@@ -1,135 +1,232 @@
+from decimal import Decimal
+import uuid
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
-class Deal(models.Model):
-    DEAL_RENT = "rent"
-    DEAL_SALE = "sale"
-
-    DEAL_TYPE_CHOICES = [
-        (DEAL_RENT, "Rent"),
-        (DEAL_SALE, "Sale"),
-    ]
-
-    STATUS_LEAD = "lead"
-    STATUS_NEGOTIATING = "negotiating"
-    STATUS_PAYMENT_PENDING = "payment_pending"
-    STATUS_PAID = "paid"
-    STATUS_COMPLETED = "completed"
-    STATUS_CANCELLED = "cancelled"
-
-    STATUS_CHOICES = [
-        (STATUS_LEAD, "Lead"),
-        (STATUS_NEGOTIATING, "Negotiating"),
-        (STATUS_PAYMENT_PENDING, "Payment Pending"),
-        (STATUS_PAID, "Paid"),
-        (STATUS_COMPLETED, "Completed"),
-        (STATUS_CANCELLED, "Cancelled"),
-    ]
-
-    property = models.ForeignKey(
-        "properties.Property",
-        on_delete=models.CASCADE,
-        related_name="deals",
-    )
-
-    viewing = models.ForeignKey(
-        "viewings.Viewing",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="deals",
-    )
-
-    customer = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="deals",
-    )
-
-    partner = models.ForeignKey(
-        "partners.Partner",
-        on_delete=models.CASCADE,
-        related_name="deals",
-    )
-
-    deal_type = models.CharField(max_length=20, choices=DEAL_TYPE_CHOICES)
-    amount = models.DecimalField(max_digits=14, decimal_places=2)
-
-    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=10.00)
-    commission_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_LEAD)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def calculate_commission(self):
-        return (self.amount * self.commission_rate) / 100
-
-    def save(self, *args, **kwargs):
-        self.commission_amount = self.calculate_commission()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.property.title} - {self.customer}"
+STANDARD_VIEWING_FEE = Decimal("400.00")
 
 
 class Payment(models.Model):
-    METHOD_MPESA = "mpesa"
-    METHOD_AIRTEL = "airtel"
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        SUCCESSFUL = "successful", "Successful"
+        FAILED = "failed", "Failed"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        REFUNDED = "refunded", "Refunded"
 
-    METHOD_CHOICES = [
-        (METHOD_MPESA, "M-Pesa"),
-        (METHOD_AIRTEL, "Airtel Money"),
-    ]
+    class PaymentMethod(models.TextChoices):
+        # Retained for compatibility with historical database records.
+        MOBILE_MONEY = "mobile_money", "Mobile money"
+        MPESA = "mpesa", "M-Pesa"
+        AIRTEL_MONEY = "airtel_money", "Airtel Money"
 
-    TYPE_COMMISSION = "commission"
-    TYPE_RESERVATION = "reservation"
-    TYPE_SERVICE_FEE = "service_fee"
-
-    TYPE_CHOICES = [
-        (TYPE_COMMISSION, "Commission"),
-        (TYPE_RESERVATION, "Reservation"),
-        (TYPE_SERVICE_FEE, "Service Fee"),
-    ]
-
-    STATUS_PENDING = "pending"
-    STATUS_PAID = "paid"
-    STATUS_FAILED = "failed"
-    STATUS_REFUNDED = "refunded"
-    STATUS_CANCELLED = "cancelled"
-
-    STATUS_CHOICES = [
-        (STATUS_PENDING, "Pending"),
-        (STATUS_PAID, "Paid"),
-        (STATUS_FAILED, "Failed"),
-        (STATUS_REFUNDED, "Refunded"),
-        (STATUS_CANCELLED, "Cancelled"),
-    ]
-
-    deal = models.ForeignKey(
-        Deal,
-        on_delete=models.CASCADE,
-        related_name="payments",
+    viewing = models.OneToOneField(
+        "viewings.Viewing",
+        on_delete=models.PROTECT,
+        related_name="payment",
+        null=True,
+        blank=True,
     )
 
     payer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="payments",
     )
 
-    amount = models.DecimalField(max_digits=14, decimal_places=2)
-    payment_method = models.CharField(max_length=20, choices=METHOD_CHOICES)
-    payment_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=STANDARD_VIEWING_FEE,
+        editable=False,
+    )
 
-    transaction_reference = models.CharField(max_length=100, blank=True)
-    receipt_number = models.CharField(max_length=100, blank=True)
+    currency = models.CharField(
+        max_length=3,
+        default="KES",
+        editable=False,
+    )
 
-    paid_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+    )
+
+    payment_method = models.CharField(
+        max_length=30,
+        choices=PaymentMethod.choices,
+        default=PaymentMethod.MPESA,
+    )
+
+    purpose = models.CharField(
+        max_length=50,
+        default="viewing_fee",
+        editable=False,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+
+    payment_reference = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+    )
+
+    provider_transaction_id = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    provider_receipt_number = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    receipt_number = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+    )
+
+    merchant_request_id = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    checkout_request_id = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    provider_response_code = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    provider_response_description = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    failure_reason = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    provider_request_payload = models.JSONField(
+        blank=True,
+        default=dict,
+    )
+
+    provider_callback_payload = models.JSONField(
+        blank=True,
+        default=dict,
+    )
+
+    initiated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    callback_received_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    paid_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    failed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+        indexes = [
+            models.Index(
+                fields=["payer", "status", "-created_at"],
+                name="payment_payer_status_idx",
+            ),
+            models.Index(
+                fields=["payment_method", "status", "-created_at"],
+                name="payment_provider_status_idx",
+            ),
+            models.Index(
+                fields=["checkout_request_id", "status"],
+                name="payment_checkout_status_idx",
+            ),
+        ]
+
+    @staticmethod
+    def generate_payment_reference():
+        year = timezone.localdate().year
+        random_part = uuid.uuid4().hex[:10].upper()
+
+        return f"PH-{year}-{random_part}"
+
+    @staticmethod
+    def generate_receipt_number():
+        year = timezone.localdate().year
+        random_part = uuid.uuid4().hex[:10].upper()
+
+        return f"PHR-{year}-{random_part}"
+
+    def save(self, *args, **kwargs):
+        if not self.payment_reference:
+            self.payment_reference = (
+                self.generate_payment_reference()
+            )
+
+        super().save(*args, **kwargs)
+
+    @property
+    def provider(self):
+        """Compatibility alias used by API responses."""
+        return self.payment_method
 
     def __str__(self):
-        return f"{self.payment_method} {self.amount} - {self.status}"
+        reference = (
+            self.payment_reference
+            or f"Payment #{self.pk}"
+        )
+
+        return (
+            f"{reference} - "
+            f"{self.amount} {self.currency}"
+        )

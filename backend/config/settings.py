@@ -11,11 +11,12 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
-
+import os
+from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
+load_dotenv(BASE_DIR / ".env")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -24,8 +25,6 @@ SECRET_KEY = 'django-insecure-0!zprp7&^bmv9q-zxodjqvk(n5*5rpk_gfaz$r+ey$sj)*gf(e
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-
-ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -38,7 +37,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "notifications",
+    
 
     # Third-party apps
     "rest_framework",
@@ -50,7 +49,10 @@ INSTALLED_APPS = [
     "properties",
     "viewings",
     "payments",
+    "notifications",
     "core",
+    "commissions.apps.CommissionsConfig",
+    "deals.apps.DealsConfig",
 ]
 
 MIDDLEWARE = [
@@ -124,6 +126,28 @@ USE_I18N = True
 
 USE_TZ = True
 
+ALLOWED_HOSTS = [
+       'localhost',
+       '127.0.0.1',
+       '10.0.0.175',  # Your WSL IP address
+       '0.0.0.0',     # Accept all interfaces (dev only)
+       '.trycloudflare.com',  # Accept all subdomains of trycloudflare.com
+       "patahao-api.roysafi.com",
+   ]
+
+
+MPESA_ENVIRONMENT = os.environ.get("MPESA_ENVIRONMENT", "sandbox")
+MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
+MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
+MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")
+MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY", "")
+MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL", "")
+MPESA_TRANSACTION_TYPE = os.environ.get(
+    "MPESA_TRANSACTION_TYPE",
+    "CustomerPayBillOnline",
+)
+MPESA_HTTP_TIMEOUT = int(os.environ.get("MPESA_HTTP_TIMEOUT", "30"))
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
@@ -143,3 +167,9 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticatedOrReadOnly",
     ),
 }
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://patahao-api.roysafi.com",
+]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True

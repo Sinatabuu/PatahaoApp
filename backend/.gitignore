@@ -1,31 +1,41 @@
 # Python
 __pycache__/
 *.py[cod]
-*.sqlite3
-
-# Virtual Environment
+*.pyo
+*.pyd
 venv/
-.env
+.venv/
+env/
 
 # Django
+*.sqlite3
 media/
 staticfiles/
+*.log
 
-# VS Code
-.vscode/
-
-# JetBrains
-.idea/
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
 
 # Flutter
 mobile/.dart_tool/
+mobile/.packages
 mobile/build/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
-mobile/.packages
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/Pods/
+mobile/ios/.symlinks/
 
-# macOS
+# Editors and operating systems
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
 
-# Logs
-*.log
+# Test and coverage output
+.coverage
+htmlcov/
+.pytest_cache/

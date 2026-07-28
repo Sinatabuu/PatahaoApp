@@ -18,19 +18,30 @@ class Property(models.Model):
         (TYPE_WAREHOUSE, "Warehouse"),
     ]
 
+    LISTING_RENT = "rent"
+    LISTING_SALE = "sale"
+
     LISTING_TYPE_CHOICES = [
-        ("rent", "Rent"),
-        ("sale", "Sale"),
+        (LISTING_RENT, "Rent"),
+        (LISTING_SALE, "Sale"),
     ]
 
+    STATUS_DRAFT = "draft"
+    STATUS_PENDING = "pending"
+    STATUS_PUBLISHED = "published"
+    STATUS_RESERVED = "reserved"
+    STATUS_RENTED = "rented"
+    STATUS_SOLD = "sold"
+    STATUS_ARCHIVED = "archived"
+
     STATUS_CHOICES = [
-        ("draft", "Draft"),
-        ("pending", "Pending Verification"),
-        ("published", "Published"),
-        ("reserved", "Reserved"),
-        ("rented", "Rented"),
-        ("sold", "Sold"),
-        ("archived", "Archived"),
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_PENDING, "Pending Verification"),
+        (STATUS_PUBLISHED, "Published"),
+        (STATUS_RESERVED, "Reserved"),
+        (STATUS_RENTED, "Rented"),
+        (STATUS_SOLD, "Sold"),
+        (STATUS_ARCHIVED, "Archived"),
     ]
 
     TRUST_BADGE_CHOICES = [
@@ -42,30 +53,64 @@ class Property(models.Model):
 
     partner = models.ForeignKey(
         "partners.Partner",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="properties",
+        null=True,
+        blank=True,
     )
 
     title = models.CharField(max_length=255)
-    property_type = models.CharField(max_length=30, choices=PROPERTY_TYPE_CHOICES)
-    listing_type = models.CharField(max_length=20, choices=LISTING_TYPE_CHOICES)
-    price = models.DecimalField(max_digits=14, decimal_places=2)
+
+    property_type = models.CharField(
+        max_length=30,
+        choices=PROPERTY_TYPE_CHOICES,
+    )
+
+    listing_type = models.CharField(
+        max_length=20,
+        choices=LISTING_TYPE_CHOICES,
+    )
+
+    price = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+    )
 
     county = models.CharField(max_length=100)
     town = models.CharField(max_length=100)
     estate = models.CharField(max_length=100, blank=True)
     address = models.CharField(max_length=255, blank=True)
 
-    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    latitude = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        null=True,
+        blank=True,
+    )
+
+    longitude = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        null=True,
+        blank=True,
+    )
 
     bedrooms = models.PositiveIntegerField(default=0)
     bathrooms = models.PositiveIntegerField(default=0)
 
     description = models.TextField()
 
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="draft")
-    trust_badge = models.CharField(max_length=20, choices=TRUST_BADGE_CHOICES, default="none")
+    status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+    )
+
+    trust_badge = models.CharField(
+        max_length=20,
+        choices=TRUST_BADGE_CHOICES,
+        default="none",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -76,6 +121,10 @@ class Property(models.Model):
     def __str__(self):
         return self.title
 
+    @property
+    def is_available(self):
+        return self.status == self.STATUS_PUBLISHED
+
 
 class PropertyPhoto(models.Model):
     property = models.ForeignKey(
@@ -84,9 +133,17 @@ class PropertyPhoto(models.Model):
         related_name="photos",
     )
 
-    image = models.ImageField(upload_to="property_photos/")
-    caption = models.CharField(max_length=255, blank=True)
+    image = models.ImageField(
+        upload_to="property_photos/",
+    )
+
+    caption = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
     is_cover = models.BooleanField(default=False)
+
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -94,3 +151,44 @@ class PropertyPhoto(models.Model):
 
     def __str__(self):
         return f"Photo for {self.property.title}"
+
+
+class PropertyVideo(models.Model):
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="videos",
+    )
+
+    video = models.FileField(
+        upload_to="property_videos/",
+    )
+
+    thumbnail = models.ImageField(
+        upload_to="property_video_thumbnails/",
+        null=True,
+        blank=True,
+    )
+
+    title = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    description = models.TextField(blank=True)
+
+    duration = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Duration in seconds",
+    )
+
+    is_featured = models.BooleanField(default=False)
+
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-is_featured", "-uploaded_at"]
+
+    def __str__(self):
+        return self.title or f"Video for {self.property.title}"

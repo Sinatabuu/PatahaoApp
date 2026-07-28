@@ -1,9 +1,19 @@
 from django.contrib import admin
-from .models import Property, PropertyPhoto
+
+from .models import (
+    Property,
+    PropertyPhoto,
+    PropertyVideo,
+)
 
 
 class PropertyPhotoInline(admin.TabularInline):
     model = PropertyPhoto
+    extra = 1
+
+
+class PropertyVideoInline(admin.TabularInline):
+    model = PropertyVideo
     extra = 1
 
 
@@ -19,6 +29,10 @@ class PropertyAdmin(admin.ModelAdmin):
         "status",
         "trust_badge",
         "created_at",
+    )
+
+    list_editable = (
+        "status",
     )
 
     list_filter = (
@@ -39,7 +53,64 @@ class PropertyAdmin(admin.ModelAdmin):
         "estate",
     )
 
-    inlines = [PropertyPhotoInline]
+    fieldsets = (
+        (
+            "Property ownership",
+            {
+                "fields": (
+                    "partner",
+                )
+            },
+        ),
+        (
+            "Listing details",
+            {
+                "fields": (
+                    "title",
+                    "property_type",
+                    "listing_type",
+                    "price",
+                    "description",
+                )
+            },
+        ),
+        (
+            "Location",
+            {
+                "fields": (
+                    "county",
+                    "town",
+                    "estate",
+                    "address",
+                    "latitude",
+                    "longitude",
+                )
+            },
+        ),
+        (
+            "Property features",
+            {
+                "fields": (
+                    "bedrooms",
+                    "bathrooms",
+                )
+            },
+        ),
+        (
+            "Availability and trust",
+            {
+                "fields": (
+                    "status",
+                    "trust_badge",
+                )
+            },
+        ),
+    )
+
+    inlines = [
+        PropertyPhotoInline,
+        PropertyVideoInline,
+    ]
 
 
 @admin.register(PropertyPhoto)
@@ -51,4 +122,26 @@ class PropertyPhotoAdmin(admin.ModelAdmin):
         "uploaded_at",
     )
 
-    list_filter = ("is_cover",)
+    list_filter = (
+        "is_cover",
+    )
+
+
+@admin.register(PropertyVideo)
+class PropertyVideoAdmin(admin.ModelAdmin):
+    list_display = (
+        "property",
+        "title",
+        "duration",
+        "is_featured",
+        "uploaded_at",
+    )
+
+    list_filter = (
+        "is_featured",
+    )
+
+    search_fields = (
+        "title",
+        "property__title",
+    )

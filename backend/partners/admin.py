@@ -1,4 +1,5 @@
 from django.contrib import admin
+
 from .models import Partner
 
 
@@ -6,24 +7,34 @@ from .models import Partner
 class PartnerAdmin(admin.ModelAdmin):
     list_display = (
         "business_name",
-        "user",
         "partner_type",
+        "partner_code",
         "county",
         "town",
         "verification_status",
-        "commission_rate",
+        "is_active",
+        "accepts_viewing_requests",
         "created_at",
     )
 
     list_filter = (
         "partner_type",
         "verification_status",
+        "is_active",
+        "accepts_viewing_requests",
         "county",
     )
 
     search_fields = (
         "business_name",
+        "display_name",
+        "partner_code",
+        "phone_number",
         "user__username",
         "user__email",
-        "phone_number",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
     )

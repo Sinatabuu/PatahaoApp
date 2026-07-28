@@ -1,7 +1,74 @@
-from rest_framework.routers import DefaultRouter
-from .views import PartnerViewSet
+from django.urls import path
 
-router = DefaultRouter()
-router.register(r"partners", PartnerViewSet, basename="partner")
+from .views import (
+    PartnerConfirmViewingView,
+    PartnerDashboardView,
+    PartnerDeclineViewingView,
+    PartnerPropertiesView,
+    PartnerRescheduleViewingView,
+    PartnerTodayViewingsView,
+    PartnerViewingsView,
+    partner_viewing_arrived,
+    partner_viewing_complete,
+    partner_viewing_en_route,
+    partner_viewing_start,
+)
 
-urlpatterns = router.urls
+
+urlpatterns = [
+    path(
+        "partners/dashboard/",
+        PartnerDashboardView.as_view(),
+        name="partner-dashboard",
+    ),
+    path(
+        "partners/properties/",
+        PartnerPropertiesView.as_view(),
+        name="partner-properties",
+    ),
+    path(
+        "partners/viewings/",
+        PartnerViewingsView.as_view(),
+        name="partner-viewings",
+    ),
+    path(
+        "partners/viewings/today/",
+        PartnerTodayViewingsView.as_view(),
+        name="partner-viewings-today",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/confirm/",
+        PartnerConfirmViewingView.as_view(),
+        name="partner-viewing-confirm",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/reschedule/",
+        PartnerRescheduleViewingView.as_view(),
+        name="partner-viewing-reschedule",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/decline/",
+        PartnerDeclineViewingView.as_view(),
+        name="partner-viewing-decline",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/en-route/",
+        partner_viewing_en_route,
+        name="partner-viewing-en-route",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/arrived/",
+        partner_viewing_arrived,
+        name="partner-viewing-arrived",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/start/",
+        partner_viewing_start,
+        name="partner-viewing-start",
+    ),
+    path(
+        "partners/viewings/<int:viewing_id>/complete/",
+        partner_viewing_complete,
+        name="partner-viewing-complete",
+    ),
+]
