@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('partners', '0003_partner_commission_plan_and_more'),
-        ('properties', '0008_favorite'),
+        ('properties', '0003_alter_property_partner'),
         ('viewings', '0009_viewingfeedback'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
