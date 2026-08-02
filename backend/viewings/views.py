@@ -3,7 +3,7 @@ from datetime import date
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-
+from trust.services import recalculate_trust_from_feedback
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -22,7 +22,12 @@ from .serializers import (
     ViewingSerializer,
 )
 
+from rest_framework import permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from .models import Viewing, ViewingFeedback
+from .serializers import ViewingFeedbackSerializer
 class ViewingViewSet(viewsets.ModelViewSet):
     """
     API endpoint for individual property viewing requests.
@@ -954,4 +959,103 @@ class ViewingBookingViewSet(viewsets.ModelViewSet):
                 f"Viewing booking created for "
                 f"{booking.viewing_date}"
             ),
+        )
+
+class ViewingFeedbackView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get_viewing(self, request, viewing_id):
+        return get_object_or_404(
+            Viewing.objects.select_related(
+                "customer",
+                "property",
+                "assigned_partner",
+            ),
+            id=viewing_id,
+            customer=request.user,
+        )
+
+    def get(self, request, viewing_id):
+        viewing = self.get_viewing(
+            request,
+            viewing_id,
+        )
+
+        feedback = getattr(
+            viewing,
+            "customer_feedback",
+            None,
+        )
+
+        if feedback is None:
+            return Response(
+                {
+                    "detail": (
+                        "Feedback has not been submitted "
+                        "for this viewing."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            ViewingFeedbackSerializer(
+                feedback,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, viewing_id):
+        viewing = self.get_viewing(
+            request,
+            viewing_id,
+        )
+
+        if viewing.status != Viewing.Status.COMPLETED:
+            return Response(
+                {
+                    "detail": (
+                        "Feedback can only be submitted "
+                        "after the viewing is completed."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if hasattr(viewing, "customer_feedback"):
+            return Response(
+                {
+                    "detail": (
+                        "Feedback has already been submitted "
+                        "for this viewing."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ViewingFeedbackSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        feedback = serializer.save(
+            viewing=viewing,
+            customer=request.user,
+        )
+        recalculate_trust_from_feedback(
+            feedback,
+        )
+        return Response(
+            ViewingFeedbackSerializer(
+                feedback,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
         )

@@ -10,6 +10,7 @@ from .models import (
     ViewingBooking,
     ViewingBookingItem,
     ViewingEvent,
+    ViewingFeedback,
 )
 
 
@@ -45,6 +46,21 @@ class ViewingEventSerializer(serializers.ModelSerializer):
 
         return full_name or obj.actor.get_username()
 
+    def validate_partner_rating(self, value):
+        if value < 1 or value > 5:
+            raise serializers.ValidationError(
+                "Partner rating must be between 1 and 5."
+            )
+
+        return value
+
+    def validate_property_rating(self, value):
+        if value < 1 or value > 5:
+            raise serializers.ValidationError(
+                "Property rating must be between 1 and 5."
+            )
+
+        return value
 
 class ViewingSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(
