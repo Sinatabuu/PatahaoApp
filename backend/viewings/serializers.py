@@ -62,6 +62,60 @@ class ViewingEventSerializer(serializers.ModelSerializer):
 
         return value
 
+class ViewingFeedbackSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(
+        source="customer.get_full_name",
+        read_only=True,
+    )
+
+    property_accuracy_label = serializers.CharField(
+        source="get_property_accuracy_display",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ViewingFeedback
+        fields = [
+            "id",
+            "viewing",
+            "customer",
+            "customer_name",
+            "attended",
+            "property_accuracy",
+            "property_accuracy_label",
+            "partner_rating",
+            "property_rating",
+            "comments",
+            "submitted_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "viewing",
+            "customer",
+            "customer_name",
+            "property_accuracy_label",
+            "submitted_at",
+            "updated_at",
+        ]
+
+    def validate_partner_rating(self, value):
+        if value < 1 or value > 5:
+            raise serializers.ValidationError(
+                "Partner rating must be between 1 and 5."
+            )
+
+        return value
+
+    def validate_property_rating(self, value):
+        if value < 1 or value > 5:
+            raise serializers.ValidationError(
+                "Property rating must be between 1 and 5."
+            )
+
+        return value
+
 class ViewingSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(
         source="customer.get_full_name",
