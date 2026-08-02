@@ -1,10 +1,11 @@
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
     ViewingBookingViewSet,
+    ViewingFeedbackView,
     ViewingViewSet,
 )
-
 
 router = DefaultRouter()
 
@@ -20,5 +21,11 @@ router.register(
     basename="viewing-booking",
 )
 
-
-urlpatterns = router.urls
+urlpatterns = [
+    path(
+        "viewings/<int:viewing_id>/feedback/",
+        ViewingFeedbackView.as_view(),
+        name="viewing-feedback",
+    ),
+    path("", include(router.urls)),
+]

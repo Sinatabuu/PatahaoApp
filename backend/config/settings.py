@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "core",
     "commissions.apps.CommissionsConfig",
     "deals.apps.DealsConfig",
+    "trust",
 ]
 
 MIDDLEWARE = [

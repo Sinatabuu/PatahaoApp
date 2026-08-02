@@ -678,3 +678,99 @@ class ViewingBookingItem(models.Model):
             f"Booking #{self.booking_id} - "
             f"{self.property}"
         )
+
+class ViewingFeedback(models.Model):
+    class PropertyAccuracy(models.TextChoices):
+        YES = "yes", "Yes"
+        PARTIALLY = "partially", "Partially"
+        NO = "no", "No"
+
+    viewing = models.OneToOneField(
+        Viewing,
+        on_delete=models.CASCADE,
+        related_name="customer_feedback",
+    )
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="viewing_feedback",
+    )
+
+    attended = models.BooleanField(
+        default=True,
+    )
+
+    property_accuracy = models.CharField(
+        max_length=20,
+        choices=PropertyAccuracy.choices,
+    )
+
+    partner_rating = models.PositiveSmallIntegerField()
+
+    property_rating = models.PositiveSmallIntegerField()
+
+    comments = models.TextField(
+        blank=True,
+    )
+
+    submitted_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-submitted_at",
+        ]
+
+    def __str__(self):
+        return (
+            f"Feedback for viewing #{self.viewing_id} "
+            f"by {self.customer}"
+        )
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+
+        if self.partner_rating < 1 or self.partner_rating > 5:
+            errors["partner_rating"] = (
+                "Partner rating must be between 1 and 5."
+            )
+
+        if self.property_rating < 1 or self.property_rating > 5:
+            errors["property_rating"] = (
+                "Property rating must be between 1 and 5."
+            )
+
+        if (
+            self.viewing_id
+            and self.customer_id
+            and self.viewing.customer_id != self.customer_id
+        ):
+            errors["customer"] = (
+                "Only the customer who requested the viewing "
+                "can submit feedback."
+            )
+
+        if (
+            self.viewing_id
+            and self.viewing.status != Viewing.Status.COMPLETED
+        ):
+            errors["viewing"] = (
+                "Feedback can only be submitted after "
+                "the viewing is completed."
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+
+        return super().save(*args, **kwargs)
