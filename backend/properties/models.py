@@ -95,6 +95,35 @@ class Property(models.Model):
         blank=True,
     )
 
+    def save(self, *args, **kwargs):
+        is_being_published = False
+
+        if self.status == self.STATUS_PUBLISHED:
+            if self.pk is None:
+                is_being_published = True
+            else:
+                previous_status = (
+                    type(self)
+                    .objects
+                    .filter(pk=self.pk)
+                    .values_list("status", flat=True)
+                    .first()
+                )
+
+                is_being_published = (
+                    previous_status != self.STATUS_PUBLISHED
+                )
+
+        if is_being_published:
+            from mandates.services import (
+                validate_property_publication,
+            )
+
+            validate_property_publication(self)
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
     bedrooms = models.PositiveIntegerField(default=0)
     bathrooms = models.PositiveIntegerField(default=0)
 

@@ -34,19 +34,20 @@ class CommissionPlanAdmin(admin.ModelAdmin):
 
 @admin.register(CommissionAgreement)
 class CommissionAgreementAdmin(admin.ModelAdmin):
-    list_display = [
+    readonly_fields = [
         "agreement_number",
-        "property",
-        "owner_name",
-        "commission_method",
         "expected_total_commission",
-        "currency",
         "status",
         "owner_confirmed",
+        "owner_confirmed_at",
         "is_verified",
+        "verified_by",
+        "verified_at",
         "is_locked",
-        "publish_ready",
+        "locked_at",
+        "created_by",
         "created_at",
+        "updated_at",
     ]
 
     list_filter = [
@@ -65,21 +66,8 @@ class CommissionAgreementAdmin(admin.ModelAdmin):
         "owner_phone_number",
     ]
 
-    readonly_fields = [
-        "agreement_number",
-        "expected_total_commission",
-        "owner_confirmed_at",
-        "verified_by",
-        "verified_at",
-        "locked_at",
-        "created_by",
-        "created_at",
-        "updated_at",
-    ]
-
     raw_id_fields = [
         "property",
-        "verified_by",
     ]
 
     actions = [
@@ -98,6 +86,14 @@ class CommissionAgreementAdmin(admin.ModelAdmin):
     ):
         if not obj.pk:
             obj.created_by = request.user
+            obj.status = CommissionAgreement.Status.DRAFT
+            obj.owner_confirmed = False
+            obj.owner_confirmed_at = None
+            obj.is_verified = False
+            obj.verified_by = None
+            obj.verified_at = None
+            obj.is_locked = False
+            obj.locked_at = None
 
         super().save_model(
             request,
@@ -105,7 +101,6 @@ class CommissionAgreementAdmin(admin.ModelAdmin):
             form,
             change,
         )
-
     @admin.display(
         boolean=True,
         description="Publish ready",

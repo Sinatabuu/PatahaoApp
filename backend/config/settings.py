@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     
+    
 
     # Third-party apps
     "rest_framework",
@@ -54,6 +55,8 @@ INSTALLED_APPS = [
     "commissions.apps.CommissionsConfig",
     "deals.apps.DealsConfig",
     "trust",
+    "mandates.apps.MandatesConfig",
+    
 ]
 
 MIDDLEWARE = [
