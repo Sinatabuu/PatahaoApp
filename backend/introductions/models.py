@@ -377,11 +377,10 @@ class ProtectedIntroduction(models.Model):
 
     @builtins.property
     def is_active(self):
-        def is_active(self):
-            return (
-                self.status == self.Status.ACTIVE
-                and self.protected_until > timezone.now()
-            )
+        return (
+            self.status == self.Status.ACTIVE
+            and self.protected_until > timezone.now()
+        )
 
     def __str__(self):
         return self.certificate_number

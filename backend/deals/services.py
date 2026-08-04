@@ -1,8 +1,13 @@
 from django.db import transaction
 
+from django.core.exceptions import ValidationError
+
+from introductions.models import ProtectedIntroduction
+
 from .models import (
     CommissionInvoice,
     Deal,
+    DealEvent,
     DealOutcome,
 )
 from django.utils import timezone
@@ -52,7 +57,7 @@ def evaluate_deal_outcomes(deal_id):
 
     # We cannot make a final decision until both sides report.
     if customer_outcome is None or partner_outcome is None:
-        deal.status = Deal.Status.PENDING_CONFIRMATION
+        Deal.Status.DRAFT
         deal.customer_confirmed = False
         deal.partner_confirmed = False
 
@@ -86,17 +91,36 @@ def evaluate_deal_outcomes(deal_id):
     )
 
     if successful_match:
-        deal.status = Deal.Status.CONFIRMED
+        deal.status = Deal.Status.AGREED
         deal.customer_confirmed = True
         deal.partner_confirmed = True
+        deal.customer_confirmed_at = timezone.now()
+        deal.partner_confirmed_at = timezone.now()
+        deal.agreed_at = timezone.now()
 
         deal.save(
             update_fields=[
                 "status",
                 "customer_confirmed",
                 "partner_confirmed",
+                "customer_confirmed_at",
+                "partner_confirmed_at",
+                "agreed_at",
                 "updated_at",
             ]
+        )
+
+        DealEvent.objects.create(
+            deal=deal,
+            action="outcomes_matched",
+            notes=(
+                "Customer and partner reported a successful "
+                "property transaction."
+            ),
+            metadata={
+                "customer_outcome": customer_answer,
+                "partner_outcome": partner_answer,
+            },
         )
 
         reserve_property(deal)
@@ -115,24 +139,28 @@ def evaluate_deal_outcomes(deal_id):
         deal.status = Deal.Status.CANCELLED
         deal.customer_confirmed = False
         deal.partner_confirmed = False
+        deal.cancelled_at = timezone.now()
+        deal.cancellation_reason = (
+            "Customer and partner reported that no deal occurred."
+        )
 
         deal.save(
             update_fields=[
                 "status",
                 "customer_confirmed",
                 "partner_confirmed",
+                "cancelled_at",
+                "cancellation_reason",
                 "updated_at",
             ]
         )
-
-        return deal
 
     if (
         answers_match
         and customer_answer
         == DealOutcome.Outcome.STILL_DECIDING
     ):
-        deal.status = Deal.Status.PENDING_CONFIRMATION
+        Deal.Status.DRAFT
         deal.customer_confirmed = False
         deal.partner_confirmed = False
 
@@ -170,46 +198,205 @@ def evaluate_deal_outcomes(deal_id):
 
 
 def reserve_property(deal):
-    """
-    Reserve a property after both parties confirm a successful deal.
-
-    Only a published property is automatically moved to reserved.
-    Rented, sold, archived, or otherwise unavailable properties
-    are not overwritten.
-    """
-
     property_instance = deal.property
 
-    if property_instance.status != "published":
+    if (
+        property_instance.status
+        != property_instance.STATUS_PUBLISHED
+    ):
         return
 
-    property_instance.status = "reserved"
+    property_instance.status = (
+        property_instance.STATUS_RESERVED
+    )
 
     property_instance.save(
         update_fields=[
             "status",
-            
+            "updated_at",
         ]
     )
 
 
-def create_deal_from_viewing(viewing):
-    """
-    Create a Deal for a completed viewing.
+@transaction.atomic
+def create_deal_from_pic(
+    *,
+    introduction,
+    actor,
+    monthly_rent=None,
+    sale_price=None,
+):
+    if actor is None:
+        raise ValidationError(
+            "An authenticated actor is required."
+        )
 
-    Safe to call multiple times.
-    """
+    if not introduction.is_active:
+        raise ValidationError(
+            "Only an active PIC can create a deal."
+        )
 
-    deal, created = Deal.objects.get_or_create(
-        viewing=viewing,
-        defaults={
-            "customer": viewing.customer,
-            "partner": viewing.assigned_partner,
-            "property": viewing.property,
+    existing = Deal.objects.filter(
+        introduction=introduction,
+    ).first()
+
+    if existing is not None:
+        return existing, False
+
+    listing_type = introduction.listing_type_snapshot
+
+    if listing_type in {"rent", "rental"}:
+        deal_type = "rental"
+    elif listing_type == "sale":
+        deal_type = "sale"
+    else:
+        raise ValidationError(
+            "The PIC listing type must be rental or sale."
+        )
+
+    if deal_type == "rental":
+        if monthly_rent is None:
+            monthly_rent = (
+                introduction.property_price_snapshot
+            )
+
+        if monthly_rent <= 0:
+            raise ValidationError(
+                "Monthly rent must be greater than zero."
+            )
+
+        sale_price = None
+
+    if deal_type == "sale":
+        if sale_price is None:
+            sale_price = (
+                introduction.property_price_snapshot
+            )
+
+        if sale_price <= 0:
+            raise ValidationError(
+                "Sale price must be greater than zero."
+            )
+
+        monthly_rent = None
+
+    legacy_deal = Deal.objects.filter(
+        viewing=introduction.viewing,
+    ).first()
+
+    if legacy_deal is not None:
+        legacy_deal.introduction = introduction
+        legacy_deal.deal_type = deal_type
+        legacy_deal.customer = introduction.customer
+        legacy_deal.partner = introduction.partner
+        legacy_deal.property = introduction.property
+        legacy_deal.commission_amount = (
+            introduction.expected_commission_snapshot
+        )
+        legacy_deal.status = Deal.Status.DRAFT
+
+        if deal_type == "rental":
+            legacy_deal.monthly_rent = monthly_rent
+            legacy_deal.sale_price = None
+        else:
+            legacy_deal.sale_price = sale_price
+            legacy_deal.monthly_rent = None
+
+        legacy_deal.save(
+            update_fields=[
+                "introduction",
+                "deal_type",
+                "customer",
+                "partner",
+                "property",
+                "monthly_rent",
+                "sale_price",
+                "commission_amount",
+                "status",
+                "updated_at",
+            ]
+        )
+
+        DealEvent.objects.create(
+            deal=legacy_deal,
+            action="legacy_deal_linked_to_pic",
+            actor=actor,
+            notes=(
+                "Existing deal linked to Property Introduction "
+                f"Certificate {introduction.certificate_number}."
+            ),
+            metadata={
+                "pic_id": introduction.id,
+                "certificate_number": (
+                    introduction.certificate_number
+                ),
+            },
+        )
+
+        introduction.transition_status(
+            new_status=(
+                ProtectedIntroduction.Status.CONVERTED_TO_DEAL
+            ),
+            actor=actor,
+            notes=(
+                f"PIC linked to existing deal "
+                f"{legacy_deal.deal_number}."
+            ),
+            metadata={
+                "deal_id": legacy_deal.id,
+                "deal_number": legacy_deal.deal_number,
+            },
+        )
+
+        return legacy_deal, False
+
+    deal = Deal.objects.create(
+        introduction=introduction,
+        customer=introduction.customer,
+        partner=introduction.partner,
+        property=introduction.property,
+        viewing=introduction.viewing,
+        deal_type=deal_type,
+        monthly_rent=monthly_rent,
+        sale_price=sale_price,
+        commission_amount=(
+            introduction.expected_commission_snapshot
+        ),
+        status=Deal.Status.DRAFT,
+    )
+
+    DealEvent.objects.create(
+        deal=deal,
+        action="deal_created",
+        actor=actor,
+        notes=(
+            "Deal created from Property Introduction "
+            f"Certificate {introduction.certificate_number}."
+        ),
+        metadata={
+            "pic_id": introduction.id,
+            "certificate_number": (
+                introduction.certificate_number
+            ),
+            "deal_type": deal_type,
         },
     )
 
-    return deal    
+    introduction.transition_status(
+        new_status=(
+            ProtectedIntroduction.Status.CONVERTED_TO_DEAL
+        ),
+        actor=actor,
+        notes=(
+            f"PIC converted to deal {deal.deal_number}."
+        ),
+        metadata={
+            "deal_id": deal.id,
+            "deal_number": deal.deal_number,
+        },
+    )
+
+    return deal, True
 
 
 def generate_invoice_number():
@@ -217,3 +404,17 @@ def generate_invoice_number():
     last = CommissionInvoice.objects.count() + 1
 
     return f"PH-COM-{last:06d}"
+
+def create_deal_from_viewing(viewing, actor=None):
+    try:
+        introduction = viewing.property_introduction_certificate
+    except ProtectedIntroduction.DoesNotExist as error:
+        raise ValidationError(
+            "A Property Introduction Certificate is required "
+            "before creating a deal."
+        ) from error
+
+    return create_deal_from_pic(
+        introduction=introduction,
+        actor=actor,
+    )
