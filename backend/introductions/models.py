@@ -241,9 +241,12 @@ class ProtectedIntroduction(models.Model):
 
     def save(self, *args, **kwargs):
         if self.pk:
-            original = type(self).objects.get(pk=self.pk)
+            original = type(self)._base_manager.get(
+                pk=self.pk,
+            )
 
             immutable_fields = [
+                "certificate_number",
                 "customer_id",
                 "property_id",
                 "partner_id",
@@ -268,12 +271,14 @@ class ProtectedIntroduction(models.Model):
                 "currency_snapshot",
                 "viewing_fee_snapshot",
                 "viewing_payment_reference",
+                "created_at",
             ]
 
             changed_fields = [
                 field
                 for field in immutable_fields
-                if getattr(original, field) != getattr(self, field)
+                if getattr(original, field)
+                != getattr(self, field)
             ]
 
             if changed_fields:
@@ -281,11 +286,45 @@ class ProtectedIntroduction(models.Model):
                     {
                         "protected_introduction": (
                             "PIC evidence cannot be changed after "
-                            "creation: "
+                            "creation. Attempted fields: "
                             + ", ".join(changed_fields)
-                        ),
+                        )
                     }
                 )
+
+            allowed_status_transitions = {
+                self.Status.ACTIVE: {
+                    self.Status.CONVERTED_TO_DEAL,
+                    self.Status.EXPIRED,
+                    self.Status.DISPUTED,
+                    self.Status.CANCELLED,
+                },
+                self.Status.DISPUTED: {
+                    self.Status.ACTIVE,
+                    self.Status.CONVERTED_TO_DEAL,
+                    self.Status.CANCELLED,
+                },
+                self.Status.CONVERTED_TO_DEAL: set(),
+                self.Status.EXPIRED: set(),
+                self.Status.CANCELLED: set(),
+            }
+
+            if self.status != original.status:
+                permitted = allowed_status_transitions.get(
+                    original.status,
+                    set(),
+                )
+
+                if self.status not in permitted:
+                    raise ValidationError(
+                        {
+                            "status": (
+                                "PIC status cannot move from "
+                                f"{original.status} "
+                                f"to {self.status}."
+                            )
+                        }
+                    )
 
         if not self.certificate_number:
             self.certificate_number = (
@@ -295,6 +334,46 @@ class ProtectedIntroduction(models.Model):
 
         self.full_clean()
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Property Introduction Certificates are permanent "
+            "commercial records and cannot be deleted."
+    )
+
+    def transition_status(
+        self,
+        *,
+        new_status,
+        actor,
+        notes="",
+        metadata=None,
+    ):
+        if actor is None:
+            raise ValidationError(
+                "An authenticated actor is required."
+            )
+
+        previous_status = self.status
+        self.status = new_status
+        self.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        IntroductionEvent.objects.create(
+            introduction=self,
+            action="status_changed",
+            actor=actor,
+            notes=notes,
+            metadata={
+                "previous_status": previous_status,
+                "new_status": new_status,
+                **(metadata or {}),
+            },
+        )   
 
     @builtins.property
     def is_active(self):
@@ -347,4 +426,15 @@ class IntroductionEvent(models.Model):
         return (
             f"{self.introduction.certificate_number}: "
             f"{self.action}"
+        )
+
+class ProtectedIntroductionQuerySet(models.QuerySet):
+    def delete(self):
+        raise ValidationError(
+            "Property Introduction Certificates cannot be deleted."
+        )
+
+    def update(self, **kwargs):
+        raise ValidationError(
+            "PIC records cannot be modified through bulk updates."
         )
