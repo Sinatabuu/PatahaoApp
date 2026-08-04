@@ -10,7 +10,9 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from core.models import ActivityLog
-
+from introductions.services import (
+    create_property_introduction_certificate,
+)
 from .models import (
     Viewing,
     ViewingBooking,
@@ -119,6 +121,18 @@ class ViewingViewSet(viewsets.ModelViewSet):
             pk=pk,
             assigned_partner=partner,
         )
+
+    def _require_confirmed_viewing(self, viewing):
+        if viewing.status != Viewing.Status.CONFIRMED:
+            raise ValidationError(
+                {
+                    "status": (
+                        "Only a confirmed viewing can be "
+                        "started or completed."
+                    ),
+                    "current_status": viewing.status,
+                }
+            )
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -874,13 +888,23 @@ class ViewingViewSet(viewsets.ModelViewSet):
             ),
         )
 
+        introduction, introduction_created = (
+            create_property_introduction_certificate(
+                viewing=viewing,
+                actor=request.user,
+            )
+        )
+
         ActivityLog.objects.create(
             actor=request.user,
             action="viewing_completed",
             entity_type="Viewing",
             entity_id=str(viewing.pk),
             description=(
-                f"Viewing completed at {viewing.property.title}"
+                f"Viewing completed at "
+                f"{viewing.property.title}; "
+                f"PIC {introduction.certificate_number} "
+                f"{'created' if introduction_created else 'reused'}."
             ),
         )
 
@@ -894,10 +918,27 @@ class ViewingViewSet(viewsets.ModelViewSet):
                     "event_type": event.event_type,
                     "created_at": event.created_at,
                 },
+                "property_introduction_certificate": {
+                    "id": introduction.id,
+                    "certificate_number": (
+                        introduction.certificate_number
+                    ),
+                    "created": introduction_created,
+                    "status": introduction.status,
+                    "protected_from": (
+                        introduction.protected_from
+                    ),
+                    "protected_until": (
+                        introduction.protected_until
+                    ),
+                    "protection_period_days": (
+                        introduction.protection_period_days
+                    ),
+                },
                 "viewing": serializer.data,
             },
             status=status.HTTP_200_OK,
-        )    
+        )
 
 class ViewingBookingViewSet(viewsets.ModelViewSet):
     """

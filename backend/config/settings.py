@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "deals.apps.DealsConfig",
     "trust",
     "mandates.apps.MandatesConfig",
+    "introductions.apps.IntroductionsConfig",
     
 ]
 

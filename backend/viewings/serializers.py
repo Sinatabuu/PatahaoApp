@@ -208,7 +208,25 @@ class ViewingSerializer(serializers.ModelSerializer):
         return str(obj.assigned_partner)
 
     def get_operational_status(self, obj):
-        return obj.operational_status
+        if obj.status in {
+            Viewing.Status.PENDING_PAYMENT,
+            Viewing.Status.PAYMENT_PROCESSING,
+            Viewing.Status.PAID_PENDING_PARTNER,
+            Viewing.Status.RESCHEDULE_PROPOSED,
+        }:
+            return "pending"
+
+        elif obj.status == Viewing.Status.CONFIRMED:
+            return "confirmed"
+
+        elif obj.status == Viewing.Status.CANCELLED:
+            return "cancelled"
+
+        elif obj.status == Viewing.Status.COMPLETED:
+            return "completed"
+
+        else:
+            return "unknown"
 
     def _latest_event(self, obj, event_type):
         return (
