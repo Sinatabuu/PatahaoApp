@@ -12,7 +12,7 @@ from properties.models import Property
 from viewings.models import Viewing
 
 from .models import Deal, DealOutcome
-
+from .services import evaluate_deal_outcomes
 
 User = get_user_model()
 
@@ -90,7 +90,7 @@ class DealAPITestBase(APITestCase):
             bedrooms=2,
             bathrooms=1,
             description="Rental property used by the Deals API tests.",
-            status=Property.STATUS_PUBLISHED,
+            status=Property.STATUS_DRAFT,
         )
 
         self.sale_property = Property.objects.create(
@@ -106,7 +106,7 @@ class DealAPITestBase(APITestCase):
             bedrooms=4,
             bathrooms=3,
             description="Sale property used by the Deals API tests.",
-            status=Property.STATUS_PUBLISHED,
+            status=Property.STATUS_DRAFT,
         )
 
         self.other_property = Property.objects.create(
@@ -122,8 +122,22 @@ class DealAPITestBase(APITestCase):
             bedrooms=1,
             bathrooms=1,
             description="Property belonging to another partner.",
+            status=Property.STATUS_DRAFT,
+        )
+
+        Property.objects.filter(
+            pk__in=[
+                self.rental_property.pk,
+                self.sale_property.pk,
+                self.other_property.pk,
+            ]
+        ).update(
             status=Property.STATUS_PUBLISHED,
         )
+
+        self.rental_property.refresh_from_db()
+        self.sale_property.refresh_from_db()
+        self.other_property.refresh_from_db()
 
         self.viewing = Viewing.objects.create(
             customer=self.customer,
@@ -132,7 +146,7 @@ class DealAPITestBase(APITestCase):
             requested_date=date(2027, 1, 15),
             requested_time=time(10, 30),
             customer_message="Rental deal API test.",
-            status=Viewing.Status.CONFIRMED,
+            
         )
 
         self.sale_viewing = Viewing.objects.create(
@@ -142,7 +156,7 @@ class DealAPITestBase(APITestCase):
             requested_date=date(2027, 1, 16),
             requested_time=time(11, 30),
             customer_message="Sale deal API test.",
-            status=Viewing.Status.CONFIRMED,
+            
         )
 
         self.other_viewing = Viewing.objects.create(
@@ -152,7 +166,7 @@ class DealAPITestBase(APITestCase):
             requested_date=date(2027, 1, 17),
             requested_time=time(12, 30),
             customer_message="Other customer's viewing.",
-            status=Viewing.Status.CONFIRMED,
+            
         )
 
         self.deal = Deal.objects.create(
@@ -505,6 +519,25 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             format="json",
         )
 
+    def submit_owner_outcome(
+        self,
+        deal,
+        outcome,
+        notes="Owner outcome.",
+    ):
+        owner_outcome = DealOutcome.objects.create(
+            deal=deal,
+            reporter=DealOutcome.Reporter.OWNER,
+            outcome=outcome,
+            notes=notes,
+        )
+
+        evaluate_deal_outcomes(
+            deal.id,
+        )
+
+        return owner_outcome
+
     def test_first_outcome_keeps_deal_pending_confirmation(self):
         response = self.submit_customer_outcome(
             self.deal,
@@ -520,15 +553,19 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
 
         self.assertEqual(
             self.deal.status,
-            Deal.Status.PENDING_CONFIRMATION,
+            Deal.Status.AWAITING_CONFIRMATIONS,
         )
 
-        self.assertFalse(
+        self.assertTrue(
             self.deal.customer_confirmed,
         )
 
         self.assertFalse(
             self.deal.partner_confirmed,
+        )
+
+        self.assertFalse(
+            self.deal.owner_confirmed,
         )
 
     def test_matching_rental_outcomes_confirm_deal(self):
@@ -542,6 +579,15 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             self.deal,
             DealOutcome.Outcome.RENTED,
             notes="The customer accepted the rental.",
+        )
+
+        self.submit_owner_outcome(
+            self.deal,
+            DealOutcome.Outcome.RENTED,
+            notes=(
+                "I confirm the customer rented "
+                "the property."
+            ),
         )
 
         self.assertEqual(
@@ -559,7 +605,7 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
 
         self.assertEqual(
             self.deal.status,
-            Deal.Status.CONFIRMED,
+            Deal.Status.AGREED,
         )
 
         self.assertTrue(
@@ -570,24 +616,54 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             self.deal.partner_confirmed,
         )
 
+        self.assertTrue(
+            self.deal.owner_confirmed,
+        )
+
+        self.assertIsNotNone(
+            self.deal.customer_confirmed_at,
+        )
+
+        self.assertIsNotNone(
+            self.deal.partner_confirmed_at,
+        )
+
+        self.assertIsNotNone(
+            self.deal.owner_confirmed_at,
+        )
+
+        self.assertIsNotNone(
+            self.deal.agreed_at,
+        )
+
         self.assertEqual(
             self.rental_property.status,
             Property.STATUS_RESERVED,
         )
 
     def test_matching_purchase_outcomes_confirm_sale_deal(self):
-        self.submit_customer_outcome(
+        customer_response = self.submit_customer_outcome(
             self.sale_deal,
             DealOutcome.Outcome.PURCHASED,
         )
 
-        response = self.submit_partner_outcome(
+        partner_response = self.submit_partner_outcome(
+            self.sale_deal,
+            DealOutcome.Outcome.PURCHASED,
+        )
+
+        self.submit_owner_outcome(
             self.sale_deal,
             DealOutcome.Outcome.PURCHASED,
         )
 
         self.assertEqual(
-            response.status_code,
+            customer_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            partner_response.status_code,
             status.HTTP_201_CREATED,
         )
 
@@ -596,7 +672,7 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
 
         self.assertEqual(
             self.sale_deal.status,
-            Deal.Status.CONFIRMED,
+            Deal.Status.AGREED,
         )
 
         self.assertTrue(
@@ -607,24 +683,38 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             self.sale_deal.partner_confirmed,
         )
 
+        self.assertTrue(
+            self.sale_deal.owner_confirmed,
+        )
+
         self.assertEqual(
             self.sale_property.status,
             Property.STATUS_RESERVED,
         )
 
     def test_conflicting_outcomes_mark_deal_disputed(self):
-        self.submit_customer_outcome(
+        customer_response = self.submit_customer_outcome(
             self.deal,
             DealOutcome.Outcome.RENTED,
         )
 
-        response = self.submit_partner_outcome(
+        partner_response = self.submit_partner_outcome(
             self.deal,
             DealOutcome.Outcome.DECLINED,
         )
 
+        self.submit_owner_outcome(
+            self.deal,
+            DealOutcome.Outcome.RENTED,
+        )
+
         self.assertEqual(
-            response.status_code,
+            customer_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            partner_response.status_code,
             status.HTTP_201_CREATED,
         )
 
@@ -635,12 +725,16 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             Deal.Status.DISPUTED,
         )
 
-        self.assertFalse(
+        self.assertTrue(
             self.deal.customer_confirmed,
         )
 
-        self.assertFalse(
+        self.assertTrue(
             self.deal.partner_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.owner_confirmed,
         )
 
     def test_wrong_success_outcome_for_listing_type_is_disputed(self):
@@ -654,11 +748,22 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             DealOutcome.Outcome.PURCHASED,
         )
 
+        self.submit_owner_outcome(
+            self.deal,
+            DealOutcome.Outcome.PURCHASED,
+        )
+
         self.deal.refresh_from_db()
+        self.rental_property.refresh_from_db()
 
         self.assertEqual(
             self.deal.status,
             Deal.Status.DISPUTED,
+        )
+
+        self.assertEqual(
+            self.rental_property.status,
+            Property.STATUS_PUBLISHED,
         )
 
     def test_matching_declined_outcomes_cancel_deal(self):
@@ -672,11 +777,36 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             DealOutcome.Outcome.DECLINED,
         )
 
+        self.submit_owner_outcome(
+            self.deal,
+            DealOutcome.Outcome.DECLINED,
+        )
+
         self.deal.refresh_from_db()
 
         self.assertEqual(
             self.deal.status,
             Deal.Status.CANCELLED,
+        )
+
+        self.assertTrue(
+            self.deal.customer_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.partner_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.owner_confirmed,
+        )
+
+        self.assertIsNotNone(
+            self.deal.cancelled_at,
+        )
+
+        self.assertTrue(
+            self.deal.cancellation_reason,
         )
 
     def test_matching_no_show_outcomes_cancel_deal(self):
@@ -690,6 +820,11 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             DealOutcome.Outcome.NO_SHOW,
         )
 
+        self.submit_owner_outcome(
+            self.deal,
+            DealOutcome.Outcome.NO_SHOW,
+        )
+
         self.deal.refresh_from_db()
 
         self.assertEqual(
@@ -697,7 +832,21 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             Deal.Status.CANCELLED,
         )
 
-    def test_matching_still_deciding_outcomes_keep_deal_pending(self):
+        self.assertTrue(
+            self.deal.customer_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.partner_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.owner_confirmed,
+        )
+
+    def test_matching_still_deciding_outcomes_keep_deal_negotiating(
+        self,
+    ):
         self.submit_customer_outcome(
             self.deal,
             DealOutcome.Outcome.STILL_DECIDING,
@@ -708,14 +857,37 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
             DealOutcome.Outcome.STILL_DECIDING,
         )
 
+        self.submit_owner_outcome(
+            self.deal,
+            DealOutcome.Outcome.STILL_DECIDING,
+        )
+
         self.deal.refresh_from_db()
+        self.rental_property.refresh_from_db()
 
         self.assertEqual(
             self.deal.status,
-            Deal.Status.PENDING_CONFIRMATION,
+            Deal.Status.NEGOTIATING,
         )
 
-    def test_repeated_submission_updates_existing_outcome(self):
+        self.assertTrue(
+            self.deal.customer_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.partner_confirmed,
+        )
+
+        self.assertTrue(
+            self.deal.owner_confirmed,
+        )
+
+        self.assertEqual(
+            self.rental_property.status,
+            Property.STATUS_PUBLISHED,
+        )
+
+    def test_repeated_submission_is_rejected(self):
         first_response = self.submit_customer_outcome(
             self.deal,
             DealOutcome.Outcome.STILL_DECIDING,
@@ -735,7 +907,7 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
 
         self.assertEqual(
             second_response.status_code,
-            status.HTTP_200_OK,
+            status.HTTP_409_CONFLICT,
         )
 
         customer_outcomes = DealOutcome.objects.filter(
@@ -752,12 +924,12 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
 
         self.assertEqual(
             saved_outcome.outcome,
-            DealOutcome.Outcome.RENTED,
+            DealOutcome.Outcome.STILL_DECIDING,
         )
 
         self.assertEqual(
             saved_outcome.notes,
-            "I have now accepted the property.",
+            "I need more time.",
         )
 
     def test_invalid_outcome_is_rejected(self):
@@ -806,4 +978,91 @@ class DealOutcomeWorkflowTests(DealAPITestBase):
         self.assertIn(
             "notes",
             response.data,
+        )
+class DealTimelineTests(DealAPITestBase):
+
+    def timeline_url(self, deal):
+        return reverse(
+            "deal-timeline",
+            kwargs={"pk": deal.pk},
+        )
+
+    def test_customer_can_view_own_timeline(self):
+        self.client.force_authenticate(
+            user=self.customer,
+        )
+
+        response = self.client.get(
+            self.timeline_url(self.deal),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertIn(
+            "deal",
+            response.data,
+        )
+
+        self.assertIn(
+            "timeline",
+            response.data,
+        )
+
+    def test_customer_cannot_view_other_customer_timeline(self):
+        self.client.force_authenticate(
+            user=self.customer,
+        )
+
+        response = self.client.get(
+            self.timeline_url(self.other_deal),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_partner_can_view_assigned_timeline(self):
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = self.client.get(
+            self.timeline_url(self.deal),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_partner_cannot_view_other_partner_timeline(self):
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = self.client.get(
+            self.timeline_url(self.other_deal),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_staff_can_view_any_timeline(self):
+        self.client.force_authenticate(
+            user=self.staff_user,
+        )
+
+        response = self.client.get(
+            self.timeline_url(self.deal),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
         )

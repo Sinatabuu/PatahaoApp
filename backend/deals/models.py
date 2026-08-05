@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from uuid import uuid4
-
+import hashlib
+import secrets
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -49,8 +50,12 @@ class Deal(models.Model):
             "Awaiting owner confirmation",
         )
 
-        NEGOTIATING = "negotiating", "Negotiating"
+        AWAITING_CONFIRMATIONS = (
+            "awaiting_confirmations",
+            "Awaiting customer, partner, and owner confirmations",
+        )
 
+        NEGOTIATING = "negotiating", "Negotiating"
         AGREED = "agreed", "Terms agreed"
 
         DOCUMENTS_PENDING = (
@@ -207,7 +212,7 @@ class Deal(models.Model):
                     "The deal viewing must match the PIC viewing."
                 )
 
-            if not pic.is_active:
+            if not self.pk and not pic.is_active:
                 errors["introduction"] = (
                     "The PIC must be active before a deal can begin."
                 )
@@ -370,7 +375,9 @@ class DealEvent(models.Model):
         related_name="events",
     )
 
-    action = models.CharField(max_length=60)
+    action = models.CharField(
+        max_length=60,
+    )
 
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -380,7 +387,9 @@ class DealEvent(models.Model):
         blank=True,
     )
 
-    notes = models.TextField(blank=True)
+    notes = models.TextField(
+        blank=True,
+    )
 
     metadata = models.JSONField(
         default=dict,
@@ -392,7 +401,10 @@ class DealEvent(models.Model):
     )
 
     class Meta:
-        ordering = ["created_at"]
+        ordering = [
+            "created_at",
+            "id",
+        ]
 
     def save(self, *args, **kwargs):
         if self.pk:
@@ -408,52 +420,28 @@ class DealEvent(models.Model):
         )
 
     def __str__(self):
-        return f"{self.deal.deal_number}: {self.action}"
-
+        return (
+            f"{self.deal.deal_number} — "
+            f"{self.action} — "
+            f"{self.created_at:%Y-%m-%d %H:%M}"
+        )
 class DealOutcome(models.Model):
 
     class Reporter(models.TextChoices):
-
-        CUSTOMER = (
-            "customer",
-            "Customer",
-        )
-
-        PARTNER = (
-            "partner",
-            "Partner",
-        )
+        CUSTOMER = "customer", "Customer"
+        PARTNER = "partner", "Partner"
+        OWNER = "owner", "Owner"
 
     class Outcome(models.TextChoices):
-
-        RENTED = (
-            "rented",
-            "Customer rented property",
-        )
-
-        PURCHASED = (
-            "purchased",
-            "Customer bought property",
-        )
-
-        STILL_DECIDING = (
-            "still_deciding",
-            "Still deciding",
-        )
-
-        DECLINED = (
-            "declined",
-            "Declined property",
-        )
-
-        NO_SHOW = (
-            "no_show",
-            "Did not attend",
-        )
+        RENTED = "rented", "Customer rented property"
+        PURCHASED = "purchased", "Customer bought property"
+        STILL_DECIDING = "still_deciding", "Still deciding"
+        DECLINED = "declined", "Declined property"
+        NO_SHOW = "no_show", "Did not attend"
 
     deal = models.ForeignKey(
         Deal,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="outcomes",
     )
 
@@ -477,9 +465,12 @@ class DealOutcome(models.Model):
     )
 
     class Meta:
+        ordering = [
+            "created_at",
+            "id",
+        ]
 
         constraints = [
-
             models.UniqueConstraint(
                 fields=[
                     "deal",
@@ -487,13 +478,159 @@ class DealOutcome(models.Model):
                 ],
                 name="one_outcome_per_reporter",
             )
-
         ]
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError(
+                "Deal outcomes cannot be modified after submission."
+            )
+
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Deal outcomes cannot be deleted."
+        )
+
     def __str__(self):
+        return (
+            f"{self.deal.deal_number} — "
+            f"{self.get_reporter_display()} — "
+            f"{self.get_outcome_display()}"
+        )
+
+class OwnerConfirmationToken(models.Model):
+    deal = models.ForeignKey(
+        Deal,
+        on_delete=models.PROTECT,
+        related_name="owner_confirmation_tokens",
+    )
+
+    owner = models.ForeignKey(
+        "mandates.PropertyOwner",
+        on_delete=models.PROTECT,
+        related_name="deal_confirmation_tokens",
+    )
+
+    mandate = models.ForeignKey(
+        "mandates.PropertyMandate",
+        on_delete=models.PROTECT,
+        related_name="deal_confirmation_tokens",
+    )
+
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        editable=False,
+    )
+
+    expires_at = models.DateTimeField()
+
+    used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_owner_confirmation_tokens",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-created_at",
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "deal",
+                    "expires_at",
+                ],
+            ),
+        ]
+
+    @classmethod
+    def hash_token(cls, raw_token):
+        return hashlib.sha256(
+            raw_token.encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def issue(
+        cls,
+        *,
+        deal,
+        owner,
+        mandate,
+        created_by,
+        expires_at,
+    ):
+        raw_token = secrets.token_urlsafe(48)
+
+        token = cls.objects.create(
+            deal=deal,
+            owner=owner,
+            mandate=mandate,
+            token_hash=cls.hash_token(raw_token),
+            expires_at=expires_at,
+            created_by=created_by,
+        )
+
+        return token, raw_token
+
+    @property
+    def is_usable(self):
+        now = timezone.now()
 
         return (
-            f"{self.deal} - {self.reporter}"
+            self.used_at is None
+            and self.revoked_at is None
+            and self.expires_at > now
+        )
+
+    def mark_used(self):
+        if not self.is_usable:
+            raise ValidationError(
+                "This owner confirmation token is no longer valid."
+            )
+
+        self.used_at = timezone.now()
+        self.save(
+            update_fields=[
+                "used_at",
+            ]
+        )
+
+    def revoke(self):
+        if self.used_at is not None:
+            raise ValidationError(
+                "A used owner confirmation token cannot be revoked."
+            )
+
+        if self.revoked_at is None:
+            self.revoked_at = timezone.now()
+            self.save(
+                update_fields=[
+                    "revoked_at",
+                ]
+            )
+
+    def __str__(self):
+        return (
+            f"{self.deal.deal_number} — "
+            f"{self.owner.owner_number}"
         )
 
 class CommissionInvoice(models.Model):

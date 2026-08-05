@@ -118,11 +118,20 @@ class DealSerializer(serializers.ModelSerializer):
             "status",
             "customer_confirmed",
             "partner_confirmed",
+            "owner_confirmed",
+            "customer_confirmed_at",
+            "partner_confirmed_at",
+            "owner_confirmed_at",
+            "agreed_at",
+            "completed_at",
+            "cancelled_at",
+            "cancellation_reason",
 
             "outcomes",
 
             "created_at",
             "updated_at",
+            
         ]
 
         read_only_fields = fields
@@ -151,3 +160,44 @@ class DealSerializer(serializers.ModelSerializer):
             or getattr(deal.partner.user, "full_name", "")
             or deal.partner.user.email
         )
+
+class OwnerOutcomeSubmissionSerializer(serializers.Serializer):
+    token = serializers.CharField(
+        write_only=True,
+        trim_whitespace=True,
+    )
+
+    outcome = serializers.ChoiceField(
+        choices=DealOutcome.Outcome.choices,
+    )
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=2000,
+    )
+
+class DealTimelineItemSerializer(serializers.Serializer):
+    timestamp = serializers.DateTimeField()
+    event_type = serializers.CharField()
+    title = serializers.CharField()
+    description = serializers.CharField(
+        allow_blank=True,
+    )
+    actor = serializers.CharField(
+        allow_null=True,
+        required=False,
+    )
+    source = serializers.CharField()
+    source_id = serializers.IntegerField(
+        allow_null=True,
+        required=False,
+    )
+    metadata = serializers.JSONField()
+
+
+class DealTimelineSerializer(serializers.Serializer):
+    deal = serializers.DictField()
+    timeline = DealTimelineItemSerializer(
+        many=True,
+    )
