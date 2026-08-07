@@ -39,7 +39,7 @@ urlpatterns = [
     path("api/", include("core.urls")),
     path("api/", include("deals.urls")),
     path("api/", include("commissions.urls")),
-    
+    path("api/", include("governance.urls")),
 ]
 
 if settings.DEBUG:

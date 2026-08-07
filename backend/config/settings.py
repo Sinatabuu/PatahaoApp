@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "trust",
     "mandates.apps.MandatesConfig",
     "introductions.apps.IntroductionsConfig",
+    "governance"
     
 ]
 
