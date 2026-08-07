@@ -8,7 +8,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 
 from viewings.models import Viewing, ViewingEvent
-
+from notifications.models import Notification
 from .models import Payment
 from .serializers import PaymentSerializer
 from .services import MpesaAPIError, MpesaClient
@@ -69,7 +69,22 @@ def _complete_payment(payment, viewing, *, provider_receipt, transaction_date, a
                 "currency": payment.currency,
             },
         )
+        partner = (
+            viewing.assigned_partner
+            or viewing.property.partner
+        )
 
+        if partner and partner.user_id:
+            Notification.objects.create(
+                user=partner.user,
+                title="New paid viewing request",
+                message=(
+                    f"A customer has paid for a viewing of "
+                    f"{viewing.property.title}. "
+                    f"Please review and respond to the request."
+                ),
+                notification_type=Notification.TYPE_VIEWING,
+            )
 
 class PaymentViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentSerializer

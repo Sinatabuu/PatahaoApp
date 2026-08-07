@@ -4,8 +4,7 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.db import transaction
 from django.utils import timezone
-
-from viewings.models import Viewing
+from .views import _complete_payment
 
 from .models import Payment
 
@@ -38,28 +37,34 @@ def mark_payments_successful(modeladmin, request, queryset):
             now = timezone.now()
             mock_reference = uuid.uuid4().hex[:10].upper()
 
-            payment.status = Payment.Status.SUCCESSFUL
-            payment.provider_transaction_id = f"DEV-{mock_reference}"
-            payment.provider_receipt_number = f"TEST{mock_reference}"
-            payment.receipt_number = Payment.generate_receipt_number()
             payment.provider_response_code = "0"
             payment.provider_response_description = (
                 "Development payment simulation completed successfully."
             )
-            payment.failure_reason = ""
-            payment.paid_at = now
             payment.callback_received_at = now
             payment.provider_callback_payload = {
                 "development_simulation": True,
                 "simulated_by_user_id": request.user.pk,
                 "simulated_at": now.isoformat(),
             }
-            payment.save()
 
-            viewing = payment.viewing
-            viewing.status = Viewing.Status.PAID_PENDING_PARTNER
-            viewing.payment_reference = payment.payment_reference
-            viewing.save()
+            payment.save(
+                update_fields=[
+                    "provider_response_code",
+                    "provider_response_description",
+                    "callback_received_at",
+                    "provider_callback_payload",
+                    "updated_at",
+                ]
+            )
+
+            _complete_payment(
+                payment,
+                payment.viewing,
+                provider_receipt=f"TEST{mock_reference}",
+                transaction_date=now,
+                actor=request.user,
+            )
 
             successful_count += 1
 

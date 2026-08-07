@@ -222,12 +222,13 @@ class Viewing(models.Model):
 
         super().save(*args, **kwargs)
 
-        @builtins.property
-        def booking_status(self):
+    @builtins.property
+    def booking_status(self):
             return self.status
 
-        @builtins.property
-        def operational_status(self):
+    @builtins.property
+        
+    def operational_status(self):
             latest_event = (
                 self.events.filter(
                     event_type__in=ViewingEvent.OPERATIONAL_EVENT_TYPES,

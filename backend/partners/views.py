@@ -20,6 +20,16 @@ from .serializers import (
     PartnerDashboardPropertySerializer,
     PartnerDashboardViewingSerializer,
 )
+from properties.models import Property
+from viewings.models import Viewing, ViewingEvent
+from deals.models import Deal
+from introductions.models import ProtectedIntroduction
+from commissions.models import (
+    CommissionPlan,
+    CommissionSettlementParticipant,
+)
+from notifications.models import Notification
+
 
 
 def get_authenticated_partner(user, require_approved=False):
@@ -441,6 +451,177 @@ class PartnerDashboardView(APIView):
 
         today = timezone.localdate()
 
+        introductions = (
+            ProtectedIntroduction.objects
+            .filter(partner=partner)
+            .select_related(
+                "customer",
+                "property",
+                "viewing",
+            )
+            .order_by("-created_at")
+        )
+
+        deals = (
+            Deal.objects
+            .filter(partner=partner)
+            .select_related(
+                "customer",
+                "property",
+                "viewing",
+                "introduction",
+            )
+            .order_by("-created_at")
+        )
+
+        
+        partner_commission_shares = (
+            CommissionSettlementParticipant.objects
+            .filter(partner=partner)
+            .select_related(
+                "settlement",
+                "settlement__deal",
+            )
+            .order_by("-id")
+        )
+
+        commission_total = (
+            partner_commission_shares.aggregate(
+                total=Sum("amount")
+            ).get("total")
+            or Decimal("0.00")
+        )
+
+        notifications = Notification.objects.filter(
+            user=request.user,
+        )
+
+        unread_notifications = notifications.filter(
+            is_read=False,
+        )
+
+        active_deal_statuses = [
+            Deal.Status.DRAFT,
+            Deal.Status.AWAITING_CUSTOMER,
+            Deal.Status.AWAITING_OWNER,
+            Deal.Status.AWAITING_CONFIRMATIONS,
+            Deal.Status.NEGOTIATING,
+            Deal.Status.AGREED,
+            Deal.Status.DOCUMENTS_PENDING,
+            Deal.Status.COMMISSION_DUE,
+        ]
+
+        active_deals = deals.filter(
+            status__in=active_deal_statuses,
+        )
+
+        awaiting_partner_confirmation = deals.filter(
+            partner_confirmed=False,
+            status=Deal.Status.AWAITING_CONFIRMATIONS,
+        )
+        pending_requests = viewings.filter(
+            status=Viewing.Status.PAID_PENDING_PARTNER,
+        )
+        inbox_items = []
+
+        for viewing in pending_requests:
+            inbox_items.append(
+                {
+                    "type": "viewing",
+                    "id": viewing.id,
+                    "priority": "high",
+                    "action": "respond_to_viewing",
+                    "title": (
+                        f"Viewing request for {viewing.property.title}"
+                    ),
+                    "created_at": viewing.created_at.isoformat(),
+                }
+            )
+
+        for deal in awaiting_partner_confirmation:
+            inbox_items.append(
+                {
+                    "type": "deal",
+                    "id": deal.id,
+                    "priority": "high",
+                    "action": "confirm_deal",
+                    "title": (
+                        f"Deal confirmation for {deal.property.title}"
+                    ),
+                    "created_at": deal.created_at.isoformat(),
+                }
+            )
+
+        inbox_items.sort(
+            key=lambda item: item["created_at"],
+            reverse=True,
+        )
+
+        active_introductions = introductions.filter(
+            status__in=[
+                ProtectedIntroduction.Status.ACTIVE,
+                ProtectedIntroduction.Status.DISPUTED,
+            ],
+        )
+        try:
+            trust_record = partner.trust_score_record
+        except Exception:
+            trust_record = None
+
+        successful_transactions = (
+            trust_record.successful_deals
+            if trust_record
+            else 0
+        )
+
+        current_plan = partner.commission_plan
+
+        next_plan = (
+            CommissionPlan.objects
+            .filter(
+                is_active=True,
+                minimum_completed_transactions__gt=successful_transactions,
+            )
+            .order_by(
+                "minimum_completed_transactions",
+                "partner_share_rate",
+            )
+            .first()
+        )
+
+        if next_plan:
+            transactions_needed = max(
+                next_plan.minimum_completed_transactions
+                - successful_transactions,
+                0,
+            )
+
+            if current_plan:
+                current_threshold = (
+                    current_plan.minimum_completed_transactions
+                )
+            else:
+                current_threshold = 0
+
+            tier_span = max(
+                next_plan.minimum_completed_transactions
+                - current_threshold,
+                1,
+            )
+
+            progress_in_tier = max(
+                successful_transactions - current_threshold,
+                0,
+            )
+
+            tier_progress_percent = min(
+                (progress_in_tier / tier_span) * 100,
+                100,
+            )
+        else:
+            transactions_needed = 0
+            tier_progress_percent = 100
+        
         today_viewings = viewings.filter(
             Q(confirmed_date=today)
             | Q(
@@ -453,10 +634,6 @@ class PartnerDashboardView(APIView):
             "id",
         )
 
-        pending_requests = viewings.filter(
-            status=Viewing.Status.PAID_PENDING_PARTNER,
-        )
-
         confirmed_viewings = viewings.filter(
             status=Viewing.Status.CONFIRMED,
         )
@@ -466,6 +643,7 @@ class PartnerDashboardView(APIView):
             completed_at__date=today,
         )
 
+        
         property_summary = properties.aggregate(
             total=Count("id"),
             published=Count(
@@ -541,8 +719,6 @@ class PartnerDashboardView(APIView):
             status__in=[
                 Viewing.Status.PAID_PENDING_PARTNER,
                 Viewing.Status.RESCHEDULE_PROPOSED,
-                Viewing.Status.CONFIRMED,
-                Viewing.Status.CANCELLED,
             ]
         )
 
@@ -552,6 +728,17 @@ class PartnerDashboardView(APIView):
                     partner,
                     context={"request": request},
                 ).data,
+                "inbox": {
+                    "count": len(inbox_items),
+                    "items": inbox_items,
+                },
+                "attention": {
+                    "viewing_requests": pending_requests.count(),
+                    "active_introductions": active_introductions.count(),
+                    "deal_confirmations": awaiting_partner_confirmation.count(),
+                    "active_deals": active_deals.count(),
+                    "unread_notifications": unread_notifications.count(),
+                },
                 "summary": {
                     "active_properties": properties.filter(
                         status=Property.STATUS_PUBLISHED,
@@ -567,6 +754,90 @@ class PartnerDashboardView(APIView):
                     ),
                     "currency": "KES",
                 },
+                "deals": {
+                    "active": active_deals.count(),
+                    "awaiting_partner_confirmation": (
+                        awaiting_partner_confirmation.count()
+                    ),
+                    "total": deals.count(),
+                },
+
+                "commissions": {
+                    "total_allocated_to_partner": f"{commission_total:.2f}",
+                    "share_count": partner_commission_shares.count(),
+                    "currency": "KES",
+                },
+
+                "trust": (
+                    {
+                        "score": f"{trust_record.score:.2f}",
+                        "confidence": f"{trust_record.confidence:.2f}",
+                        "grade": trust_record.grade,
+                        "average_rating": f"{trust_record.average_rating:.2f}",
+                        "viewing_completion_rate": (
+                            f"{trust_record.viewing_completion_rate:.2f}"
+                        ),
+                        "successful_deals": trust_record.successful_deals,
+                        "evaluated_deals": trust_record.evaluated_deals,
+                        "disputed_deals": trust_record.disputed_deals,
+                        "owner_confirmation_rate": (
+                            f"{trust_record.owner_confirmation_rate:.2f}"
+                        ),
+                        "active_restriction": trust_record.active_restriction,
+                        "permanently_banned": trust_record.permanently_banned,
+                    }
+                    if trust_record
+                    else None
+                ),
+
+                "tier_progress": {
+                    "successful_transactions": successful_transactions,
+
+                    "current_plan": (
+                        {
+                            "id": current_plan.id,
+                            "name": current_plan.name,
+                            "partner_share_rate": (
+                                f"{current_plan.partner_share_rate:.2f}"
+                            ),
+                            "minimum_completed_transactions": (
+                                current_plan.minimum_completed_transactions
+                            ),
+                        }
+                        if current_plan
+                        else None
+                    ),
+
+                    "next_plan": (
+                        {
+                            "id": next_plan.id,
+                            "name": next_plan.name,
+                            "partner_share_rate": (
+                                f"{next_plan.partner_share_rate:.2f}"
+                            ),
+                            "minimum_completed_transactions": (
+                                next_plan.minimum_completed_transactions
+                            ),
+                        }
+                        if next_plan
+                        else None
+                    ),
+
+                    "transactions_needed": transactions_needed,
+                    "progress_percent": f"{tier_progress_percent:.2f}",
+                },
+
+                "notifications": [
+                    {
+                        "id": notification.id,
+                        "title": notification.title,
+                        "message": notification.message,
+                        "notification_type": notification.notification_type,
+                        "is_read": notification.is_read,
+                        "created_at": notification.created_at.isoformat(),
+                    }
+                    for notification in notifications[:10]
+                ],
                 "today_viewings": PartnerDashboardViewingSerializer(
                     today_viewings,
                     many=True,
