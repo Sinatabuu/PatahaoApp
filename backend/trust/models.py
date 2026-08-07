@@ -81,6 +81,14 @@ class CustomerTrustScore(TrustScoreBase):
 
 
 class PartnerTrustScore(TrustScoreBase):
+    class Grade(models.TextChoices):
+        UNRATED = "unrated", "Unrated"
+        HIGH_RISK = "high_risk", "High risk"
+        DEVELOPING = "developing", "Developing"
+        GOOD = "good", "Good"
+        TRUSTED = "trusted", "Trusted"
+        EXCELLENT = "excellent", "Excellent"
+
     partner = models.OneToOneField(
         "partners.Partner",
         on_delete=models.CASCADE,
@@ -108,13 +116,71 @@ class PartnerTrustScore(TrustScoreBase):
     rescheduled_viewings = models.PositiveIntegerField(
         default=0,
     )
+    grade = models.CharField(
+        max_length=20,
+        choices=Grade.choices,
+        default=Grade.UNRATED,
+    )
+
+    viewing_completion_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    successful_deals = models.PositiveIntegerField(
+        default=0,
+    )
+
+    evaluated_deals = models.PositiveIntegerField(
+        default=0,
+    )
+
+    disputed_deals = models.PositiveIntegerField(
+        default=0,
+    )
+
+    owner_confirmation_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    dispute_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    confirmed_violations = models.PositiveIntegerField(
+        default=0,
+    )
+
+    active_restriction = models.BooleanField(
+        default=False,
+    )
+
+    permanently_banned = models.BooleanField(
+        default=False,
+    )
+
+    calculation_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+    )
 
     def __str__(self):
         return (
             f"Partner trust: {self.partner} "
             f"({self.score})"
         )
-
+    class Grade(models.TextChoices):
+        UNRATED = "unrated", "Unrated"
+        HIGH_RISK = "high_risk", "High risk"
+        DEVELOPING = "developing", "Developing"
+        GOOD = "good", "Good"
+        TRUSTED = "trusted", "Trusted"
+        EXCELLENT = "excellent", "Excellent"
 
 class PropertyTrustScore(TrustScoreBase):
     property = models.OneToOneField(

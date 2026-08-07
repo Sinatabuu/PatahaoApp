@@ -5,7 +5,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from mandates.models import PropertyMandate
-
+from governance.services import (
+    enforce_partner_operational_access,
+)
 from .models import (
     IntroductionEvent,
     ProtectedIntroduction,
@@ -30,6 +32,10 @@ def create_property_introduction_certificate(
 
     property_obj = viewing.property
     partner = property_obj.partner
+    enforce_partner_operational_access(
+        partner,
+        operation="create_property_introduction_certificate",
+    )
 
     mandate = (
         PropertyMandate.objects

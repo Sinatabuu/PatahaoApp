@@ -6,7 +6,9 @@ from django.utils import timezone
 from payments.models import Payment
 from introductions.models import ProtectedIntroduction
 from mandates.models import PropertyMandate
-
+from governance.services import (
+    enforce_partner_operational_access,
+)
 from .models import (
     CommissionInvoice,
     Deal,
@@ -339,6 +341,11 @@ def issue_owner_confirmation_token(
             "Only Pata Hao staff or the assigned partner "
             "may issue owner confirmation."
         )
+    if is_assigned_partner:
+        enforce_partner_operational_access(
+            actor_partner,
+            operation="issue_owner_confirmation",
+        )
 
     if deal.status in {
         Deal.Status.AGREED,
@@ -661,6 +668,28 @@ def create_deal_from_pic(
     if actor is None:
         raise ValidationError(
             "An authenticated actor is required."
+        )
+    actor_partner = getattr(
+        actor,
+        "partner_profile",
+        None,
+    )
+
+    is_assigned_partner = (
+        actor_partner is not None
+        and actor_partner.pk == introduction.partner_id
+    )
+
+    if not actor.is_staff and not is_assigned_partner:
+        raise ValidationError(
+            "Only Pata Hao staff or the assigned partner "
+            "may convert this PIC into a deal."
+        )
+
+    if is_assigned_partner:
+        enforce_partner_operational_access(
+            actor_partner,
+            operation="convert_pic_to_deal",
         )
 
     if not introduction.is_active:
@@ -1784,10 +1813,7 @@ def build_deal_timeline(deal):
         },
     )
 
-    add_item(
-        timestamp=deal.completed_at,
-        ...
-    )
+    
     timeline.sort(
         key=lambda item: (
             item["timestamp"],

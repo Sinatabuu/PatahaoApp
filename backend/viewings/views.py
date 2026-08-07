@@ -8,7 +8,12 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
-
+from django.core.exceptions import (
+    ValidationError as DjangoValidationError,
+)
+from governance.services import (
+    enforce_partner_operational_access,
+)
 from core.models import ActivityLog
 from introductions.services import (
     create_property_introduction_certificate,
@@ -86,9 +91,11 @@ class ViewingViewSet(viewsets.ModelViewSet):
 
     def _get_partner_profile(self):
         """
-        Return the logged-in user's active partner profile.
+        Return the logged-in user's approved and operationally
+        authorized partner profile.
 
-        Raises PermissionDenied when the user is not an active partner.
+        All partner viewing operations pass through this central
+        governance gate.
         """
 
         partner = getattr(
@@ -102,10 +109,32 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 "A partner account is required for this action."
             )
 
-        if not partner.is_active:
-            raise PermissionDenied(
-                "This partner account is currently inactive."
+        try:
+            enforce_partner_operational_access(
+                partner,
+                operation="manage_assigned_viewing",
             )
+
+        except DjangoValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                detail = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+
+            if detail is None:
+                detail = str(exc)
+
+            raise PermissionDenied(
+                detail=detail,
+            ) from exc
 
         return partner
 
