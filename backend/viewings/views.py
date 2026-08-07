@@ -1,5 +1,5 @@
 from datetime import date
-
+from django.db.models import Count, Q
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -35,6 +35,53 @@ from rest_framework.views import APIView
 
 from .models import Viewing, ViewingFeedback
 from .serializers import ViewingFeedbackSerializer
+from properties.models import PropertyPartner
+
+def choose_participation_for_property(property_obj):
+    """
+    Choose the active property participation that should
+    receive a new viewing.
+
+    Partners with fewer active viewings for this property are
+    preferred. Ties are resolved by participation join date.
+    """
+
+    active_viewing_statuses = [
+        Viewing.Status.PENDING_PAYMENT,
+        Viewing.Status.PAYMENT_PROCESSING,
+        Viewing.Status.PAID_PENDING_PARTNER,
+        Viewing.Status.RESCHEDULE_PROPOSED,
+        Viewing.Status.CONFIRMED,
+    ]
+
+    return (
+        PropertyPartner.objects
+        .filter(
+            property=property_obj,
+            status=PropertyPartner.Status.ACTIVE,
+            partner__is_active=True,
+            partner__accepts_viewing_requests=True,
+        )
+        .annotate(
+            active_viewing_count=Count(
+                "partner__assigned_viewings",
+                filter=Q(
+                    partner__assigned_viewings__property=property_obj,
+                    partner__assigned_viewings__status__in=(
+                        active_viewing_statuses
+                    ),
+                ),
+            )
+        )
+        .select_related("partner")
+        .order_by(
+            "active_viewing_count",
+            "joined_at",
+            "id",
+        )
+        .first()
+    )
+
 class ViewingViewSet(viewsets.ModelViewSet):
     """
     API endpoint for individual property viewing requests.
@@ -165,10 +212,29 @@ class ViewingViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        viewing = serializer.save(
-            customer=self.request.user,
+        property_obj = serializer.validated_data["property"]
+
+        participation = choose_participation_for_property(
+            property_obj
         )
 
+        if participation is None:
+            raise ValidationError(
+                {
+                    "property": (
+                        "No active partner is currently available "
+                        "to handle viewings for this property."
+                    )
+                }
+            )
+
+        viewing = serializer.save(
+            customer=self.request.user,
+            assigned_partner=participation.partner,
+            source_participation=participation,
+        )
+
+        
         ActivityLog.objects.create(
             actor=self.request.user,
             action="viewing_requested",

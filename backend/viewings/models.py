@@ -84,6 +84,17 @@ class Viewing(models.Model):
         null=True,
         blank=True,
     )
+    source_participation = models.ForeignKey(
+        "properties.PropertyPartner",
+        on_delete=models.PROTECT,
+        related_name="generated_viewings",
+        null=True,
+        blank=True,
+        help_text=(
+            "The property participation through which this "
+            "viewing was assigned."
+        ),
+    )
 
     requested_date = models.DateField()
     requested_time = models.TimeField()

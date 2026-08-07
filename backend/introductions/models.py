@@ -194,10 +194,23 @@ class ProtectedIntroduction(models.Model):
                     "PIC property must match the viewing property."
                 )
 
-        if self.property_id and self.partner_id:
-            if self.property.partner_id != self.partner_id:
+            if self.viewing.status != self.viewing.Status.COMPLETED:
+                errors["viewing"] = (
+                    "A PIC can only be created after the viewing "
+                    "has been completed."
+                )
+
+            if self.viewing.assigned_partner_id is None:
                 errors["partner"] = (
-                    "PIC partner must match the property partner."
+                    "A completed viewing must have an assigned partner "
+                    "before a PIC can be created."
+                )
+
+        if self.viewing_id and self.partner_id:
+            if self.viewing.assigned_partner_id != self.partner_id:
+                errors["partner"] = (
+                    "PIC partner must match the partner assigned "
+                    "to the viewing."
                 )
 
         if self.mandate_id:

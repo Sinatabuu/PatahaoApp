@@ -190,6 +190,73 @@ class PropertyPhoto(models.Model):
     def __str__(self):
         return f"Photo for {self.property.title}"
 
+class PropertyPartner(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACTIVE = "active", "Active"
+        SUSPENDED = "suspended", "Suspended"
+        REMOVED = "removed", "Removed"
+
+    class Role(models.TextChoices):
+        SOURCE = "source", "Source partner"
+        PARTICIPATING = "participating", "Participating partner"
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="partner_participations",
+    )
+
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.PROTECT,
+        related_name="property_participations",
+    )
+
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.PARTICIPATING,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+
+    joined_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["property_id", "partner_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["property", "partner"],
+                name="unique_partner_per_property",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.property.title} — "
+            f"{self.partner} ({self.role})"
+        )
 
 class PropertyVideo(models.Model):
     property = models.ForeignKey(
