@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -149,6 +150,13 @@ class Property(models.Model):
         choices=TRUST_BADGE_CHOICES,
         default="none",
     )
+    verification_return_reason = models.TextField(
+        blank=True,
+        help_text=(
+            "Reason a pending property was returned "
+            "to the partner for changes."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -162,6 +170,46 @@ class Property(models.Model):
     @property
     def is_available(self):
         return self.status == self.STATUS_PUBLISHED
+
+class PropertyFavorite(models.Model):
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="property_favorites",
+    )
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="favorites",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-created_at",
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "customer",
+                    "property",
+                ],
+                name=(
+                    "unique_property_favorite_per_customer"
+                ),
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.customer} saved "
+            f"{self.property.title}"
+        )
 
 
 class PropertyPhoto(models.Model):

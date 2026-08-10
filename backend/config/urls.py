@@ -31,6 +31,7 @@ urlpatterns = [
 
     # App APIs
     path("api/", include("properties.urls")),
+    path("api/", include("properties.favorite_urls")),
     path("api/", include("partners.urls")),
     path("api/", include("accounts.urls")),
     path("api/", include("viewings.urls")),

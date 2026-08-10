@@ -4,6 +4,7 @@ from partners.models import Partner
 
 from .models import (
     Property,
+    PropertyFavorite,
     PropertyPhoto,
     PropertyVideo,
 )
@@ -169,6 +170,9 @@ class PropertySerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    is_favorite = serializers.SerializerMethodField()
+    favorite_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Property
         fields = (
@@ -189,9 +193,42 @@ class PropertySerializer(serializers.ModelSerializer):
             "description",
             "status",
             "is_available",
+            "is_favorite",
+            "favorite_id",
             "trust_badge",
             "photos",
             "videos",
             "created_at",
             "updated_at",
         )
+
+
+    def _get_customer_favorite(self, obj):
+        request = self.context.get("request")
+
+        if (
+            request is None
+            or not request.user.is_authenticated
+        ):
+            return None
+
+        return (
+            PropertyFavorite.objects
+            .filter(
+                customer=request.user,
+                property=obj,
+            )
+            .first()
+        )
+
+    def get_is_favorite(self, obj):
+        return self._get_customer_favorite(obj) is not None
+
+    def get_favorite_id(self, obj):
+        favorite = self._get_customer_favorite(obj)
+
+        if favorite is None:
+            return None
+
+        return favorite.id
+
