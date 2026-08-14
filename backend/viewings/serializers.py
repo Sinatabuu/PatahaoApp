@@ -126,6 +126,10 @@ class ViewingSerializer(serializers.ModelSerializer):
         source="property.title",
         read_only=True,
     )
+    listing_type = serializers.CharField(
+        source="property.listing_type",
+        read_only=True,
+    )
 
     assigned_partner_name = serializers.SerializerMethodField()
 
@@ -140,6 +144,8 @@ class ViewingSerializer(serializers.ModelSerializer):
     partner_arrived_at = serializers.SerializerMethodField()
     viewing_started_at = serializers.SerializerMethodField()
     completion_notes = serializers.SerializerMethodField()
+    deal_id = serializers.SerializerMethodField()
+    partner_outcome_submitted = serializers.SerializerMethodField()
 
     class Meta:
         model = Viewing
@@ -150,6 +156,7 @@ class ViewingSerializer(serializers.ModelSerializer):
             "customer_name",
             "property",
             "property_title",
+            "listing_type",
             "assigned_partner",
             "assigned_partner_name",
             "source_participation",
@@ -172,6 +179,8 @@ class ViewingSerializer(serializers.ModelSerializer):
             "partner_arrived_at",
             "viewing_started_at",
             "completion_notes",
+            "deal_id",
+            "partner_outcome_submitted",
             "created_at",
             "updated_at",
         ]
@@ -180,6 +189,7 @@ class ViewingSerializer(serializers.ModelSerializer):
             "customer",
             "customer_name",
             "property_title",
+            "listing_type",
             "assigned_partner",
             "assigned_partner_name",
             "source_participation",
@@ -199,6 +209,8 @@ class ViewingSerializer(serializers.ModelSerializer):
             "partner_arrived_at",
             "viewing_started_at",
             "completion_notes",
+            "deal_id",
+            "partner_outcome_submitted",
             "created_at",
             "updated_at",
         ]
@@ -275,6 +287,25 @@ class ViewingSerializer(serializers.ModelSerializer):
         )
 
         return event.notes if event else ""
+
+    def get_deal_id(self, obj):
+        deal = getattr(obj, "deal", None)
+
+        if deal is None:
+            return None
+
+        return deal.id
+
+
+    def get_partner_outcome_submitted(self, obj):
+        deal = getattr(obj, "deal", None)
+
+        if deal is None:
+            return False
+
+        return deal.outcomes.filter(
+            reporter="partner",
+        ).exists()
 
     def validate_requested_date(self, value):
         if value < date.today():

@@ -73,6 +73,15 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    listing_type = serializers.CharField(
+        source="property.listing_type",
+        read_only=True,
+    )
+
+    deal_id = serializers.SerializerMethodField()
+
+    partner_outcome_submitted = serializers.SerializerMethodField()
+
     class Meta:
         model = Viewing
 
@@ -83,7 +92,9 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
             "customer_email",
             "property",
             "property_title",
-
+            "listing_type",
+            "deal_id",
+            "partner_outcome_submitted",
             "requested_date",
             "requested_time",
             "customer_message",
@@ -114,3 +125,22 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
             return full_name
 
         return viewing.customer.email
+
+    def get_deal_id(self, viewing):
+        deal = getattr(viewing, "deal", None)
+
+        if deal is None:
+            return None
+
+        return deal.id
+
+
+    def get_partner_outcome_submitted(self, viewing):
+        deal = getattr(viewing, "deal", None)
+
+        if deal is None:
+            return False
+
+        return deal.outcomes.filter(
+            reporter="partner",
+        ).exists()

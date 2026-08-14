@@ -835,11 +835,18 @@ def validate_partner_property_limit(property_obj):
             }
         )
 
+    current_tier = get_current_tier(
+        partner,
+    )
+
     return {
         "allowed": True,
-        "tier": get_current_tier(
-            partner,
-        ),
+        "tier": {
+            "id": current_tier.id,
+            "code": current_tier.code,
+            "name": current_tier.name,
+            "rank": current_tier.rank,
+        },
         "property_limit": property_limit,
         "published_count": active_count,
         "remaining_slots": (

@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.http import JsonResponse
+from django.urls import include, path
 
 def home(request):
     return JsonResponse(
@@ -41,6 +42,7 @@ urlpatterns = [
     path("api/", include("deals.urls")),
     path("api/", include("commissions.urls")),
     path("api/", include("governance.urls")),
+    path("api/", include("mandates.urls")),
 ]
 
 if settings.DEBUG:

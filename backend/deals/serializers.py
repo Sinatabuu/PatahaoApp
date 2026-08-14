@@ -57,7 +57,7 @@ class DealOutcomeSubmissionSerializer(serializers.ModelSerializer):
 
 class DealSerializer(serializers.ModelSerializer):
     customer_name = serializers.SerializerMethodField()
-
+    customer_outcome_submitted = serializers.SerializerMethodField()
     partner_name = serializers.SerializerMethodField()
 
     property_title = serializers.CharField(
@@ -117,6 +117,7 @@ class DealSerializer(serializers.ModelSerializer):
 
             "status",
             "customer_confirmed",
+            "customer_outcome_submitted",
             "partner_confirmed",
             "owner_confirmed",
             "customer_confirmed_at",
@@ -135,6 +136,10 @@ class DealSerializer(serializers.ModelSerializer):
         ]
 
         read_only_fields = fields
+    def get_customer_outcome_submitted(self, deal):
+        return deal.outcomes.filter(
+            reporter=DealOutcome.Reporter.CUSTOMER,
+        ).exists()
 
     def get_customer_name(self, deal):
         full_name = deal.customer.get_full_name().strip()

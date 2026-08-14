@@ -19,13 +19,17 @@ def get_current_property_mandate(property_obj):
             "owner",
             "partner",
             "commission_agreement",
+            "commission_agreement__accepted_by",
+            "commission_agreement__verified_by",
         )
-        .prefetch_related("documents")
         .filter(
             property=property_obj,
             status=PropertyMandate.Status.APPROVED,
         )
-        .order_by("-version", "-approved_at")
+        .order_by(
+            "-version",
+            "-approved_at",
+        )
         .first()
     )
 
@@ -33,11 +37,13 @@ def get_current_property_mandate(property_obj):
 def evaluate_property_publication(property_obj):
     reasons = []
 
-    mandate = get_current_property_mandate(property_obj)
+    mandate = get_current_property_mandate(
+        property_obj,
+    )
 
     if mandate is None:
         reasons.append(
-            "An approved property mandate is required."
+            "An approved digital property mandate is required."
         )
 
         return PublicationReadiness(
@@ -46,38 +52,72 @@ def evaluate_property_publication(property_obj):
             mandate=None,
         )
 
-    if not mandate.owner.is_verified:
+    if not mandate.partner_declared:
         reasons.append(
-            "The property owner has not been verified."
+            "The partner has not accepted the digital property mandate."
+        )
+
+    if mandate.partner_declared_at is None:
+        reasons.append(
+            "The partner mandate acceptance time is missing."
+        )
+
+    if mandate.declared_by_id is None:
+        reasons.append(
+            "The partner mandate acceptance user is missing."
         )
 
     if not mandate.owner_authority_confirmed:
         reasons.append(
-            "The owner's authority over this property "
-            "has not been confirmed."
-        )
-
-    if not mandate.has_approved_signed_document:
-        reasons.append(
-            "An approved signed property mandate is required."
+            "The partner has not confirmed authority to market this property."
         )
 
     if not mandate.no_cash_acknowledged:
         reasons.append(
-            "The owner has not acknowledged the no-cash policy."
+            "The partner has not acknowledged the Pata Hao payment policy."
         )
 
     if not mandate.anti_circumvention_acknowledged:
         reasons.append(
-            "The owner has not acknowledged the "
-            "anti-circumvention rule."
+            "The partner has not acknowledged the anti-circumvention rule."
         )
 
-    if not mandate.commission_agreement.is_publish_ready():
+    agreement = mandate.commission_agreement
+
+    if agreement is None:
         reasons.append(
-            "The commission agreement is not confirmed, "
-            "verified, and locked."
+            "A commission agreement is required."
         )
+    else:
+        if not agreement.partner_accepted:
+            reasons.append(
+                "The partner has not accepted the commission agreement."
+            )
+
+        if agreement.partner_accepted_at is None:
+            reasons.append(
+                "The commission agreement acceptance time is missing."
+            )
+
+        if agreement.accepted_by_id is None:
+            reasons.append(
+                "The commission agreement accepting user is missing."
+            )
+
+        if not agreement.is_verified:
+            reasons.append(
+                "The commission agreement has not been verified by Pata Hao."
+            )
+
+        if not agreement.is_locked:
+            reasons.append(
+                "The commission agreement has not been locked."
+            )
+
+        if not agreement.is_publish_ready():
+            reasons.append(
+                "The commission agreement is not ready for publication."
+            )
 
     if not mandate.is_currently_valid:
         reasons.append(

@@ -5,10 +5,10 @@ from partners.models import Partner
 from .models import (
     Property,
     PropertyFavorite,
+    PropertyPartner,
     PropertyPhoto,
     PropertyVideo,
 )
-
 
 class PublicPartnerSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
@@ -200,9 +200,8 @@ class PropertySerializer(serializers.ModelSerializer):
             "videos",
             "created_at",
             "updated_at",
+
         )
-
-
     def _get_customer_favorite(self, obj):
         request = self.context.get("request")
 
@@ -222,7 +221,10 @@ class PropertySerializer(serializers.ModelSerializer):
         )
 
     def get_is_favorite(self, obj):
-        return self._get_customer_favorite(obj) is not None
+        return (
+            self._get_customer_favorite(obj)
+            is not None
+        )
 
     def get_favorite_id(self, obj):
         favorite = self._get_customer_favorite(obj)
@@ -232,3 +234,62 @@ class PropertySerializer(serializers.ModelSerializer):
 
         return favorite.id
 
+class PartnerPropertySerializer(PropertySerializer):
+    partner_role = serializers.SerializerMethodField()
+    participation_status = serializers.SerializerMethodField()
+
+    class Meta(PropertySerializer.Meta):
+        fields = PropertySerializer.Meta.fields + (
+            "partner_role",
+            "participation_status",
+
+        )
+
+    def _get_partner(self):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return None
+
+        try:
+            return Partner.objects.get(user=request.user)
+        except Partner.DoesNotExist:
+            return None
+
+    def _get_participation(self, obj):
+        partner = self._get_partner()
+
+        if partner is None:
+            return None
+
+        return (
+            obj.partner_participations
+            .filter(partner=partner)
+            .first()
+        )
+
+    def get_partner_role(self, obj):
+        participation = self._get_participation(obj)
+
+        if participation:
+            return participation.role
+
+        partner = self._get_partner()
+
+        if partner and obj.partner_id == partner.id:
+            return PropertyPartner.Role.SOURCE
+
+        return None
+
+    def get_participation_status(self, obj):
+        participation = self._get_participation(obj)
+
+        if participation:
+            return participation.status
+
+        partner = self._get_partner()
+
+        if partner and obj.partner_id == partner.id:
+            return PropertyPartner.Status.ACTIVE
+
+        return None

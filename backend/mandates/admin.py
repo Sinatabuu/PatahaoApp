@@ -52,7 +52,11 @@ class PropertyOwnerAdmin(admin.ModelAdmin):
     @admin.action(
         description="Verify selected property owners",
     )
-    def verify_selected_owners(self, request, queryset):
+    def verify_selected_owners(
+        self,
+        request,
+        queryset,
+    ):
         updated = 0
 
         for owner in queryset:
@@ -129,6 +133,8 @@ class PropertyMandateAdmin(admin.ModelAdmin):
         "partner",
         "status",
         "version",
+        "partner_declared",
+        "authorization_method",
         "no_cash_acknowledged",
         "anti_circumvention_acknowledged",
         "approved_at",
@@ -136,6 +142,8 @@ class PropertyMandateAdmin(admin.ModelAdmin):
 
     list_filter = [
         "status",
+        "partner_declared",
+        "authorization_method",
         "no_cash_acknowledged",
         "anti_circumvention_acknowledged",
         "owner_authority_confirmed",
@@ -150,14 +158,89 @@ class PropertyMandateAdmin(admin.ModelAdmin):
         "owner__owner_number",
         "partner__business_name",
         "commission_agreement__agreement_number",
+        "declared_by__username",
     ]
 
     readonly_fields = [
         "mandate_number",
+        "partner_declared_at",
+        "declared_by",
+        "submitted_at",
         "approved_by",
         "approved_at",
         "created_at",
         "updated_at",
+    ]
+
+    fieldsets = [
+        (
+            "Property mandate",
+            {
+                "fields": [
+                    "mandate_number",
+                    "property",
+                    "owner",
+                    "partner",
+                    "commission_agreement",
+                    "version",
+                    "status",
+                ]
+            },
+        ),
+        (
+            "Partner authority",
+            {
+                "fields": [
+                    "authorization_method",
+                    "authorization_notes",
+                    "owner_authority_confirmed",
+                ]
+            },
+        ),
+        (
+            "Pata Hao terms",
+            {
+                "fields": [
+                    "no_cash_acknowledged",
+                    "anti_circumvention_acknowledged",
+                    "partner_declared",
+                    "partner_declared_at",
+                    "declaration_version",
+                    "declared_by",
+                ]
+            },
+        ),
+        (
+            "Validity",
+            {
+                "fields": [
+                    "effective_date",
+                    "expiry_date",
+                    "protection_period_days",
+                ]
+            },
+        ),
+        (
+            "Review",
+            {
+                "fields": [
+                    "submitted_at",
+                    "approved_by",
+                    "approved_at",
+                    "rejection_reason",
+                ]
+            },
+        ),
+        (
+            "Audit",
+            {
+                "fields": [
+                    "created_by",
+                    "created_at",
+                    "updated_at",
+                ]
+            },
+        ),
     ]
 
     inlines = [
@@ -179,29 +262,47 @@ class PropertyMandateAdmin(admin.ModelAdmin):
         queryset,
     ):
         updated = 0
+        failed = []
 
         for mandate in queryset:
-            mandate.status = (
-                PropertyMandate.Status.UNDER_REVIEW
+            try:
+                mandate.submit_for_review()
+                mandate.save()
+
+                MandateEvent.objects.create(
+                    mandate=mandate,
+                    action="submitted_for_review",
+                    actor=request.user,
+                    notes=(
+                        "Digital property mandate submitted "
+                        "for Pata Hao review."
+                    ),
+                    metadata={
+                        "declaration_version": (
+                            mandate.declaration_version
+                        ),
+                    },
+                )
+
+                updated += 1
+
+            except Exception as error:
+                failed.append(
+                    f"{mandate.mandate_number}: {error}"
+                )
+
+        if updated:
+            self.message_user(
+                request,
+                f"{updated} mandate(s) submitted for review.",
             )
-            mandate.submitted_at = timezone.now()
-            mandate.save()
 
-            MandateEvent.objects.create(
-                mandate=mandate,
-                action="submitted_for_review",
-                actor=request.user,
-                notes=(
-                    "Mandate submitted for Pata Hao review."
-                ),
+        for message in failed:
+            self.message_user(
+                request,
+                message,
+                level="error",
             )
-
-            updated += 1
-
-        self.message_user(
-            request,
-            f"{updated} mandate(s) submitted for review.",
-        )
 
     @admin.action(
         description="Approve selected mandates",
@@ -226,11 +327,21 @@ class PropertyMandateAdmin(admin.ModelAdmin):
                     action="approved",
                     actor=request.user,
                     notes=(
-                        "Property mandate approved by Pata Hao."
+                        "Digital property mandate approved "
+                        "by Pata Hao."
                     ),
+                    metadata={
+                        "declaration_version": (
+                            mandate.declaration_version
+                        ),
+                        "commission_agreement_id": (
+                            mandate.commission_agreement_id
+                        ),
+                    },
                 )
 
                 approved += 1
+
             except Exception as error:
                 failed.append(
                     f"{mandate.mandate_number}: {error}"
@@ -310,7 +421,7 @@ class MandateDocumentAdmin(admin.ModelAdmin):
                 actor=request.user,
                 notes=(
                     f"{document.get_document_type_display()} "
-                    "approved."
+                    "approved as supporting evidence."
                 ),
                 metadata={
                     "document_id": document.id,
@@ -355,7 +466,10 @@ class MandateEventAdmin(admin.ModelAdmin):
         "created_at",
     ]
 
-    def has_add_permission(self, request):
+    def has_add_permission(
+        self,
+        request,
+    ):
         return False
 
     def has_delete_permission(

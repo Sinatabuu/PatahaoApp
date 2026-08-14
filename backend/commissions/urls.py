@@ -1,14 +1,20 @@
 from django.urls import path
-
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    PartnerCommissionAgreementViewSet,
     PartnerCommissionSettlementViewSet,
     PartnerCommissionSummaryView,
 )
 
 
 router = DefaultRouter()
+
+router.register(
+    r"partner/commission-agreements",
+    PartnerCommissionAgreementViewSet,
+    basename="partner-commission-agreement",
+)
 
 router.register(
     r"partner/commission-settlements",

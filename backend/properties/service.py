@@ -94,48 +94,6 @@ class PublishingEngine:
         else:
             missing.append("Select one property cover photo.")
 
-        # 4. Commission agreement checks
-        agreement = getattr(
-            property_obj,
-            "commission_agreement",
-            None,
-        )
-
-        if agreement is None:
-            missing.append(
-                "Create a commission agreement."
-            )
-        else:
-            passed.append("Commission agreement exists.")
-
-            if agreement.owner_confirmed:
-                passed.append(
-                    "Property owner confirmed the commission agreement."
-                )
-            else:
-                missing.append(
-                    "Property owner must confirm "
-                    "the commission agreement."
-                )
-
-            if agreement.is_verified:
-                passed.append(
-                    "Commission agreement is verified."
-                )
-            else:
-                missing.append(
-                    "Commission agreement requires admin verification."
-                )
-
-            if agreement.is_locked:
-                passed.append(
-                    "Commission agreement is locked."
-                )
-            else:
-                missing.append(
-                    "Commission agreement must be locked."
-                )
-
         total_checks = len(passed) + len(missing)
 
         readiness_score = (

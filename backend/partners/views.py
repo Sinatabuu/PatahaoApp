@@ -715,10 +715,12 @@ class PartnerDashboardView(APIView):
             or Decimal("0.00")
         )
 
-        actionable_viewings = viewings.filter(
+        dashboard_viewings = viewings.filter(
             status__in=[
                 Viewing.Status.PAID_PENDING_PARTNER,
                 Viewing.Status.RESCHEDULE_PROPOSED,
+                Viewing.Status.CONFIRMED,
+                Viewing.Status.COMPLETED,
             ]
         )
 
@@ -844,7 +846,7 @@ class PartnerDashboardView(APIView):
                     context={"request": request},
                 ).data,
                 "viewing_requests": PartnerDashboardViewingSerializer(
-                    actionable_viewings,
+                    dashboard_viewings,
                     many=True,
                     context={"request": request},
                 ).data,
