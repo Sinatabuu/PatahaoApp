@@ -8,16 +8,23 @@ from rest_framework.views import APIView
 
 from commissions.models import CommissionAgreement
 from core.models import ActivityLog
+from properties.models import Property
 from mandates.models import MandateEvent, PropertyMandate
 from mandates.services import evaluate_property_publication
 from properties.models import Property
 from properties.service import PublishingEngine
-
+from viewings.models import Viewing
 from .services import (
     enforce_partner_operational_access,
     get_partner_capacity_summary,
     validate_partner_property_limit,
 )
+from django.utils import timezone
+
+from deals.models import Deal
+from partners.models import Partner
+
+
 
 
 def _validation_error_detail(exc):
@@ -229,6 +236,75 @@ def _review_payload(property_obj):
         "ready_to_publish": ready_to_publish,
     }
 
+
+class AdminOperationsSummaryView(APIView):
+    """
+    Staff-only operational summary for the Pata Hao admin dashboard.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "the operations dashboard."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        today = timezone.localdate()
+
+        pending_reviews = Property.objects.filter(
+            status=Property.STATUS_PENDING,
+        ).count()
+
+        published_properties = Property.objects.filter(
+            status=Property.STATUS_PUBLISHED,
+        ).count()
+
+        active_partners = Partner.objects.filter(
+            verification_status=Partner.STATUS_APPROVED,
+            is_active=True,
+        ).count()
+
+        todays_viewings = Viewing.objects.filter(
+            requested_date=today,
+        ).exclude(
+            status__in=[
+                Viewing.Status.CANCELLED,
+                Viewing.Status.REFUNDED,
+            ],
+        ).count()
+
+        open_deals = Deal.objects.exclude(
+            status__in=[
+                Deal.Status.COMPLETED,
+                Deal.Status.CANCELLED,
+            ],
+        ).count()
+
+        commission_activity = CommissionAgreement.objects.filter(
+            updated_at__date=today,
+        ).count()
+
+        return Response(
+            {
+                "pending_reviews": pending_reviews,
+                "published_properties": published_properties,
+                "active_partners": active_partners,
+                "todays_viewings": todays_viewings,
+                "open_deals": open_deals,
+                "commission_activity": commission_activity,
+                "generated_for_date": today,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class StaffOnlyAPIView(APIView):
     permission_classes = [permissions.IsAdminUser]

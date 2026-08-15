@@ -1,6 +1,8 @@
 from django.urls import path
 
+
 from .views import (
+    AdminOperationsSummaryView,
     ApproveMandateReviewView,
     LockCommissionReviewView,
     MyPartnerCapacityView,
@@ -11,8 +13,12 @@ from .views import (
     VerifyCommissionReviewView,
 )
 
-
 urlpatterns = [
+    path(
+        "admin/operations-summary/",
+        AdminOperationsSummaryView.as_view(),
+        name="governance-admin-operations-summary",
+    ),
     path(
         "my-capacity/",
         MyPartnerCapacityView.as_view(),

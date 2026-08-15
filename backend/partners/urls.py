@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    AdminPartnerDetailView,
+    AdminPartnerListView,
     PartnerConfirmViewingView,
     PartnerDashboardView,
     PartnerDeclineViewingView,
@@ -70,5 +72,15 @@ urlpatterns = [
         "partners/viewings/<int:viewing_id>/complete/",
         partner_viewing_complete,
         name="partner-viewing-complete",
+    ),
+    path(
+        "admin/partners/",
+        AdminPartnerListView.as_view(),
+        name="admin-partner-list",
+    ),
+    path(
+        "admin/partners/<int:partner_id>/",
+        AdminPartnerDetailView.as_view(),
+        name="admin-partner-detail",
     ),
 ]

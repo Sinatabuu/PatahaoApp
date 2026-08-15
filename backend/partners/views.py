@@ -426,6 +426,284 @@ def partner_viewing_complete(request, viewing_id):
     )
 
 
+class AdminPartnerListView(APIView):
+    """
+    Staff-only partner directory for Pata Hao operations.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "the partner directory."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        search = request.query_params.get(
+            "search",
+            "",
+        ).strip()
+
+        requested_status = request.query_params.get(
+            "status",
+            "",
+        ).strip()
+
+        partner_type = request.query_params.get(
+            "partner_type",
+            "",
+        ).strip()
+
+        is_active = request.query_params.get(
+            "is_active",
+            "",
+        ).strip().lower()
+
+        try:
+            page = int(
+                request.query_params.get(
+                    "page",
+                    "1",
+                )
+            )
+        except ValueError:
+            page = 1
+
+        try:
+            page_size = int(
+                request.query_params.get(
+                    "page_size",
+                    "50",
+                )
+            )
+        except ValueError:
+            page_size = 50
+
+        page = max(page, 1)
+        page_size = max(
+            1,
+            min(page_size, 100),
+        )
+
+        queryset = (
+            Partner.objects
+            .select_related(
+                "user",
+                "commission_plan",
+            )
+            .annotate(
+                property_count=Count(
+                    "properties",
+                    distinct=True,
+                ),
+                published_property_count=Count(
+                    "properties",
+                    filter=Q(
+                        properties__status=Property.STATUS_PUBLISHED,
+                    ),
+                    distinct=True,
+                ),
+            )
+            .order_by(
+                "business_name",
+                "id",
+            )
+        )
+
+        if search:
+            queryset = queryset.filter(
+                Q(display_name__icontains=search)
+                | Q(business_name__icontains=search)
+                | Q(partner_code__icontains=search)
+                | Q(town__icontains=search)
+                | Q(county__icontains=search)
+                | Q(service_area__icontains=search)
+                | Q(user__username__icontains=search)
+                | Q(user__email__icontains=search)
+            )
+
+        if requested_status:
+            queryset = queryset.filter(
+                verification_status=requested_status,
+            )
+
+        if partner_type:
+            queryset = queryset.filter(
+                partner_type=partner_type,
+            )
+
+        if is_active == "true":
+            queryset = queryset.filter(
+                is_active=True,
+            )
+
+        elif is_active == "false":
+            queryset = queryset.filter(
+                is_active=False,
+            )
+
+        total_count = queryset.count()
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        page_items = queryset[
+            start:end
+        ]
+
+        results = []
+
+        for partner in page_items:
+            display_name = (
+                partner.display_name.strip()
+                or partner.business_name.strip()
+                or partner.user.get_full_name().strip()
+                or partner.user.username
+            )
+
+            results.append(
+                {
+                    "id": partner.id,
+                    "display_name": display_name,
+                    "business_name": partner.business_name,
+                    "partner_type": partner.partner_type,
+                    "partner_code": partner.partner_code,
+                    "county": partner.county,
+                    "town": partner.town,
+                    "service_area": partner.service_area,
+                    "verification_status": (
+                        partner.verification_status
+                    ),
+                    "is_active": partner.is_active,
+                    "accepts_viewing_requests": (
+                        partner.accepts_viewing_requests
+                    ),
+                    "commission_plan_id": (
+                        partner.commission_plan_id
+                    ),
+                    "property_count": (
+                        partner.property_count
+                    ),
+                    "published_property_count": (
+                        partner.published_property_count
+                    ),
+                    "created_at": partner.created_at,
+                }
+            )
+
+        total_pages = (
+            (total_count + page_size - 1)
+            // page_size
+        )
+
+        return Response(
+            {
+                "count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_previous": page > 1,
+                "results": results,
+            },
+            status=status.HTTP_200_OK,
+    )
+
+class AdminPartnerDetailView(APIView):
+    """
+    Staff-only partner detail for Pata Hao operations.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request, partner_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "partner details."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        partner = (
+            Partner.objects
+            .select_related(
+                "user",
+                "commission_plan",
+            )
+            .annotate(
+                property_count=Count(
+                    "properties",
+                    distinct=True,
+                ),
+                published_property_count=Count(
+                    "properties",
+                    filter=Q(
+                        properties__status=Property.STATUS_PUBLISHED,
+                    ),
+                    distinct=True,
+                ),
+            )
+            .filter(pk=partner_id)
+            .first()
+        )
+
+        if partner is None:
+            return Response(
+                {
+                    "detail": "Partner not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        display_name = (
+            partner.display_name.strip()
+            or partner.business_name.strip()
+            or partner.user.get_full_name().strip()
+            or partner.user.username
+        )
+
+        return Response(
+            {
+                "id": partner.id,
+                "display_name": display_name,
+                "business_name": partner.business_name,
+                "partner_type": partner.partner_type,
+                "partner_code": partner.partner_code,
+                "county": partner.county,
+                "town": partner.town,
+                "service_area": partner.service_area,
+                "verification_status": partner.verification_status,
+                "verification_notes": partner.verification_notes,
+                "is_active": partner.is_active,
+                "accepts_viewing_requests": (
+                    partner.accepts_viewing_requests
+                ),
+                "commission_plan_id": partner.commission_plan_id,
+                "commission_rate": partner.commission_rate,
+                "property_count": partner.property_count,
+                "published_property_count": (
+                    partner.published_property_count
+                ),
+                "created_at": partner.created_at,
+                "updated_at": partner.updated_at,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 class PartnerDashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
