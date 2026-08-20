@@ -4,7 +4,7 @@ import 'package:mobile/screens/partner_dashboard_screen.dart';
 import 'package:mobile/screens/property_list_screen.dart';
 import 'package:mobile/screens/welcome_screen.dart';
 import 'package:mobile/services/auth_service.dart';
-import 'package:mobile/screens/staff_property_review_queue_screen.dart';
+import 'package:mobile/screens/staff_operations_dashboard_screen.dart';
 
 class AppEntryScreen extends StatefulWidget {
   const AppEntryScreen({super.key});
@@ -155,7 +155,10 @@ class _AppEntryScreenState extends State<AppEntryScreen> {
     }
 
     if (currentUser.isStaff) {
-      return StaffPropertyReviewQueueScreen(onLogout: _handleLogout);
+      return StaffOperationsDashboardScreen(
+        currentUser: currentUser,
+        onLogout: _handleLogout,
+      );
     }
 
     switch (currentUser.role) {

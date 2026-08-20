@@ -7,6 +7,7 @@ import 'package:mobile/screens/property_list_screen.dart';
 import 'package:mobile/screens/my_properties_screen.dart';
 import 'partner_post_property_screen.dart';
 import 'package:mobile/services/deal_service.dart';
+import 'package:mobile/services/partner_governance_service.dart';
 
 class PartnerDashboardScreen extends StatefulWidget {
   const PartnerDashboardScreen({super.key, this.onLogout});
@@ -19,7 +20,10 @@ class PartnerDashboardScreen extends StatefulWidget {
 
 class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
   late Future<PartnerDashboard> _dashboardFuture;
+  late Future<List<Map<String, dynamic>>> _governanceCasesFuture;
+
   final Set<int> _processingViewingIds = <int>{};
+  final Set<int> _processingGovernanceCaseIds = <int>{};
 
   @override
   void initState() {
@@ -29,11 +33,15 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
 
   void _loadDashboard() {
     _dashboardFuture = PartnerDashboardService.instance.getDashboard();
+
+    _governanceCasesFuture = PartnerGovernanceService.instance
+        .fetchActiveCases();
   }
 
   Future<void> _refreshDashboard() async {
     setState(_loadDashboard);
-    await _dashboardFuture;
+
+    await Future.wait([_dashboardFuture, _governanceCasesFuture]);
   }
 
   Future<void> _logout() async {
@@ -283,17 +291,13 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
     );
   }
 
-  Future<void> _confirmPartnerOutcome(
-    PartnerDashboardViewing viewing,
-  ) async {
+  Future<void> _confirmPartnerOutcome(PartnerDashboardViewing viewing) async {
     final dealId = viewing.dealId;
 
     if (dealId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'No deal is linked to this completed viewing.',
-          ),
+          content: Text('No deal is linked to this completed viewing.'),
         ),
       );
       return;
@@ -302,19 +306,15 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
     if (viewing.partnerOutcomeSubmitted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Your property outcome has already been submitted.',
-          ),
+          content: Text('Your property outcome has already been submitted.'),
         ),
       );
       return;
     }
 
-    final isSale =
-        viewing.listingType.trim().toLowerCase() == 'sale';
+    final isSale = viewing.listingType.trim().toLowerCase() == 'sale';
 
-    final successOutcome =
-        isSale ? 'purchased' : 'rented';
+    final successOutcome = isSale ? 'purchased' : 'rented';
 
     final successLabel = isSale
         ? 'Customer bought this property'
@@ -322,27 +322,21 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
 
     String? selectedOutcome;
 
-    final shouldSubmit =
-        await showDialog<bool>(
+    final shouldSubmit = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text(
-                'Confirm property outcome',
-              ),
+              title: const Text('Confirm property outcome'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     viewing.propertyTitle,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 14),
                   RadioGroup<String>(
@@ -360,15 +354,11 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                         ),
                         RadioListTile<String>(
                           value: 'still_deciding',
-                          title: const Text(
-                            'Customer is still deciding',
-                          ),
+                          title: const Text('Customer is still deciding'),
                         ),
                         RadioListTile<String>(
                           value: 'declined',
-                          title: const Text(
-                            'Customer did not proceed',
-                          ),
+                          title: const Text('Customer did not proceed'),
                         ),
                       ],
                     ),
@@ -378,20 +368,14 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                     'This confirmation becomes part of '
                     'the permanent deal record and '
                     'cannot be changed after submission.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.black54,
-                    ),
+                    style: TextStyle(fontSize: 13, color: Colors.black54),
                   ),
                 ],
               ),
               actions: [
                 TextButton(
                   onPressed: () {
-                    Navigator.pop(
-                      dialogContext,
-                      false,
-                    );
+                    Navigator.pop(dialogContext, false);
                   },
                   child: const Text('Cancel'),
                 ),
@@ -399,10 +383,7 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                   onPressed: selectedOutcome == null
                       ? null
                       : () {
-                          Navigator.pop(
-                            dialogContext,
-                            true,
-                          );
+                          Navigator.pop(dialogContext, true);
                         },
                   child: const Text('Submit'),
                 ),
@@ -413,17 +394,13 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
       },
     );
 
-    if (
-        shouldSubmit != true ||
-        selectedOutcome == null ||
-        !mounted) {
+    if (shouldSubmit != true || selectedOutcome == null || !mounted) {
       return;
     }
 
     await _runViewingAction(
       viewingId: viewing.id,
-      successMessage:
-          'Property outcome submitted.',
+      successMessage: 'Property outcome submitted.',
       action: () async {
         await DealService.instance.submitPartnerOutcome(
           dealId: dealId,
@@ -640,6 +617,7 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
       await _refreshDashboard();
     }
   }
+
   Future<void> _openPostProperty() async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
@@ -733,8 +711,43 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
               children: [
                 _PartnerHeader(partner: dashboard.partner),
                 const SizedBox(height: 16),
+
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _governanceCasesFuture,
+                  builder: (context, governanceSnapshot) {
+                    if (governanceSnapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const SizedBox.shrink();
+                    }
+
+                    if (governanceSnapshot.hasError) {
+                      return const SizedBox.shrink();
+                    }
+
+                    final cases =
+                        governanceSnapshot.data ??
+                        const <Map<String, dynamic>>[];
+
+                    if (cases.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+
+                    return Column(
+                      children: [
+                        _PartnerGovernanceSection(
+                          cases: cases,
+                          processingCaseIds: _processingGovernanceCaseIds,
+                          onRequestReview: _requestGovernanceReview,
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    );
+                  },
+                ),
+
                 _SummarySection(summary: dashboard.summary),
                 const SizedBox(height: 24),
+
                 _QuickActionsSection(
                   propertyCount: dashboard.properties.length,
                   viewingCount: allViewings.length,
@@ -742,7 +755,7 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                   onPostProperty: _openPostProperty,
                   onBrowseProperties: _openBrowseProperties,
                 ),
-                
+
                 const SizedBox(height: 28),
                 _buildViewingSection(
                   title: 'Awaiting Your Response',
@@ -785,8 +798,290 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
     );
   }
 
+  Future<void> _requestGovernanceReview(
+    Map<String, dynamic> governanceCase,
+  ) async {
+    final caseId = _parseGovernanceInt(governanceCase['id']);
+
+    if (caseId <= 0) {
+      return;
+    }
+
+    if (_processingGovernanceCaseIds.contains(caseId)) {
+      return;
+    }
+
+    final propertyTitle =
+        governanceCase['property_title']?.toString().trim() ?? '';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Request governance review?'),
+          content: Text(
+            propertyTitle.isEmpty
+                ? 'Send this governance case to Pata Hao staff for review?'
+                : 'Send the governance issue for $propertyTitle '
+                      'to Pata Hao staff for review?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Request review'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _processingGovernanceCaseIds.add(caseId);
+    });
+
+    try {
+      await PartnerGovernanceService.instance.requestReview(caseId);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Governance review requested. '
+            'The case is now with Pata Hao staff.',
+          ),
+        ),
+      );
+
+      await _refreshDashboard();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _processingGovernanceCaseIds.remove(caseId);
+        });
+      }
+    }
+  }
+
+  int _parseGovernanceInt(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
   String _cleanError(Object? error) {
     return error.toString().replaceFirst('Exception: ', '').trim();
+  }
+}
+
+class _PartnerGovernanceSection extends StatelessWidget {
+  const _PartnerGovernanceSection({
+    required this.cases,
+    required this.processingCaseIds,
+    required this.onRequestReview,
+  });
+
+  final List<Map<String, dynamic>> cases;
+  final Set<int> processingCaseIds;
+
+  final Future<void> Function(Map<String, dynamic> governanceCase)
+  onRequestReview;
+
+  int _toInt(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  String _text(Map<String, dynamic> item, String key) {
+    return item[key]?.toString().trim() ?? '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Action Required',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFE4E6),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                cases.length.toString(),
+                style: const TextStyle(
+                  color: Color(0xFFBE123C),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        ...cases.map((governanceCase) {
+          final caseId = _toInt(governanceCase['id']);
+
+          final title = _text(governanceCase, 'title');
+
+          final propertyTitle = _text(governanceCase, 'property_title');
+
+          final dealNumber = _text(governanceCase, 'deal_number');
+
+          final message = _text(governanceCase, 'message');
+
+          final actionLabel = _text(governanceCase, 'action_label');
+
+          final processing = processingCaseIds.contains(caseId);
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Card(
+              elevation: 0,
+              color: const Color(0xFFFFF7ED),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: const BorderSide(color: Color(0xFFFDBA74)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.gpp_maybe_outlined,
+                          color: Color(0xFFC2410C),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            title.isEmpty
+                                ? 'Governance action required'
+                                : title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    if (propertyTitle.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        propertyTitle,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+
+                    if (dealNumber.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        dealNumber,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+
+                    if (message.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        message,
+                        style: const TextStyle(
+                          height: 1.4,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 14),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: processing || caseId <= 0
+                            ? null
+                            : () {
+                                onRequestReview(governanceCase);
+                              },
+                        icon: processing
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.rate_review_outlined),
+                        label: Text(
+                          processing
+                              ? 'Requesting review...'
+                              : actionLabel.isEmpty
+                              ? 'Request governance review'
+                              : actionLabel,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
   }
 }
 
@@ -1473,17 +1768,12 @@ class _ViewingCard extends StatelessWidget {
                   ),
                   child: const Row(
                     children: [
-                      Icon(
-                        Icons.check_circle_outline,
-                        color: Colors.green,
-                      ),
+                      Icon(Icons.check_circle_outline, color: Colors.green),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Property outcome submitted.',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],

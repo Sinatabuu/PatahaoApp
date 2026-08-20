@@ -106,7 +106,7 @@ class NotificationService {
     final decoded = _decode(response.body);
 
     if (response.statusCode == 200 && decoded is Map) {
-      final value = decoded['updated_count'];
+      final value = decoded['updated'] ?? decoded['updated_count'];
       if (value is int) return value;
       return int.tryParse(value?.toString() ?? '') ?? 0;
     }

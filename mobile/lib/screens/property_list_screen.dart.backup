@@ -1,0 +1,1380 @@
+import 'package:flutter/material.dart';
+
+import 'package:mobile/models/property.dart';
+import 'package:mobile/screens/my_viewings_screen.dart';
+import 'package:mobile/screens/property_detail_screen.dart';
+import 'package:mobile/services/property_service.dart';
+import 'package:mobile/services/favorite_service.dart';
+import '../models/property_type_option.dart';
+import '../widgets/pata_hao_network_image.dart';
+import 'package:mobile/screens/saved_properties_screen.dart';
+import 'package:mobile/screens/customer_profile_screen.dart';
+
+
+class PropertyListScreen extends StatefulWidget {
+  const PropertyListScreen({super.key, this.onLogout});
+
+  final Future<void> Function()? onLogout;
+
+  @override
+  State<PropertyListScreen> createState() => _PropertyListScreenState();
+}
+
+class _PropertyListScreenState extends State<PropertyListScreen> {
+  final PropertyService _propertyService = PropertyService();
+  final TextEditingController _searchController = TextEditingController();
+
+  String _selectedListingType = 'all';
+  String _selectedPropertyType = 'all';
+  int? _selectedBedrooms;
+  double? _minimumPrice;
+  double? _maximumPrice;
+  bool _verifiedOnly = false;
+  late Future<List<Property>> _propertiesFuture;
+  late Future<List<PropertyTypeOption>> _propertyTypesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProperties();
+    _loadPropertyTypes();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _loadProperties() {
+    _propertiesFuture = _propertyService.fetchProperties();
+  }
+
+  void _loadPropertyTypes() {
+    _propertyTypesFuture = _propertyService.fetchPropertyTypes();
+  }
+
+  Future<void> _refreshProperties() async {
+    setState(_loadProperties);
+    await _propertiesFuture;
+  }
+
+  String _normalizePropertyType(String value) {
+    final normalized = value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+
+    switch (normalized) {
+      case 'studio':
+      case 'bedsitter':
+      case 'studio_bedsitter':
+      case 'bedsitter_studio':
+        return 'studio';
+
+      case 'flat':
+      case 'apartment':
+        return 'apartment';
+
+      default:
+        return normalized;
+    }
+  }
+
+  List<Property> _filterProperties(List<Property> properties) {
+    final query = _searchController.text.trim().toLowerCase();
+
+    return properties.where((property) {
+      final locationMatches =
+          query.isEmpty ||
+          property.title.toLowerCase().contains(query) ||
+          property.estate.toLowerCase().contains(query) ||
+          property.town.toLowerCase().contains(query) ||
+          property.county.toLowerCase().contains(query);
+
+      final listingTypeMatches =
+          _selectedListingType == 'all' ||
+          property.listingType.trim().toLowerCase() ==
+              _selectedListingType.trim().toLowerCase();
+      final normalizedPropertyType = _normalizePropertyType(
+        property.propertyType,
+      );
+
+      final normalizedSelectedPropertyType = _normalizePropertyType(
+        _selectedPropertyType,
+      );
+
+      final propertyTypeMatches =
+          normalizedSelectedPropertyType == 'all' ||
+          normalizedPropertyType == normalizedSelectedPropertyType;
+      // Bedroom filtering does not apply to studios/bedsitters.
+      final bedroomsMatch =
+          normalizedSelectedPropertyType == 'studio' ||
+          _selectedBedrooms == null ||
+          (_selectedBedrooms == 4
+              ? property.bedrooms >= 4
+              : property.bedrooms == _selectedBedrooms);
+
+      final numericPrice = double.tryParse(property.price);
+
+      final minimumPriceMatches =
+          _minimumPrice == null ||
+          (numericPrice != null && numericPrice >= _minimumPrice!);
+
+      final maximumPriceMatches =
+          _maximumPrice == null ||
+          (numericPrice != null && numericPrice <= _maximumPrice!);
+
+      final verifiedMatches = !_verifiedOnly || property.isVerified;
+
+      return locationMatches &&
+          listingTypeMatches &&
+          propertyTypeMatches &&
+          bedroomsMatch &&
+          minimumPriceMatches &&
+          maximumPriceMatches &&
+          verifiedMatches;
+    }).toList();
+  }
+
+  int get _activeFilterCount {
+    var count = 0;
+
+    if (_selectedListingType != 'all') {
+      count++;
+    }
+    if (_selectedPropertyType != 'all') {
+      count++;
+    }
+    if (_selectedBedrooms != null) {
+      count++;
+    }
+    if (_minimumPrice != null || _maximumPrice != null) {
+      count++;
+    }
+    if (_verifiedOnly) {
+      count++;
+    }
+
+    return count;
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchController.clear();
+      _selectedListingType = 'all';
+      _selectedPropertyType = 'all';
+      _selectedBedrooms = null;
+      _minimumPrice = null;
+      _maximumPrice = null;
+      _verifiedOnly = false;
+    });
+  }
+
+  void _openSavedProperties() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SavedPropertiesScreen()),
+    );
+  }
+
+  void _openMyViewings() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const MyViewingsScreen()));
+  }
+  void _openProfile() {
+    if (widget.onLogout == null) {
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CustomerProfileScreen(
+          onLogout: widget.onLogout!,
+        ),
+      ),
+    );
+  }
+
+  String _formatPrice(Property property) {
+    final amount = double.tryParse(property.price);
+
+    final formattedAmount = amount == null
+        ? property.price
+        : amount
+              .toStringAsFixed(0)
+              .replaceAllMapped(
+                RegExp(r'\B(?=(\d{3})+(?!\d))'),
+                (match) => ',',
+              );
+
+    if (property.listingType == 'rent') {
+      return 'KES $formattedAmount / month';
+    }
+
+    return 'KES $formattedAmount';
+  }
+
+  String _location(Property property) {
+    return [
+      property.estate,
+      property.town,
+      property.county,
+    ].where((value) => value.trim().isNotEmpty).join(', ');
+  }
+
+  String _mediaUrl(Property property) {
+    final media = property.coverMediaUrl?.trim() ?? '';
+
+    if (media.isEmpty) {
+      return '';
+    }
+
+    if (media.startsWith('http')) {
+      return media;
+    }
+
+    return '${PropertyService.baseUrl}$media';
+  }
+
+  Future<void> _openFilters() async {
+    String temporaryListingType = _selectedListingType;
+    String temporaryPropertyType = _selectedPropertyType;
+    int? temporaryBedrooms = _selectedBedrooms;
+    bool temporaryVerifiedOnly = _verifiedOnly;
+
+    final minimumPriceController = TextEditingController(
+      text: _minimumPrice?.toStringAsFixed(0) ?? '',
+    );
+
+    final maximumPriceController = TextEditingController(
+      text: _maximumPrice?.toStringAsFixed(0) ?? '',
+    );
+
+    List<PropertyTypeOption> propertyTypes;
+
+    try {
+      propertyTypes = await _propertyTypesFuture;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load property types. Please try again.'),
+        ),
+      );
+
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    final shouldApply = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  0,
+                  20,
+                  20 + MediaQuery.of(context).viewInsets.bottom,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Find the right home',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Choose only what matters to you.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'I want to',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment<String>(
+                            value: 'all',
+                            label: Text('Any'),
+                          ),
+                          ButtonSegment<String>(
+                            value: 'rent',
+                            label: Text('Rent'),
+                            icon: Icon(Icons.key_outlined),
+                          ),
+                          ButtonSegment<String>(
+                            value: 'sale',
+                            label: Text('Buy'),
+                            icon: Icon(Icons.home_outlined),
+                          ),
+                        ],
+                        selected: {temporaryListingType},
+                        onSelectionChanged: (selection) {
+                          setModalState(() {
+                            temporaryListingType = selection.first;
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'Property type',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: temporaryPropertyType,
+                        decoration: const InputDecoration(
+                          labelText: 'Property type',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String>(
+                            value: 'all',
+                            child: Text('Any property type'),
+                          ),
+                          ...propertyTypes.map(
+                            (type) => DropdownMenuItem<String>(
+                              value: type.value,
+                              child: Text(type.label),
+                            ),
+                          ),
+                        ],
+                        onChanged: (String? value) {
+                          setModalState(() {
+                            temporaryPropertyType = value ?? 'all';
+
+                            if (temporaryPropertyType == 'studio') {
+                              temporaryBedrooms = null;
+                            }
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'Monthly budget or purchase price',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: minimumPriceController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Minimum',
+                                prefixText: 'KES ',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: maximumPriceController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Maximum',
+                                prefixText: 'KES ',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'Bedrooms',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Any'),
+                            selected: temporaryBedrooms == null,
+                            onSelected: (_) {
+                              setModalState(() {
+                                temporaryBedrooms = null;
+                              });
+                            },
+                          ),
+                          for (final bedrooms in [1, 2, 3, 4])
+                            ChoiceChip(
+                              label: Text(bedrooms == 4 ? '4+' : '$bedrooms'),
+                              selected: temporaryBedrooms == bedrooms,
+                              onSelected: (_) {
+                                setModalState(() {
+                                  temporaryBedrooms = bedrooms;
+                                });
+                              },
+                            ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: temporaryVerifiedOnly,
+                        title: const Text('Verified properties only'),
+                        subtitle: const Text(
+                          'Show listings checked by Pata Hao.',
+                        ),
+                        secondary: const Icon(
+                          Icons.verified_outlined,
+                          color: Color(0xFF34AD2C),
+                        ),
+                        onChanged: (value) {
+                          setModalState(() {
+                            temporaryVerifiedOnly = value;
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                setModalState(() {
+                                  temporaryListingType = 'all';
+                                  temporaryPropertyType = 'all';
+                                  temporaryBedrooms = null;
+                                  temporaryVerifiedOnly = false;
+                                  minimumPriceController.clear();
+                                  maximumPriceController.clear();
+                                });
+                              },
+                              child: const Text('Reset'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: FilledButton(
+                              onPressed: () {
+                                Navigator.pop(context, true);
+                              },
+                              child: const Text('Show Properties'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted) {
+      minimumPriceController.dispose();
+      maximumPriceController.dispose();
+      return;
+    }
+
+    if (shouldApply == true) {
+      setState(() {
+        _selectedListingType = temporaryListingType;
+        _selectedPropertyType = temporaryPropertyType;
+        _selectedBedrooms = temporaryBedrooms;
+        _verifiedOnly = temporaryVerifiedOnly;
+
+        _minimumPrice = double.tryParse(
+          minimumPriceController.text.replaceAll(',', '').trim(),
+        );
+
+        _maximumPrice = double.tryParse(
+          maximumPriceController.text.replaceAll(',', '').trim(),
+        );
+      });
+    }
+
+    minimumPriceController.dispose();
+    maximumPriceController.dispose();
+  }
+
+  Future<void> _showLogoutDialog() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Log out'),
+          content: const Text('Are you sure you want to log out of Pata Hao?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
+              child: const Text('Log out'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldLogout == true && widget.onLogout != null) {
+      await widget.onLogout!();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Pata Hao'),
+      ),
+      body: FutureBuilder<List<Property>>(
+        future: _propertiesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.cloud_off,
+                      size: 52,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Could not load properties',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      snapshot.error.toString(),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(_loadProperties);
+                      },
+                      icon: const Icon(
+                        Icons.refresh,
+                      ),
+                      label: const Text(
+                        'Try Again',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          final properties =
+              snapshot.data ?? <Property>[];
+
+          final filteredProperties =
+              _filterProperties(properties);
+
+          if (properties.isEmpty) {
+            return RefreshIndicator(
+              onRefresh: _refreshProperties,
+              child: ListView(
+                physics:
+                    const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(height: 180),
+                  Icon(
+                    Icons.home_work_outlined,
+                    size: 60,
+                  ),
+                  SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      'No properties are available yet.',
+                      style: TextStyle(
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: _refreshProperties,
+            child: CustomScrollView(
+              physics:
+                  const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _PropertySearchHeader(
+                    controller: _searchController,
+                    selectedListingType:
+                        _selectedListingType,
+                    activeFilterCount:
+                        _activeFilterCount,
+                    resultCount:
+                        filteredProperties.length,
+                    onSearchChanged: (_) {
+                      setState(() {});
+                    },
+                    onListingTypeChanged: (value) {
+                      setState(() {
+                        _selectedListingType = value;
+                      });
+                    },
+                    onOpenFilters: _openFilters,
+                    onClearFilters: _clearFilters,
+                  ),
+                ),
+
+                if (filteredProperties.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _NoMatchingProperties(
+                      onClearFilters:
+                          _clearFilters,
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding:
+                        const EdgeInsets.fromLTRB(
+                      16,
+                      0,
+                      16,
+                      24,
+                    ),
+                    sliver: SliverList(
+                      delegate:
+                          SliverChildBuilderDelegate(
+                        (context, index) {
+                          final property =
+                              filteredProperties[index];
+
+                          return _PropertyCard(
+                            property: property,
+                            mediaUrl:
+                                _mediaUrl(property),
+                            location:
+                                _location(property),
+                            price:
+                                _formatPrice(property),
+                          );
+                        },
+                        childCount:
+                            filteredProperties.length,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+      bottomNavigationBar: widget.onLogout == null
+          ? null
+          : NavigationBar(
+              selectedIndex: 0,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.home_outlined,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.home,
+                  ),
+                  label: 'Home',
+                ),
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.favorite_border,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.favorite,
+                  ),
+                  label: 'Saved',
+                ),
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.calendar_month_outlined,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.calendar_month,
+                  ),
+                  label: 'Viewings',
+                ),
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.person_outline,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.person,
+                  ),
+                  label: 'Profile',
+                ),
+              ],
+              onDestinationSelected: (index) {
+                switch (index) {
+                  case 0:
+                    break;
+
+                  case 1:
+                    _openSavedProperties();
+                    break;
+
+                  case 2:
+                    _openMyViewings();
+                    break;
+
+                  case 3:
+                    _openProfile();
+                    break;
+                }
+              },
+            ),
+    );
+  }
+          final properties = snapshot.data ?? <Property>[];
+          final filteredProperties = _filterProperties(properties);
+
+          if (properties.isEmpty) {
+            return RefreshIndicator(
+              onRefresh: _refreshProperties,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(height: 180),
+                  Icon(Icons.home_work_outlined, size: 60),
+                  SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      'No properties are available yet.',
+                      style: TextStyle(fontSize: 18),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: _refreshProperties,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _PropertySearchHeader(
+                    controller: _searchController,
+                    selectedListingType: _selectedListingType,
+                    activeFilterCount: _activeFilterCount,
+                    resultCount: filteredProperties.length,
+                    onSearchChanged: (_) {
+                      setState(() {});
+                    },
+                    onListingTypeChanged: (value) {
+                      setState(() {
+                        _selectedListingType = value;
+                      });
+                    },
+                    onOpenFilters: _openFilters,
+                    onClearFilters: _clearFilters,
+                  ),
+                ),
+
+                if (filteredProperties.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _NoMatchingProperties(onClearFilters: _clearFilters),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final property = filteredProperties[index];
+
+                        return _PropertyCard(
+                          property: property,
+                          mediaUrl: _mediaUrl(property),
+                          location: _location(property),
+                          price: _formatPrice(property),
+                        );
+                      }, childCount: filteredProperties.length),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PropertySearchHeader extends StatelessWidget {
+  const _PropertySearchHeader({
+    required this.controller,
+    required this.selectedListingType,
+    required this.activeFilterCount,
+    required this.resultCount,
+    required this.onSearchChanged,
+    required this.onListingTypeChanged,
+    required this.onOpenFilters,
+    required this.onClearFilters,
+  });
+
+  final TextEditingController controller;
+  final String selectedListingType;
+  final int activeFilterCount;
+  final int resultCount;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onListingTypeChanged;
+  final VoidCallback onOpenFilters;
+  final VoidCallback onClearFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSearch = controller.text.trim().isNotEmpty;
+    final hasFilters = activeFilterCount > 0 || hasSearch;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Find a place that feels like home',
+            style: TextStyle(
+              fontSize: 25,
+              fontWeight: FontWeight.bold,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Search by area, town, county, or property name.',
+            style: TextStyle(
+              fontSize: 15,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          TextField(
+            controller: controller,
+            onChanged: onSearchChanged,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Try Roysambu, Zimmerman, Kasarani...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: hasSearch
+                  ? IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        controller.clear();
+                        onSearchChanged('');
+                      },
+                      icon: const Icon(Icons.close),
+                    )
+                  : null,
+              filled: true,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          Row(
+            children: [
+              Expanded(
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment<String>(value: 'all', label: Text('All')),
+                    ButtonSegment<String>(value: 'rent', label: Text('Rent')),
+                    ButtonSegment<String>(value: 'sale', label: Text('Buy')),
+                  ],
+                  selected: {selectedListingType},
+                  onSelectionChanged: (selection) {
+                    onListingTypeChanged(selection.first);
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Badge(
+                isLabelVisible: activeFilterCount > 0,
+                label: Text('$activeFilterCount'),
+                child: IconButton.filledTonal(
+                  tooltip: 'More filters',
+
+                  onPressed: onOpenFilters,
+                  icon: const Icon(Icons.tune),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 18),
+
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  resultCount == 1
+                      ? '1 home found'
+                      : '$resultCount homes found',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (hasFilters)
+                TextButton(
+                  onPressed: onClearFilters,
+                  child: const Text('Clear all'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoMatchingProperties extends StatelessWidget {
+  const _NoMatchingProperties({required this.onClearFilters});
+
+  final VoidCallback onClearFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.search_off_outlined,
+              size: 68,
+              color: Color(0xFF34AD2C),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'No homes match your search',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Try another location, increase your budget, '
+              'or remove one of the filters.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: onClearFilters,
+              icon: const Icon(Icons.refresh),
+              label: const Text('See all properties'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PropertyCard extends StatefulWidget {
+  const _PropertyCard({
+    required this.property,
+    required this.mediaUrl,
+    required this.location,
+    required this.price,
+  });
+
+  final Property property;
+  final String mediaUrl;
+  final String location;
+  final String price;
+
+  @override
+  State<_PropertyCard> createState() => _PropertyCardState();
+}
+
+class _PropertyCardState extends State<_PropertyCard> {
+  late Property _property;
+  bool _isUpdatingFavorite = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _property = widget.property;
+  }
+
+  @override
+  void didUpdateWidget(covariant _PropertyCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.property.id != widget.property.id ||
+        oldWidget.property.isFavorite != widget.property.isFavorite ||
+        oldWidget.property.favoriteId != widget.property.favoriteId) {
+      _property = widget.property;
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    if (_isUpdatingFavorite) {
+      return;
+    }
+
+    final previousProperty = _property;
+    final wasFavorite = previousProperty.isFavorite;
+    final favoriteId = previousProperty.favoriteId;
+
+    if (wasFavorite && favoriteId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This saved property is missing its favorite reference. '
+            'Refresh the property list and try again.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isUpdatingFavorite = true;
+      _property = previousProperty.copyWith(
+        isFavorite: !wasFavorite,
+        clearFavoriteId: wasFavorite,
+      );
+    });
+
+    try {
+      if (wasFavorite) {
+        await FavoriteService.instance.removeFavorite(favoriteId: favoriteId!);
+      } else {
+        final favorite = await FavoriteService.instance.saveProperty(
+          propertyId: previousProperty.id,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _property = _property.copyWith(
+            isFavorite: true,
+            favoriteId: favorite.id,
+          );
+        });
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            wasFavorite ? 'Removed from saved properties.' : 'Property saved.',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _property = previousProperty;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdatingFavorite = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 20),
+      clipBehavior: Clip.antiAlias,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: InkWell(
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => PropertyDetailScreen(property: _property),
+            ),
+          );
+
+          if (!mounted) {
+            return;
+          }
+
+          // Reload so changes made on the details screen are reflected here.
+          // This remains harmless until the details-screen heart is connected.
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                SizedBox(
+                  height: 220,
+                  width: double.infinity,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      PataHaoNetworkImage(
+                        imageUrl: widget.mediaUrl.isEmpty
+                            ? null
+                            : widget.mediaUrl,
+                        width: double.infinity,
+                        height: 220,
+                        fit: BoxFit.cover,
+                        cacheWidth: 900,
+                      ),
+                      if (_property.hasVideo)
+                        const Center(
+                          child: CircleAvatar(
+                            radius: 30,
+                            backgroundColor: Colors.black54,
+                            child: Icon(
+                              Icons.play_arrow_rounded,
+                              size: 42,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      if (_property.hasVideo)
+                        Positioned(
+                          left: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.videocam_rounded,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                                SizedBox(width: 5),
+                                Text(
+                                  'Video',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF34AD2C),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _property.listingType == 'rent' ? 'For Rent' : 'For Sale',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: CircleAvatar(
+                    backgroundColor: Colors.white,
+                    child: _isUpdatingFavorite
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            tooltip: _property.isFavorite
+                                ? 'Remove from saved properties'
+                                : 'Save property',
+                            icon: Icon(
+                              _property.isFavorite
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              color: _property.isFavorite
+                                  ? Colors.red
+                                  : const Color(0xFF34AD2C),
+                            ),
+                            onPressed: _toggleFavorite,
+                          ),
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _property.title,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (_property.trustBadge != 'none')
+                        const Icon(Icons.verified, color: Color(0xFF34AD2C)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        size: 18,
+                        color: Colors.black54,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          widget.location,
+                          style: const TextStyle(color: Colors.black54),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Icon(Icons.bed_outlined, size: 20),
+                      const SizedBox(width: 5),
+                      Text('${_property.bedrooms} beds'),
+                      const SizedBox(width: 20),
+                      const Icon(Icons.bathtub_outlined, size: 20),
+                      const SizedBox(width: 5),
+                      Text('${_property.bathrooms} baths'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    widget.price,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF34AD2C),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

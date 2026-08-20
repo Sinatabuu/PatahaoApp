@@ -7,6 +7,7 @@ import '../widgets/pata_hao_network_image.dart';
 import 'package:mobile/screens/login_screen.dart';
 import 'package:mobile/services/auth_service.dart';
 import 'package:mobile/screens/add_phone_number_screen.dart';
+import 'package:mobile/screens/property_photo_viewer_screen.dart';
 
 class PropertyDetailScreen extends StatelessWidget {
   final Property property;
@@ -241,6 +242,30 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
+  void _openPhotoViewer(BuildContext context, int photoIndex) {
+    final imageUrls = property.photos
+        .map((photo) => _mediaUrl(photo.image))
+        .toList();
+
+    if (imageUrls.isEmpty) {
+      return;
+    }
+
+    final safeIndex = photoIndex.clamp(0, imageUrls.length - 1);
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) {
+          return PropertyPhotoViewerScreen(
+            imageUrls: imageUrls,
+            initialIndex: safeIndex,
+            title: property.title,
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildPhotoGallery(BuildContext context) {
     PropertyVideo? video;
 
@@ -303,12 +328,14 @@ class PropertyDetailScreen extends StatelessWidget {
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => PropertyVideoScreen(
-                            videoUrl: videoUrl,
-                            title: currentVideo.title.trim().isEmpty
-                                ? property.title
-                                : currentVideo.title,
-                          ),
+                          builder: (_) {
+                            return PropertyVideoScreen(
+                              videoUrl: videoUrl,
+                              title: currentVideo.title.trim().isEmpty
+                                  ? property.title
+                                  : currentVideo.title,
+                            );
+                          },
                         ),
                       );
                     },
@@ -385,22 +412,32 @@ class PropertyDetailScreen extends StatelessWidget {
           }
 
           final photoIndex = hasVideo ? index - 1 : index;
+
           final photo = property.photos[photoIndex];
 
           return Stack(
             fit: StackFit.expand,
             children: [
-              PataHaoNetworkImage(
-                imageUrl: _mediaUrl(photo.image),
-                width: double.infinity,
-                height: 260,
-                fit: BoxFit.cover,
-                cacheWidth: 1400,
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    _openPhotoViewer(context, photoIndex);
+                  },
+                  child: PataHaoNetworkImage(
+                    imageUrl: _mediaUrl(photo.image),
+                    width: double.infinity,
+                    height: 260,
+                    fit: BoxFit.cover,
+                    cacheWidth: 1400,
+                  ),
+                ),
               ),
-              if (totalMediaItems > 1)
-                Positioned(
-                  right: 14,
-                  bottom: 14,
+
+              Positioned(
+                left: 14,
+                bottom: 14,
+                child: IgnorePointer(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -410,11 +447,50 @@ class PropertyDetailScreen extends StatelessWidget {
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      '${index + 1} of $totalMediaItems',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.zoom_in_outlined,
+                          color: Colors.white,
+                          size: 17,
+                        ),
+                        SizedBox(width: 5),
+                        Text(
+                          'Tap to view',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              if (totalMediaItems > 1)
+                Positioned(
+                  right: 14,
+                  bottom: 14,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${index + 1} of '
+                        '$totalMediaItems',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
