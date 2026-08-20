@@ -546,3 +546,147 @@ class PartnerReinstatement(models.Model):
             f"{self.partner} reinstated "
             f"{self.reinstated_at:%Y-%m-%d %H:%M}"
         )
+
+class DealGovernanceCase(models.Model):
+    """
+    Operational governance case raised when a deal cannot
+    safely progress.
+
+    This model answers:
+    - What is blocking the deal?
+    - Whose action is required?
+    - What action is required?
+    - Has the issue been resolved?
+
+    A governance case is not automatically a policy violation.
+    """
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        RESOLVED = "resolved", "Resolved"
+        DISMISSED = "dismissed", "Dismissed"
+
+    class ResponsibleRole(models.TextChoices):
+        PARTNER = "partner", "Partner"
+        STAFF = "staff", "Pata Hao staff"
+        OWNER = "owner", "Property owner"
+        CUSTOMER = "customer", "Customer"
+
+    deal = models.ForeignKey(
+        "deals.Deal",
+        on_delete=models.PROTECT,
+        related_name="governance_cases",
+    )
+
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.PROTECT,
+        related_name="deal_governance_cases",
+        null=True,
+        blank=True,
+    )
+
+    reason_code = models.CharField(
+        max_length=80,
+        db_index=True,
+    )
+
+    title = models.CharField(
+        max_length=255,
+    )
+
+    message = models.TextField()
+
+    responsible_role = models.CharField(
+        max_length=20,
+        choices=ResponsibleRole.choices,
+        db_index=True,
+    )
+
+    action_code = models.CharField(
+        max_length=80,
+    )
+
+    action_label = models.CharField(
+        max_length=160,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.OPEN,
+        db_index=True,
+    )
+
+    context_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_deal_governance_cases",
+        null=True,
+        blank=True,
+    )
+
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="resolved_deal_governance_cases",
+        null=True,
+        blank=True,
+    )
+
+    resolution_notes = models.TextField(
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-created_at",
+            "-id",
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "status",
+                    "responsible_role",
+                    "-created_at",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "deal",
+                    "status",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "partner",
+                    "status",
+                ],
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.deal.deal_number} — "
+            f"{self.reason_code} — "
+            f"{self.get_status_display()}"
+        )

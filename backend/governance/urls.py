@@ -8,9 +8,23 @@ from .views import (
     MyPartnerCapacityView,
     PropertyReviewDetailView,
     PropertyReviewListView,
+    PartnerDealGovernanceCaseDetailView,
+    PartnerDealGovernanceCaseListView,
+    PartnerRequestGovernanceReviewView,
     PublishPropertyReviewView,
     ReturnPropertyToPartnerReviewView,
     VerifyCommissionReviewView,
+    StaffDealGovernanceCaseListView,
+    StaffDealGovernanceCaseDecisionView,
+    
+)
+from .services import (
+    enforce_partner_operational_access,
+    request_deal_governance_review,
+    staff_decide_deal_governance_case,
+)
+from .serializers import (
+    StaffDealGovernanceDecisionSerializer,
 )
 
 urlpatterns = [
@@ -59,4 +73,31 @@ urlpatterns = [
         ReturnPropertyToPartnerReviewView.as_view(),
         name="governance-property-review-return-to-partner",
     ),
+    path(
+        "partner/governance-cases/<int:case_id>/",
+        PartnerDealGovernanceCaseDetailView.as_view(),
+        name="partner-governance-case-detail",
+    ),
+    path(
+        "partner/governance-cases/<int:case_id>/request-review/",
+        PartnerRequestGovernanceReviewView.as_view(),
+        name="partner-governance-case-request-review",
+    ),
+    path(
+        "partner/governance-cases/",
+        PartnerDealGovernanceCaseListView.as_view(),
+        name="partner-governance-case-list",
+    ),
+    path(
+        "admin/governance-cases/",
+        StaffDealGovernanceCaseListView.as_view(),
+        name="staff-deal-governance-case-list",
+    ),
+
+    path(
+        "admin/governance-cases/<int:case_id>/decision/",
+        StaffDealGovernanceCaseDecisionView.as_view(),
+        name="staff-deal-governance-case-decision",
+    ),
+
 ]

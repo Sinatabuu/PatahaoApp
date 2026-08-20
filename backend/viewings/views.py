@@ -26,6 +26,7 @@ from .models import (
 from .serializers import (
     ViewingBookingCreateSerializer,
     ViewingBookingSerializer,
+    ViewingEventSerializer,
     ViewingSerializer,
 )
 
@@ -36,6 +37,9 @@ from rest_framework.views import APIView
 from .models import Viewing, ViewingFeedback
 from .serializers import ViewingFeedbackSerializer
 from properties.models import PropertyPartner
+from deals.services import (
+    create_deal_from_viewing,
+)
 
 def choose_participation_for_property(property_obj):
     """
@@ -989,6 +993,10 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 actor=request.user,
             )
         )
+        deal, deal_created = create_deal_from_viewing(
+            viewing=viewing,
+            actor=request.user,
+        )
 
         ActivityLog.objects.create(
             actor=request.user,
@@ -999,7 +1007,9 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 f"Viewing completed at "
                 f"{viewing.property.title}; "
                 f"PIC {introduction.certificate_number} "
-                f"{'created' if introduction_created else 'reused'}."
+                f"{'created' if introduction_created else 'reused'}; "
+                f"deal {deal.deal_number} "
+                f"{'created' if deal_created else 'reused'}."
             ),
         )
 
@@ -1030,7 +1040,271 @@ class ViewingViewSet(viewsets.ModelViewSet):
                         introduction.protection_period_days
                     ),
                 },
+
+                "deal": {
+                    "id": deal.id,
+                    "deal_number": deal.deal_number,
+                    "created": deal_created,
+                    "status": deal.status,
+                    "deal_type": deal.deal_type,
+                    "customer_id": deal.customer_id,
+                    "partner_id": deal.partner_id,
+                    "property_id": deal.property_id,
+                    "commission_amount": (
+                        deal.commission_amount
+                    ),
+                },
                 "viewing": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class AdminViewingListView(APIView):
+    """
+    Staff-only viewing operations list.
+
+    Supports:
+    - search
+    - status filter
+    - date scope
+    - pagination
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "viewing operations."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        search = request.query_params.get(
+            "search",
+            "",
+        ).strip()
+
+        requested_status = request.query_params.get(
+            "status",
+            "",
+        ).strip()
+
+        date_scope = request.query_params.get(
+            "date_scope",
+            "",
+        ).strip().lower()
+
+        try:
+            page = int(
+                request.query_params.get(
+                    "page",
+                    "1",
+                )
+            )
+        except ValueError:
+            page = 1
+
+        try:
+            page_size = int(
+                request.query_params.get(
+                    "page_size",
+                    "50",
+                )
+            )
+        except ValueError:
+            page_size = 50
+
+        page = max(page, 1)
+
+        page_size = max(
+            1,
+            min(page_size, 100),
+        )
+
+        queryset = (
+            Viewing.objects
+            .select_related(
+                "customer",
+                "property",
+                "assigned_partner",
+                "assigned_partner__user",
+            )
+            .prefetch_related(
+                "events",
+            )
+            .order_by(
+                "-created_at",
+                "-id",
+            )
+        )
+
+        if search:
+            queryset = queryset.filter(
+                Q(
+                    customer__username__icontains=search,
+                )
+                | Q(
+                    customer__email__icontains=search,
+                )
+                | Q(
+                    customer__full_name__icontains=search,
+                )
+                | Q(
+                    property__title__icontains=search,
+                )
+                | Q(
+                    assigned_partner__display_name__icontains=search,
+                )
+                | Q(
+                    assigned_partner__business_name__icontains=search,
+                )
+                | Q(
+                    payment_reference__icontains=search,
+                )
+            )
+
+        if requested_status:
+            queryset = queryset.filter(
+                status=requested_status,
+            )
+
+        today = timezone.localdate()
+
+        if date_scope == "today":
+            queryset = queryset.filter(
+                requested_date=today,
+            )
+
+        elif date_scope == "upcoming":
+            queryset = queryset.filter(
+                requested_date__gt=today,
+            )
+
+        elif date_scope == "past":
+            queryset = queryset.filter(
+                requested_date__lt=today,
+            )
+
+        total_count = queryset.count()
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        page_items = queryset[
+            start:end
+        ]
+
+        serializer = ViewingSerializer(
+            page_items,
+            many=True,
+            context={
+                "request": request,
+            },
+        )
+
+        total_pages = (
+            total_count + page_size - 1
+        ) // page_size
+
+        return Response(
+            {
+                "count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_previous": page > 1,
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class AdminViewingDetailView(APIView):
+    """
+    Staff-only viewing operational detail.
+
+    Includes the immutable ViewingEvent timeline.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request, viewing_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "viewing details."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        viewing = (
+            Viewing.objects
+            .select_related(
+                "customer",
+                "property",
+                "assigned_partner",
+                "assigned_partner__user",
+            )
+            .prefetch_related(
+                "events",
+                "events__actor",
+            )
+            .filter(
+                pk=viewing_id,
+            )
+            .first()
+        )
+
+        if viewing is None:
+            return Response(
+                {
+                    "detail": "Viewing not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        viewing_data = ViewingSerializer(
+            viewing,
+            context={
+                "request": request,
+            },
+        ).data
+
+        events = (
+            viewing.events
+            .select_related(
+                "actor",
+            )
+            .order_by(
+                "created_at",
+                "id",
+            )
+        )
+
+        event_data = ViewingEventSerializer(
+            events,
+            many=True,
+            context={
+                "request": request,
+            },
+        ).data
+
+        return Response(
+            {
+                "viewing": viewing_data,
+                "events": event_data,
             },
             status=status.HTTP_200_OK,
         )

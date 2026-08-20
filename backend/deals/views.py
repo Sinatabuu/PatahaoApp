@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-
+from django.db.models import Q
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -20,10 +20,13 @@ from .serializers import (
 from .services import (
     build_deal_timeline,
     evaluate_deal_outcomes,
+    evaluate_owner_confirmation_governance,
     issue_owner_confirmation_token,
     submit_owner_outcome,
 )
-
+from governance.services import (
+    raise_deal_governance_case,
+)
 
 class DealViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -440,6 +443,318 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
+class AdminDealListView(APIView):
+    """
+    Staff-only scalable deal operations list.
+
+    Supports:
+    - search
+    - status filter
+    - deal type filter
+    - pagination
+
+    Existing /api/deals/ behaviour is intentionally
+    left unchanged for customers and partners.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "deal operations."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        search = request.query_params.get(
+            "search",
+            "",
+        ).strip()
+
+        requested_status = request.query_params.get(
+            "status",
+            "",
+        ).strip()
+
+        deal_type = request.query_params.get(
+            "deal_type",
+            "",
+        ).strip()
+
+        try:
+            page = int(
+                request.query_params.get(
+                    "page",
+                    "1",
+                )
+            )
+        except ValueError:
+            page = 1
+
+        try:
+            page_size = int(
+                request.query_params.get(
+                    "page_size",
+                    "50",
+                )
+            )
+        except ValueError:
+            page_size = 50
+
+        page = max(page, 1)
+
+        page_size = max(
+            1,
+            min(page_size, 100),
+        )
+
+        queryset = (
+            Deal.objects
+            .select_related(
+                "customer",
+                "partner",
+                "partner__user",
+                "property",
+                "viewing",
+            )
+            .prefetch_related(
+                "outcomes",
+            )
+            .order_by(
+                "-created_at",
+                "-id",
+            )
+        )
+
+        if search:
+            queryset = queryset.filter(
+                Q(
+                    deal_number__icontains=search,
+                )
+                | Q(
+                    property__title__icontains=search,
+                )
+                | Q(
+                    customer__username__icontains=search,
+                )
+                | Q(
+                    customer__email__icontains=search,
+                )
+                | Q(
+                    customer__full_name__icontains=search,
+                )
+                | Q(
+                    partner__display_name__icontains=search,
+                )
+                | Q(
+                    partner__business_name__icontains=search,
+                )
+            )
+
+        if requested_status:
+            queryset = queryset.filter(
+                status=requested_status,
+            )
+
+        if deal_type:
+            queryset = queryset.filter(
+                deal_type=deal_type,
+            )
+
+        total_count = queryset.count()
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        page_items = queryset[
+            start:end
+        ]
+
+        results = []
+
+        for deal in page_items:
+            customer_name = (
+                deal.customer.get_full_name().strip()
+                or getattr(
+                    deal.customer,
+                    "full_name",
+                    "",
+                )
+                or deal.customer.email
+                or deal.customer.username
+            )
+
+            partner_name = (
+                deal.partner.display_name.strip()
+                or deal.partner.business_name.strip()
+                or deal.partner.user.get_full_name().strip()
+                or deal.partner.user.email
+            )
+
+            transaction_value = None
+
+            if deal.deal_type == "rental":
+                transaction_value = deal.monthly_rent
+
+            elif deal.deal_type == "sale":
+                transaction_value = deal.sale_price
+
+            results.append(
+                {
+                    "id": deal.id,
+                    "deal_number": deal.deal_number,
+                    "deal_type": deal.deal_type,
+                    "status": deal.status,
+
+                    "customer": deal.customer_id,
+                    "customer_name": customer_name,
+
+                    "partner": deal.partner_id,
+                    "partner_name": partner_name,
+
+                    "property": deal.property_id,
+                    "property_title": deal.property.title,
+
+                    "viewing": deal.viewing_id,
+                    "viewing_status": deal.viewing.status,
+
+                    "transaction_value": transaction_value,
+                    "commission_amount": deal.commission_amount,
+
+                    "customer_confirmed": (
+                        deal.customer_confirmed
+                    ),
+                    "partner_confirmed": (
+                        deal.partner_confirmed
+                    ),
+                    "owner_confirmed": (
+                        deal.owner_confirmed
+                    ),
+
+                    "agreed_at": deal.agreed_at,
+                    "completed_at": deal.completed_at,
+                    "created_at": deal.created_at,
+                    "updated_at": deal.updated_at,
+                }
+            )
+
+        total_pages = (
+            total_count + page_size - 1
+        ) // page_size
+
+        return Response(
+            {
+                "count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_previous": page > 1,
+                "results": results,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class AdminDealOwnerConfirmationStatusView(APIView):
+    """
+    Staff-only read-only governance state for owner confirmation.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request, deal_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may access "
+                        "deal governance information."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        deal = (
+            Deal.objects
+            .select_related(
+                "property",
+                "partner",
+                "partner__user",
+                "introduction",
+                "introduction__mandate",
+                "introduction__mandate__owner",
+            )
+            .filter(
+                pk=deal_id,
+            )
+            .first()
+        )
+
+        if deal is None:
+            return Response(
+                {
+                    "detail": "Deal not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        governance = (
+            evaluate_owner_confirmation_governance(
+                deal,
+            )
+        )
+
+        mandate = governance["mandate"]
+        owner = governance["owner"]
+
+        payload = {
+            "deal_id": deal.id,
+            "deal_number": deal.deal_number,
+            "eligible": governance["eligible"],
+            "state": governance["state"],
+            "reason_code": governance["reason_code"],
+            "message": governance["message"],
+            "mandate": None,
+            "owner": None,
+        }
+
+        if mandate is not None:
+            payload["mandate"] = {
+                "id": mandate.id,
+                "mandate_number": mandate.mandate_number,
+                "status": mandate.status,
+                "is_currently_valid": (
+                    mandate.is_currently_valid
+                ),
+            }
+
+        if owner is not None:
+            payload["owner"] = {
+                "owner_number": owner.owner_number,
+                "legal_name": owner.legal_name,
+                "is_verified": owner.is_verified,
+                "has_phone": bool(
+                    owner.phone_number
+                ),
+                "has_email": bool(
+                    owner.email
+                ),
+            }
+
+        return Response(
+            payload,
+            status=status.HTTP_200_OK,
+        )
+
 class OwnerOutcomeSubmissionView(APIView):
     """
     Public single-use-token endpoint for a property owner.
@@ -526,4 +841,104 @@ class OwnerOutcomeSubmissionView(APIView):
                 ).data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+class AdminDealGovernanceCaseView(APIView):
+    """
+    Staff formally raises the deal's current governance block.
+
+    The backend independently reevaluates the deal.
+    The client cannot choose the reason or responsible party.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def post(self, request, deal_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "raise deal governance cases."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        deal = (
+            Deal.objects
+            .select_related(
+                "property",
+                "partner",
+                "partner__user",
+                "introduction",
+                "introduction__mandate",
+                "introduction__mandate__owner",
+            )
+            .filter(pk=deal_id)
+            .first()
+        )
+
+        if deal is None:
+            return Response(
+                {"detail": "Deal not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        governance = (
+            evaluate_owner_confirmation_governance(
+                deal,
+            )
+        )
+
+        try:
+            case, created = (
+                raise_deal_governance_case(
+                    deal=deal,
+                    governance=governance,
+                    actor=request.user,
+                )
+            )
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "messages",
+                None,
+            ) or str(exc)
+
+            return Response(
+                {"detail": detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": case.id,
+                "created": created,
+                "status": case.status,
+                "reason_code": (
+                    case.reason_code
+                ),
+                "responsible_role": (
+                    case.responsible_role
+                ),
+                "action_code": (
+                    case.action_code
+                ),
+                "action_label": (
+                    case.action_label
+                ),
+                "title": case.title,
+                "message": case.message,
+                "partner_id": (
+                    case.partner_id
+                ),
+            },
+            status=(
+                status.HTTP_201_CREATED
+                if created
+                else status.HTTP_200_OK
+            ),
         )

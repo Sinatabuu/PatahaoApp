@@ -18,11 +18,20 @@ from .services import (
     enforce_partner_operational_access,
     get_partner_capacity_summary,
     validate_partner_property_limit,
+    request_deal_governance_review,
+    staff_decide_deal_governance_case,
+
 )
 from django.utils import timezone
 
 from deals.models import Deal
 from partners.models import Partner
+from governance.services import (
+    enforce_partner_operational_access,
+    request_deal_governance_review,
+)
+
+from .serializers import StaffDealGovernanceDecisionSerializer
 
 
 
@@ -677,6 +686,476 @@ class ReturnPropertyToPartnerReviewView(StaffOnlyAPIView):
                 "property_id": property_obj.id,
                 "status": property_obj.status,
                 "reason": reason,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+from django.core.exceptions import ValidationError
+from rest_framework import permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .models import DealGovernanceCase
+from .services import request_deal_governance_review
+
+
+class PartnerDealGovernanceCaseDetailView(APIView):
+    """
+    Partner read-only view of one governance case assigned
+    to their partner profile.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request, case_id):
+        partner = getattr(
+            request.user,
+            "partner_profile",
+            None,
+        )
+
+        if partner is None:
+            return Response(
+                {
+                    "detail": "A partner account is required.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        case = (
+            DealGovernanceCase.objects
+            .select_related(
+                "deal",
+                "deal__property",
+                "deal__partner",
+            )
+            .filter(
+                pk=case_id,
+                partner=partner,
+            )
+            .first()
+        )
+
+        if case is None:
+            return Response(
+                {
+                    "detail": "Governance case not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {
+                "id": case.id,
+                "deal_id": case.deal_id,
+                "deal_number": case.deal.deal_number,
+                "property_id": case.deal.property_id,
+                "property_title": case.deal.property.title,
+                "status": case.status,
+                "reason_code": case.reason_code,
+                "title": case.title,
+                "message": case.message,
+                "responsible_role": case.responsible_role,
+                "action_code": case.action_code,
+                "action_label": case.action_label,
+                "created_at": case.created_at,
+                "updated_at": case.updated_at,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PartnerDealGovernanceCaseListView(APIView):
+    """
+    Return open governance cases currently assigned to the
+    authenticated partner.
+
+    Notifications alert the partner.
+    This endpoint is the source of truth for active partner work.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request):
+        partner = getattr(
+            request.user,
+            "partner_profile",
+            None,
+        )
+
+        if partner is None:
+            return Response(
+                {
+                    "detail": "A partner account is required.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            enforce_partner_operational_access(
+                partner,
+                operation="view_governance_cases",
+            )
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                detail = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+
+            if detail is None:
+                detail = str(exc)
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        cases = (
+            DealGovernanceCase.objects
+            .select_related(
+                "deal",
+                "deal__property",
+                "deal__partner",
+            )
+            .filter(
+                partner=partner,
+                status=DealGovernanceCase.Status.OPEN,
+                responsible_role=(
+                    DealGovernanceCase
+                    .ResponsibleRole
+                    .PARTNER
+                ),
+            )
+            .order_by(
+                "-created_at",
+                "-id",
+            )
+        )
+
+        results = []
+
+        for case in cases:
+            results.append(
+                {
+                    "id": case.id,
+                    "deal_id": case.deal_id,
+                    "deal_number": (
+                        case.deal.deal_number
+                    ),
+                    "property_id": (
+                        case.deal.property_id
+                    ),
+                    "property_title": (
+                        case.deal.property.title
+                    ),
+                    "status": case.status,
+                    "reason_code": (
+                        case.reason_code
+                    ),
+                    "title": case.title,
+                    "message": case.message,
+                    "responsible_role": (
+                        case.responsible_role
+                    ),
+                    "action_code": (
+                        case.action_code
+                    ),
+                    "action_label": (
+                        case.action_label
+                    ),
+                    "created_at": (
+                        case.created_at
+                    ),
+                    "updated_at": (
+                        case.updated_at
+                    ),
+                }
+            )
+
+        return Response(
+            {
+                "count": len(results),
+                "results": results,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class PartnerRequestGovernanceReviewView(APIView):
+    """
+    Partner formally hands a governance block to Pata Hao
+    staff for investigation.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def post(self, request, case_id):
+        try:
+            case = request_deal_governance_review(
+                case_id=case_id,
+                actor=request.user,
+            )
+
+        except DealGovernanceCase.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Governance case not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "messages",
+                None,
+            ) or str(exc)
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": case.id,
+                "status": case.status,
+                "responsible_role": (
+                    case.responsible_role
+                ),
+                "action_code": case.action_code,
+                "action_label": case.action_label,
+                "message": (
+                    "Governance review requested successfully. "
+                    "The case is now awaiting Pata Hao staff."
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class StaffDealGovernanceCaseListView(APIView):
+    """
+    Staff queue of open governance cases currently
+    awaiting Pata Hao action.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "access governance review cases."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        cases = (
+            DealGovernanceCase.objects
+            .select_related(
+                "deal",
+                "deal__property",
+                "deal__partner",
+                "deal__partner__user",
+                "partner",
+            )
+            .filter(
+                status=DealGovernanceCase.Status.OPEN,
+                responsible_role=(
+                    DealGovernanceCase
+                    .ResponsibleRole
+                    .STAFF
+                ),
+            )
+            .order_by(
+                "-updated_at",
+                "-id",
+            )
+        )
+
+        results = []
+
+        for case in cases:
+            results.append(
+                {
+                    "id": case.id,
+                    "deal_id": case.deal_id,
+                    "deal_number": (
+                        case.deal.deal_number
+                    ),
+                    "property_id": (
+                        case.deal.property_id
+                    ),
+                    "property_title": (
+                        case.deal.property.title
+                    ),
+                    "partner_id": (
+                        case.deal.partner_id
+                    ),
+                    "partner_name": str(
+                        case.deal.partner
+                    ),
+                    "status": case.status,
+                    "reason_code": (
+                        case.reason_code
+                    ),
+                    "title": case.title,
+                    "message": case.message,
+                    "responsible_role": (
+                        case.responsible_role
+                    ),
+                    "action_code": (
+                        case.action_code
+                    ),
+                    "action_label": (
+                        case.action_label
+                    ),
+                    "created_at": (
+                        case.created_at
+                    ),
+                    "updated_at": (
+                        case.updated_at
+                    ),
+                }
+            )
+
+        return Response(
+            {
+                "count": len(results),
+                "results": results,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class StaffDealGovernanceCaseDecisionView(APIView):
+    """
+    Staff decision endpoint for one open governance case.
+    """
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def post(self, request, case_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "decide governance cases."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = (
+            StaffDealGovernanceDecisionSerializer(
+                data=request.data,
+            )
+        )
+
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        try:
+            case, governance = (
+                staff_decide_deal_governance_case(
+                    case_id=case_id,
+                    actor=request.user,
+                    decision=(
+                        serializer.validated_data[
+                            "decision"
+                        ]
+                    ),
+                    notes=(
+                        serializer.validated_data.get(
+                            "notes",
+                            "",
+                        )
+                    ),
+                )
+            )
+
+        except DealGovernanceCase.DoesNotExist:
+            return Response(
+                {
+                    "detail": (
+                        "Governance case not found."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                detail = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+
+            if detail is None:
+                detail = str(exc)
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": case.id,
+                "status": case.status,
+                "responsible_role": (
+                    case.responsible_role
+                ),
+                "action_code": (
+                    case.action_code
+                ),
+                "action_label": (
+                    case.action_label
+                ),
+                "resolved_by": (
+                    case.resolved_by_id
+                ),
+                "resolved_at": (
+                    case.resolved_at
+                ),
+                "resolution_notes": (
+                    case.resolution_notes
+                ),
+                "governance": governance,
             },
             status=status.HTTP_200_OK,
         )

@@ -295,6 +295,167 @@ def evaluate_deal_outcomes(deal_id):
     return deal
 
 
+def evaluate_owner_confirmation_governance(deal):
+    """
+    Determine whether owner confirmation may be issued.
+
+    The decision is read-only and is shared by the API/UI and the
+    actual token-issuance service so that governance rules cannot drift.
+
+    A controlled deal must remain bound to the same protected
+    introduction, mandate, owner, and commission chain that created it.
+    """
+
+    if deal.status in {
+        Deal.Status.AGREED,
+        Deal.Status.CANCELLED,
+        Deal.Status.COMPLETED,
+        Deal.Status.COMMISSION_PAID,
+    }:
+        return {
+            "eligible": False,
+            "reason_code": "deal_status_not_eligible",
+            "state": "not_applicable",
+            "message": (
+                "Owner confirmation is no longer required "
+                "for this deal status."
+            ),
+            "mandate": None,
+            "owner": None,
+        }
+
+    if DealOutcome.objects.filter(
+        deal=deal,
+        reporter=DealOutcome.Reporter.OWNER,
+    ).exists():
+        return {
+            "eligible": False,
+            "reason_code": "owner_already_confirmed",
+            "state": "confirmed",
+            "message": (
+                "The property owner has already confirmed this deal."
+            ),
+            "mandate": None,
+            "owner": None,
+        }
+
+    if not deal.introduction_id:
+        return {
+            "eligible": False,
+            "reason_code": "protected_introduction_missing",
+            "state": "blocked",
+            "message": (
+                "This deal is not linked to a protected property "
+                "introduction. Owner confirmation cannot enter the "
+                "verified commission workflow."
+            ),
+            "mandate": None,
+            "owner": None,
+        }
+
+    introduction = deal.introduction
+
+    mandate = getattr(
+        introduction,
+        "mandate",
+        None,
+    )
+
+    if mandate is None:
+        return {
+            "eligible": False,
+            "reason_code": "mandate_missing",
+            "state": "blocked",
+            "message": (
+                "No property mandate is linked to the protected "
+                "introduction for this deal."
+            ),
+            "mandate": None,
+            "owner": None,
+        }
+
+    if (
+        mandate.property_id != deal.property_id
+        or mandate.partner_id != deal.partner_id
+    ):
+        return {
+            "eligible": False,
+            "reason_code": "mandate_mismatch",
+            "state": "blocked",
+            "message": (
+                "The protected introduction mandate does not match "
+                "this deal's property and partner."
+            ),
+            "mandate": mandate,
+            "owner": mandate.owner,
+        }
+
+    if mandate.status != PropertyMandate.Status.APPROVED:
+        return {
+            "eligible": False,
+            "reason_code": "mandate_not_approved",
+            "state": "blocked",
+            "message": (
+                "The property mandate linked to this deal "
+                "has not been approved."
+            ),
+            "mandate": mandate,
+            "owner": mandate.owner,
+        }
+
+    if not mandate.is_currently_valid:
+        return {
+            "eligible": False,
+            "reason_code": "mandate_not_current",
+            "state": "blocked",
+            "message": (
+                "The property mandate linked to this deal "
+                "is no longer currently valid."
+            ),
+            "mandate": mandate,
+            "owner": mandate.owner,
+        }
+
+    owner = mandate.owner
+
+    if not owner.is_verified:
+        return {
+            "eligible": False,
+            "reason_code": "owner_not_verified",
+            "state": "blocked",
+            "message": (
+                "The property owner must be verified before "
+                "owner confirmation can be issued."
+            ),
+            "mandate": mandate,
+            "owner": owner,
+        }
+
+    if not owner.phone_number and not owner.email:
+        return {
+            "eligible": False,
+            "reason_code": "owner_contact_missing",
+            "state": "blocked",
+            "message": (
+                "The verified property owner has no phone number "
+                "or email available for confirmation delivery."
+            ),
+            "mandate": mandate,
+            "owner": owner,
+        }
+
+    return {
+        "eligible": True,
+        "reason_code": "eligible",
+        "state": "ready",
+        "message": (
+            "Owner confirmation is ready to be issued to the "
+            "verified property owner."
+        ),
+        "mandate": mandate,
+        "owner": owner,
+    }
+
 @transaction.atomic
 def issue_owner_confirmation_token(
     *,
@@ -347,68 +508,17 @@ def issue_owner_confirmation_token(
             operation="issue_owner_confirmation",
         )
 
-    if deal.status in {
-        Deal.Status.AGREED,
-        Deal.Status.CANCELLED,
-        Deal.Status.COMPLETED,
-        Deal.Status.COMMISSION_PAID,
-    }:
+    governance = evaluate_owner_confirmation_governance(
+    deal,
+)
+
+    if not governance["eligible"]:
         raise ValidationError(
-            "Owner confirmation cannot be issued "
-            "for this deal status."
+            governance["message"]
         )
 
-    if DealOutcome.objects.filter(
-        deal=deal,
-        reporter=DealOutcome.Reporter.OWNER,
-    ).exists():
-        raise ValidationError(
-            "The owner has already submitted a confirmation."
-        )
-
-    mandate = (
-        PropertyMandate.objects
-        .select_for_update()
-        .select_related(
-            "owner",
-            "property",
-            "partner",
-            "commission_agreement",
-        )
-        .filter(
-            property=deal.property,
-            partner=deal.partner,
-            status=PropertyMandate.Status.APPROVED,
-        )
-        .order_by(
-            "-version",
-            "-created_at",
-        )
-        .first()
-    )
-
-    if mandate is None:
-        raise ValidationError(
-            "No approved property mandate was found "
-            "for this deal."
-        )
-
-    if not mandate.is_currently_valid:
-        raise ValidationError(
-            "The property mandate is not currently valid."
-        )
-
-    owner = mandate.owner
-
-    if not owner.is_verified:
-        raise ValidationError(
-            "The property owner is not verified."
-        )
-
-    if not owner.phone_number and not owner.email:
-        raise ValidationError(
-            "The verified owner has no delivery contact."
-        )
+    mandate = governance["mandate"]
+    owner = governance["owner"]
 
     now = timezone.now()
 
@@ -1823,3 +1933,311 @@ def build_deal_timeline(deal):
     )
 
     return timeline
+
+@transaction.atomic
+def complete_agreed_deal_and_raise_commission(
+    *,
+    deal_id,
+    actor,
+    notes="",
+):
+    """
+    Complete a verified agreed transaction and raise the
+    resulting commission receivable.
+
+    Financial rules:
+    - Only Pata Hao staff may complete a deal.
+    - The deal must already be AGREED.
+    - Customer, partner, and owner confirmations must all exist.
+    - The deal must remain linked to its protected introduction.
+    - The protected introduction's commission agreement must
+      be verified and locked.
+    - Commission amount comes only from that locked agreement.
+    - One deal may have only one CommissionSettlement.
+    - Completion and settlement creation are atomic.
+    """
+
+    from commissions.models import (
+        CommissionSettlement,
+    )
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated Pata Hao administrator is required."
+        )
+
+    if not actor.is_staff:
+        raise ValidationError(
+            "Only Pata Hao staff may complete a deal."
+        )
+
+    deal = (
+        Deal.objects
+        .select_for_update()
+        .select_related(
+            "property",
+            "customer",
+            "partner",
+            "partner__user",
+            "introduction",
+            "introduction__commission_agreement",
+        )
+        .prefetch_related(
+            "outcomes",
+        )
+        .get(pk=deal_id)
+    )
+
+    if deal.status != Deal.Status.AGREED:
+        raise ValidationError(
+            {
+                "status": (
+                    "Only an agreed deal may be completed."
+                )
+            }
+        )
+
+    if not (
+        deal.customer_confirmed
+        and deal.partner_confirmed
+        and deal.owner_confirmed
+    ):
+        raise ValidationError(
+            {
+                "confirmations": (
+                    "Customer, partner, and owner confirmation "
+                    "must all be present before completion."
+                )
+            }
+        )
+
+    introduction = deal.introduction
+
+    if introduction is None:
+        raise ValidationError(
+            {
+                "introduction": (
+                    "This deal is not linked to a protected "
+                    "property introduction."
+                )
+            }
+        )
+
+    #
+    # Reconfirm the protected deal identity.
+    #
+    if introduction.customer_id != deal.customer_id:
+        raise ValidationError(
+            "The protected introduction customer does not "
+            "match the deal customer."
+        )
+
+    if introduction.property_id != deal.property_id:
+        raise ValidationError(
+            "The protected introduction property does not "
+            "match the deal property."
+        )
+
+    if introduction.partner_id != deal.partner_id:
+        raise ValidationError(
+            "The protected introduction partner does not "
+            "match the deal partner."
+        )
+
+    if introduction.viewing_id != deal.viewing_id:
+        raise ValidationError(
+            "The protected introduction viewing does not "
+            "match the deal viewing."
+        )
+
+    agreement = getattr(
+        introduction,
+        "commission_agreement",
+        None,
+    )
+
+    if agreement is None:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The protected introduction is not linked "
+                    "to a commission agreement."
+                )
+            }
+        )
+
+    if agreement.property_id != deal.property_id:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The commission agreement does not belong "
+                    "to this deal's property."
+                )
+            }
+        )
+
+    if not agreement.partner_accepted:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The commission agreement has not been "
+                    "accepted by the assigned partner."
+                )
+            }
+        )
+
+    if not agreement.is_verified:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The commission agreement has not been "
+                    "verified by Pata Hao."
+                )
+            }
+        )
+
+    if not agreement.is_locked:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The commission agreement must be locked "
+                    "before a commission can become due."
+                )
+            }
+        )
+
+    gross_commission = (
+        agreement.expected_total_commission
+    )
+
+    if (
+        gross_commission is None
+        or gross_commission <= Decimal("0.00")
+    ):
+        raise ValidationError(
+            {
+                "commission": (
+                    "The locked commission amount must be "
+                    "greater than zero."
+                )
+            }
+        )
+
+    #
+    # One-to-one deal relationship prevents duplicate settlements.
+    # get_or_create also makes the service safe against a legitimate
+    # pre-existing settlement.
+    #
+    settlement, created = (
+        CommissionSettlement.objects
+        .get_or_create(
+            deal=deal,
+            defaults={
+                "agreement": agreement,
+                "gross_commission_amount": (
+                    gross_commission
+                ),
+                "currency": agreement.currency,
+                "status": (
+                    CommissionSettlement
+                    .Status
+                    .ALLOCATION_PENDING
+                ),
+                "notes": (
+                    "Created automatically from a verified "
+                    "completed Pata Hao deal."
+                ),
+                "created_by": actor,
+            },
+        )
+    )
+
+    #
+    # Never silently accept a settlement attached to a different
+    # agreement or carrying a different financial amount.
+    #
+    if settlement.agreement_id != agreement.id:
+        raise ValidationError(
+            {
+                "settlement": (
+                    "The existing commission settlement is "
+                    "linked to a different commission agreement."
+                )
+            }
+        )
+
+    if (
+        settlement.gross_commission_amount
+        != gross_commission
+    ):
+        raise ValidationError(
+            {
+                "settlement": (
+                    "The existing settlement amount does not "
+                    "match the locked commission agreement."
+                )
+            }
+        )
+
+    now = timezone.now()
+
+    deal.completed_at = deal.completed_at or now
+    deal.commission_amount = gross_commission
+    deal.status = Deal.Status.COMMISSION_DUE
+
+    deal.save(
+        update_fields=[
+            "completed_at",
+            "commission_amount",
+            "status",
+            "updated_at",
+        ]
+    )
+
+    DealEvent.objects.get_or_create(
+        deal=deal,
+        action="deal_completed",
+        defaults={
+            "actor": actor,
+            "notes": (
+                notes
+                or (
+                    "Pata Hao verified that the property "
+                    "transaction was completed."
+                )
+            ),
+            "metadata": {
+                "completed_at": (
+                    deal.completed_at.isoformat()
+                ),
+                "previous_status": "agreed",
+                "new_status": "commission_due",
+            },
+        },
+    )
+
+    DealEvent.objects.get_or_create(
+        deal=deal,
+        action="commission_became_due",
+        defaults={
+            "actor": actor,
+            "notes": (
+                "The completed transaction activated the "
+                "locked commission obligation."
+            ),
+            "metadata": {
+                "settlement_id": settlement.id,
+                "settlement_created": created,
+                "agreement_id": agreement.id,
+                "agreement_number": (
+                    agreement.agreement_number
+                ),
+                "gross_commission_amount": str(
+                    gross_commission
+                ),
+                "currency": agreement.currency,
+            },
+        },
+    )
+
+    return deal, settlement, created

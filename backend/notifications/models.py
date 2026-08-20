@@ -37,3 +37,17 @@ class Notification(models.Model):
 
     def __str__(self):
         return self.title
+
+    governance_case = models.ForeignKey(
+        "governance.DealGovernanceCase",
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+        null=True,
+        blank=True,
+    )
+
+    action_label = models.CharField(
+        max_length=160,
+        blank=True,
+        default="",
+    )

@@ -19,6 +19,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import (
+    DealGovernanceCase,
     PartnerDisciplinaryAction,
     PartnerPromotionReview,
     PartnerReinstatement,
@@ -27,6 +28,8 @@ from .models import (
     PartnerViolation,
     PolicyRule,
 )
+from django.contrib.auth import get_user_model
+
 def get_current_tier_assignment(partner):
     """
     Return the partner's active tier assignment.
@@ -1797,3 +1800,541 @@ def reinstate_partner(
         )
 
     return reinstatement
+
+
+OWNER_CONFIRMATION_CASE_RULES = {
+    "protected_introduction_missing": {
+        "responsible_role": "partner",
+        "action_code": "request_governance_review",
+        "action_label": "Request governance review",
+        "title": "Protected introduction required",
+    },
+    "mandate_missing": {
+        "responsible_role": "partner",
+        "action_code": "request_governance_review",
+        "action_label": "Request governance review",
+        "title": "Property mandate required",
+    },
+    "mandate_mismatch": {
+        "responsible_role": "staff",
+        "action_code": "investigate_mandate_mismatch",
+        "action_label": "Investigate governance record",
+        "title": "Mandate mismatch requires review",
+    },
+    "mandate_not_approved": {
+        "responsible_role": "staff",
+        "action_code": "review_property_mandate",
+        "action_label": "Review property mandate",
+        "title": "Property mandate requires review",
+    },
+    "mandate_not_current": {
+        "responsible_role": "partner",
+        "action_code": "renew_property_mandate",
+        "action_label": "Renew property mandate",
+        "title": "Property mandate is no longer current",
+    },
+    "owner_not_verified": {
+        "responsible_role": "staff",
+        "action_code": "complete_owner_verification",
+        "action_label": "Review owner verification",
+        "title": "Property owner verification required",
+    },
+    "owner_contact_missing": {
+        "responsible_role": "partner",
+        "action_code": "provide_owner_contact",
+        "action_label": "Provide owner contact",
+        "title": "Property owner contact required",
+    },
+}
+
+@transaction.atomic
+def raise_deal_governance_case(
+    *,
+    deal,
+    governance,
+    actor=None,
+):
+    """
+    Create or reuse an open DealGovernanceCase for a blocked deal.
+
+    The client does not choose the reason or responsible party.
+    Those are derived from the backend governance decision.
+    """
+
+    from notifications.models import Notification
+    from .models import DealGovernanceCase
+
+    if governance.get("eligible"):
+        raise ValidationError(
+            "This deal is not currently blocked by governance."
+        )
+
+    reason_code = governance.get(
+        "reason_code",
+        "",
+    )
+
+    rule = OWNER_CONFIRMATION_CASE_RULES.get(
+        reason_code,
+    )
+
+    if rule is None:
+        raise ValidationError(
+            "This governance state does not require an operational case."
+        )
+
+    responsible_role = rule[
+        "responsible_role"
+    ]
+
+    partner = (
+        deal.partner
+        if responsible_role
+        == DealGovernanceCase.ResponsibleRole.PARTNER
+        else None
+    )
+
+    case, created = (
+        DealGovernanceCase.objects
+        .get_or_create(
+            deal=deal,
+            reason_code=reason_code,
+            status=DealGovernanceCase.Status.OPEN,
+            defaults={
+                "partner": partner,
+                "title": rule["title"],
+                "message": governance.get(
+                    "message",
+                    "",
+                ),
+                "responsible_role": (
+                    responsible_role
+                ),
+                "action_code": rule[
+                    "action_code"
+                ],
+                "action_label": rule[
+                    "action_label"
+                ],
+                "context_snapshot": {
+                    "deal_id": deal.id,
+                    "deal_number": (
+                        deal.deal_number
+                    ),
+                    "property_id": (
+                        deal.property_id
+                    ),
+                    "property_title": (
+                        deal.property.title
+                    ),
+                    "partner_id": (
+                        deal.partner_id
+                    ),
+                    "reason_code": (
+                        reason_code
+                    ),
+                    "governance_state": (
+                        governance.get(
+                            "state",
+                            "",
+                        )
+                    ),
+                },
+                "created_by": actor,
+            },
+        )
+    )
+
+    if (
+        created
+        and responsible_role
+        == DealGovernanceCase.ResponsibleRole.PARTNER
+    ):
+        Notification.objects.create(
+            user=deal.partner.user,
+            title=(
+                f"Action required — "
+                f"{deal.property.title}"
+            ),
+            message=(
+                f"{case.message} "
+                f"Required action: "
+                f"{case.action_label}."
+            ),
+            notification_type=(
+                Notification.TYPE_DEAL
+            ),
+            governance_case=case,
+            action_label=(
+                case.action_label
+            ),
+        )
+
+    return case, created
+
+@transaction.atomic
+def request_deal_governance_review(
+    *,
+    case_id,
+    actor,
+):
+    """
+    Transfer an open partner-owned governance case to Pata Hao
+    staff for investigation.
+
+    This does not create, alter, or backfill transaction evidence.
+    """
+
+    from notifications.models import Notification
+    from deals.models import DealEvent
+
+    case = (
+        DealGovernanceCase.objects
+        .select_for_update()
+        .select_related(
+            "deal",
+            "deal__property",
+            "deal__partner",
+            "partner",
+        )
+        .get(pk=case_id)
+    )
+
+    if case.status != DealGovernanceCase.Status.OPEN:
+        raise ValidationError(
+            "Only an open governance case can be submitted for review."
+        )
+
+    actor_partner = getattr(
+        actor,
+        "partner_profile",
+        None,
+    )
+
+    if actor_partner is None:
+        raise ValidationError(
+            "A partner account is required."
+        )
+
+    if case.partner_id != actor_partner.id:
+        raise ValidationError(
+            "This governance case is not assigned to this partner."
+        )
+
+    if (
+        case.responsible_role
+        != DealGovernanceCase.ResponsibleRole.PARTNER
+    ):
+        raise ValidationError(
+            "This governance case is no longer awaiting partner action."
+        )
+
+    enforce_partner_operational_access(
+        actor_partner,
+        operation="request_governance_review",
+    )
+
+    case.responsible_role = (
+        DealGovernanceCase.ResponsibleRole.STAFF
+    )
+    case.action_code = "review_governance_case"
+    case.action_label = "Review governance case"
+
+    case.save(
+        update_fields=[
+            "responsible_role",
+            "action_code",
+            "action_label",
+            "updated_at",
+        ]
+    )
+
+    DealEvent.objects.create(
+        deal=case.deal,
+        action="governance_review_requested",
+        actor=actor,
+        notes=(
+            "The assigned partner requested Pata Hao governance "
+            "review for this blocked deal."
+        ),
+        metadata={
+            "governance_case_id": case.id,
+            "reason_code": case.reason_code,
+            "previous_responsible_role": "partner",
+            "new_responsible_role": "staff",
+        },
+    )
+
+    User = get_user_model()
+
+    staff_users = (
+        User.objects
+        .filter(
+            is_staff=True,
+            is_active=True,
+        )
+    )
+
+    for staff_user in staff_users:
+        Notification.objects.get_or_create(
+            user=staff_user,
+            governance_case=case,
+            action_label="Review governance case",
+            defaults={
+                "title": (
+                    f"Governance review required — "
+                    f"{case.deal.property.title}"
+                ),
+                "message": (
+                    f"{case.deal.partner} requested governance "
+                    f"review. Reason: {case.message}"
+                ),
+                "notification_type": (
+                    Notification.TYPE_DEAL
+                ),
+            },
+        )
+
+    return case
+
+@transaction.atomic
+def staff_decide_deal_governance_case(
+    *,
+    case_id,
+    actor,
+    decision,
+    notes="",
+):
+    """
+    Apply a staff decision to an open deal governance case.
+
+    Supported decisions:
+    - keep_blocked
+    - return_to_partner
+    - resolve
+
+    Resolution is evidence-gated. Staff cannot resolve a case
+    while the authoritative deal governance evaluator still
+    reports that the deal is blocked.
+    """
+
+    from django.utils import timezone
+    from notifications.models import Notification
+    from deals.models import DealEvent
+    from deals.services import (
+        evaluate_owner_confirmation_governance,
+    )
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated staff account is required."
+        )
+
+    if not actor.is_staff:
+        raise ValidationError(
+            "Only Pata Hao staff may decide governance cases."
+        )
+
+    allowed_decisions = {
+        "keep_blocked",
+        "return_to_partner",
+        "resolve",
+    }
+
+    if decision not in allowed_decisions:
+        raise ValidationError(
+            {
+                "decision": (
+                    "Decision must be keep_blocked, "
+                    "return_to_partner, or resolve."
+                )
+            }
+        )
+
+    case = (
+        DealGovernanceCase.objects
+        .select_for_update()
+        .select_related(
+            "deal",
+            "deal__property",
+            "deal__partner",
+            "deal__partner__user",
+            "deal__introduction",
+            "deal__introduction__mandate",
+            "deal__introduction__mandate__owner",
+            "partner",
+        )
+        .get(pk=case_id)
+    )
+
+    if case.status != DealGovernanceCase.Status.OPEN:
+        raise ValidationError(
+            "Only an open governance case may be decided."
+        )
+
+    if (
+        case.responsible_role
+        != DealGovernanceCase.ResponsibleRole.STAFF
+    ):
+        raise ValidationError(
+            "This governance case is not awaiting Pata Hao staff."
+        )
+
+    governance = evaluate_owner_confirmation_governance(
+        case.deal,
+    )
+
+    governance_snapshot = {
+        "eligible": governance.get("eligible"),
+        "state": governance.get("state"),
+        "reason_code": governance.get("reason_code"),
+        "message": governance.get("message"),
+    }
+
+    if decision == "keep_blocked":
+        case.action_code = "review_governance_case"
+        case.action_label = "Review governance case"
+
+        case.save(
+            update_fields=[
+                "action_code",
+                "action_label",
+                "updated_at",
+            ]
+        )
+
+        DealEvent.objects.create(
+            deal=case.deal,
+            action="governance_case_kept_blocked",
+            actor=actor,
+            notes=(
+                notes
+                or "Pata Hao reviewed the governance case "
+                "and kept the deal blocked."
+            ),
+            metadata={
+                "governance_case_id": case.id,
+                "decision": decision,
+                "governance": governance_snapshot,
+            },
+        )
+
+        return case, governance_snapshot
+
+    if decision == "return_to_partner":
+        if case.partner_id is None:
+            case.partner = case.deal.partner
+
+        case.responsible_role = (
+            DealGovernanceCase.ResponsibleRole.PARTNER
+        )
+
+        case.action_code = "request_governance_review"
+        case.action_label = "Request governance review"
+
+        case.save(
+            update_fields=[
+                "partner",
+                "responsible_role",
+                "action_code",
+                "action_label",
+                "updated_at",
+            ]
+        )
+
+        Notification.objects.create(
+            user=case.deal.partner.user,
+            title=(
+                f"Action required — "
+                f"{case.deal.property.title}"
+            ),
+            message=(
+                f"Pata Hao reviewed this governance case "
+                f"and returned it for partner action. "
+                f"{notes or case.message}"
+            ),
+            notification_type=Notification.TYPE_DEAL,
+            governance_case=case,
+            action_label=case.action_label,
+        )
+
+        DealEvent.objects.create(
+            deal=case.deal,
+            action="governance_case_returned_to_partner",
+            actor=actor,
+            notes=(
+                notes
+                or "Pata Hao returned the governance case "
+                "to the assigned partner."
+            ),
+            metadata={
+                "governance_case_id": case.id,
+                "decision": decision,
+                "previous_responsible_role": "staff",
+                "new_responsible_role": "partner",
+                "governance": governance_snapshot,
+            },
+        )
+
+        return case, governance_snapshot
+
+    #
+    # RESOLVE
+    #
+    # This is deliberately strict.
+    #
+    # Staff authority cannot substitute for transaction
+    # evidence. The authoritative governance evaluator must
+    # independently confirm that the block has disappeared.
+    #
+
+    if not governance.get("eligible"):
+        raise ValidationError(
+            {
+                "decision": (
+                    "This governance case cannot be resolved "
+                    "because the underlying governance "
+                    "requirement is still unsatisfied."
+                ),
+                "reason_code": governance.get(
+                    "reason_code",
+                    "",
+                ),
+                "message": governance.get(
+                    "message",
+                    "",
+                ),
+            }
+        )
+
+    case.status = DealGovernanceCase.Status.RESOLVED
+    case.resolved_by = actor
+    case.resolved_at = timezone.now()
+    case.resolution_notes = (
+        notes
+        or "Governance requirements verified as satisfied."
+    )
+
+    case.save(
+        update_fields=[
+            "status",
+            "resolved_by",
+            "resolved_at",
+            "resolution_notes",
+            "updated_at",
+        ]
+    )
+
+    DealEvent.objects.create(
+        deal=case.deal,
+        action="governance_case_resolved",
+        actor=actor,
+        notes=case.resolution_notes,
+        metadata={
+            "governance_case_id": case.id,
+            "decision": decision,
+            "governance": governance_snapshot,
+        },
+    )
+
+    return case, governance_snapshot

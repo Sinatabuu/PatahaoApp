@@ -11,6 +11,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             "title",
             "message",
             "notification_type",
+            "governance_case",
+            "action_label",
             "is_read",
             "created_at",
         ]
@@ -20,5 +22,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "title",
             "message",
             "notification_type",
+            "governance_case",
+            "action_label",
             "created_at",
         ]
