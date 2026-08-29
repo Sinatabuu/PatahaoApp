@@ -1,0 +1,63 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+
+  <h2>Reject mandate evidence</h2>
+
+  <p>
+    <strong>Mandate:</strong>
+    {{ document.mandate.mandate_number }}
+  </p>
+
+  <p>
+    <strong>Document type:</strong>
+    {{ document.get_document_type_display }}
+  </p>
+
+  <p>
+    <strong>File:</strong>
+    {{ document.original_filename }}
+  </p>
+
+  <p>
+    <strong>SHA-256:</strong>
+    <code>{{ document.file_hash }}</code>
+  </p>
+
+  <div class="help">
+    Rejecting this evidence removes it from the approved Sale Mandate Pack.
+    The document itself remains permanently preserved, and the rejection
+    reason becomes part of the immutable mandate audit trail.
+  </div>
+
+  <form
+    method="post"
+    novalidate
+  >
+    {% csrf_token %}
+
+    {{ form.non_field_errors }}
+
+    <fieldset class="module aligned">
+      {{ form.as_p }}
+    </fieldset>
+
+    <div class="submit-row">
+      <a
+        href="{% url 'admin:mandates_mandatedocument_change' document.pk %}"
+        class="button"
+      >
+        Cancel
+      </a>
+
+      <input
+        type="submit"
+        value="Reject evidence"
+        class="default"
+      >
+    </div>
+  </form>
+
+</div>
+{% endblock %}

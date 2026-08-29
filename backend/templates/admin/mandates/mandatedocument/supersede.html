@@ -1,0 +1,57 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+
+  <h2>Replace current mandate evidence</h2>
+
+  <p>
+    <strong>Mandate:</strong>
+    {{ document.mandate.mandate_number }}
+  </p>
+
+  <p>
+    <strong>Document type:</strong>
+    {{ document.get_document_type_display }}
+  </p>
+
+  <p>
+    <strong>Current file:</strong>
+    {{ document.original_filename }}
+  </p>
+
+  <p>
+    <strong>Current SHA-256:</strong>
+    <code>{{ document.file_hash }}</code>
+  </p>
+
+  <div class="help">
+    The existing document will not be modified or deleted.
+    It will become historical evidence, and the replacement
+    will be created as a new document requiring fresh approval.
+  </div>
+
+  <form
+    method="post"
+    enctype="multipart/form-data"
+    novalidate
+  >
+    {% csrf_token %}
+
+    {{ form.non_field_errors }}
+
+    <fieldset class="module aligned">
+      {{ form.as_p }}
+    </fieldset>
+
+    <div class="submit-row">
+      <input
+        type="submit"
+        value="Supersede evidence"
+        class="default"
+      >
+    </div>
+  </form>
+
+</div>
+{% endblock %}

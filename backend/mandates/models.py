@@ -321,6 +321,7 @@ class PropertyMandate(models.Model):
         self.approved_by = None
         self.approved_at = None
 
+
     def save(self, *args, **kwargs):
         if not self.mandate_number:
             self.mandate_number = f"PH-MAN-{timezone.now().year}-{uuid4().hex[:10].upper()}"
@@ -394,38 +395,180 @@ class MandateDocument(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
+
+        if not is_new:
+            persisted = type(self).objects.get(pk=self.pk)
+
+            immutable_fields = {
+                "mandate_id": (
+                    persisted.mandate_id,
+                    self.mandate_id,
+                ),
+                "document_type": (
+                    persisted.document_type,
+                    self.document_type,
+                ),
+                "file": (
+                    persisted.file.name,
+                    self.file.name,
+                ),
+                "original_filename": (
+                    persisted.original_filename,
+                    self.original_filename,
+                ),
+                "file_hash": (
+                    persisted.file_hash,
+                    self.file_hash,
+                ),
+                "file_size": (
+                    persisted.file_size,
+                    self.file_size,
+                ),
+                "uploaded_by_id": (
+                    persisted.uploaded_by_id,
+                    self.uploaded_by_id,
+                ),
+            }
+
+            changed_fields = [
+                field_name
+                for field_name, values in immutable_fields.items()
+                if values[0] != values[1]
+            ]
+
+            if changed_fields:
+                raise ValidationError(
+                    {
+                        "__all__": (
+                            "Mandate document evidence is immutable after "
+                            "upload. Create a new document version instead "
+                            "of changing: "
+                            + ", ".join(changed_fields)
+                            + "."
+                        )
+                    }
+                )
+
         if is_new:
-            self.original_filename = self.original_filename or self.file.name.rsplit("/", 1)[-1]
+            self.original_filename = (
+                self.original_filename
+                or self.file.name.rsplit("/", 1)[-1]
+            )
             self.file_size = self.file.size
+
         self.full_clean()
         super().save(*args, **kwargs)
+
         if is_new and not self.file_hash:
             self.file_hash = self.calculate_hash()
-            type(self).objects.filter(pk=self.pk).update(file_hash=self.file_hash)
+            type(self).objects.filter(
+                pk=self.pk,
+            ).update(
+                file_hash=self.file_hash,
+            )
 
     def approve(self, *, reviewed_by):
         if reviewed_by is None or not reviewed_by.is_staff:
-            raise ValidationError("Only a Pata Hao administrator can approve documents.")
+            raise ValidationError(
+                "Only a Pata Hao administrator can approve documents."
+            )
+
+        if not self.is_current:
+            raise ValidationError(
+                "Only the current version of a mandate document can be approved."
+            )
+
+        if self.status == self.Status.APPROVED:
+            raise ValidationError(
+                "This mandate document has already been approved."
+            )
+
         self.status = self.Status.APPROVED
         self.reviewed_by = reviewed_by
         self.reviewed_at = timezone.now()
         self.rejection_reason = ""
         self.save()
 
+    def reject(self, *, reviewed_by, reason):
+        if reviewed_by is None or not reviewed_by.is_staff:
+            raise ValidationError(
+                "Only a Pata Hao administrator can reject documents."
+            )
+
+        if not self.is_current:
+            raise ValidationError(
+                "Only the current version of a mandate document can be rejected."
+            )
+
+        if self.status == self.Status.REJECTED:
+            raise ValidationError(
+                "This mandate document has already been rejected."
+            )
+
+        cleaned_reason = (reason or "").strip()
+
+        if not cleaned_reason:
+            raise ValidationError(
+                "A document rejection reason is required."
+            )
+
+        self.status = self.Status.REJECTED
+        self.reviewed_by = reviewed_by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = cleaned_reason
+        self.save()
+
     def __str__(self):
         return f"{self.mandate.mandate_number} — {self.get_document_type_display()}"
 
 
+class MandateEventQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError(
+            "Mandate events are immutable and cannot be updated."
+        )
+
+    def delete(self):
+        raise ValidationError(
+            "Mandate events are immutable and cannot be deleted."
+        )
+
+
 class MandateEvent(models.Model):
-    mandate = models.ForeignKey(PropertyMandate, on_delete=models.PROTECT, related_name="events")
+    mandate = models.ForeignKey(
+        PropertyMandate,
+        on_delete=models.PROTECT,
+        related_name="events",
+    )
     action = models.CharField(max_length=60)
     notes = models.TextField(blank=True)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="mandate_events", null=True, blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="mandate_events",
+        null=True,
+        blank=True,
+    )
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = MandateEventQuerySet.as_manager()
+
     class Meta:
         ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError(
+                "Mandate events are immutable and cannot be updated."
+            )
+
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Mandate events are immutable and cannot be deleted."
+        )
 
     def __str__(self):
         return f"{self.mandate.mandate_number}: {self.action}"
