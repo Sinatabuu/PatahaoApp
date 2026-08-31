@@ -9,6 +9,8 @@ from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
+from rest_framework.test import APIClient
+
 from accounts.models import User
 from commissions.models import CommissionAgreement
 from mandates.admin import MandateDocumentAdmin
@@ -1556,4 +1558,203 @@ class SaleMandatePublicationTests(TestCase):
 
         self.assertTrue(
             document.is_current,
+        )
+
+
+    def test_partner_can_read_three_step_sale_pack_status(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        self._add_complete_sale_evidence(
+            mandate,
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.get(
+            f"/api/mandates/{mandate.id}/sale-pack/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            response.data,
+        )
+
+        self.assertTrue(
+            response.data["sale_pack_required"],
+        )
+        self.assertEqual(
+            response.data["completed_steps"],
+            3,
+        )
+        self.assertEqual(
+            response.data["total_steps"],
+            3,
+        )
+        self.assertTrue(
+            response.data["pack_complete"],
+        )
+        self.assertTrue(
+            response.data["publication_allowed"],
+            response.data["blocking_reasons"],
+        )
+
+        steps = {
+            step["key"]: step
+            for step in response.data["steps"]
+        }
+
+        self.assertEqual(
+            set(steps),
+            {
+                "owner_identity",
+                "ownership_proof",
+                "sale_authority",
+            },
+        )
+
+        for step in steps.values():
+            self.assertTrue(
+                step["completed"],
+            )
+            self.assertIsNotNone(
+                step["document"],
+            )
+            self.assertNotIn(
+                "file",
+                step["document"],
+            )
+
+    def test_sale_pack_api_returns_rejection_feedback(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        document = self._add_document(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+            filename="rejected-owner-id.pdf",
+        )
+
+        reason = "Owner identification image is unreadable."
+
+        reject_mandate_document(
+            document_id=document.id,
+            actor=self.admin,
+            reason=reason,
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.get(
+            f"/api/mandates/{mandate.id}/sale-pack/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            response.data,
+        )
+
+        owner_identity = next(
+            step
+            for step in response.data["steps"]
+            if step["key"] == "owner_identity"
+        )
+
+        self.assertFalse(
+            owner_identity["completed"],
+        )
+        self.assertEqual(
+            owner_identity["document"]["status"],
+            MandateDocument.Status.REJECTED,
+        )
+        self.assertEqual(
+            owner_identity["document"]["rejection_reason"],
+            reason,
+        )
+        self.assertNotIn(
+            "file",
+            owner_identity["document"],
+        )
+
+    def test_sale_pack_api_enforces_partner_ownership(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        customer = User.objects.create_user(
+            username="sale_pack_customer",
+            email="sale-pack-customer@example.com",
+            password="test-pass-123",
+            role=User.ROLE_CUSTOMER,
+        )
+
+        other_partner_user = User.objects.create_user(
+            username="other_sale_partner",
+            email="other-sale-partner@example.com",
+            password="test-pass-123",
+            role=User.ROLE_PARTNER,
+        )
+
+        Partner.objects.create(
+            user=other_partner_user,
+            business_name="Other Sale Partner",
+            verification_status=Partner.STATUS_APPROVED,
+            verified_by=self.admin,
+            verified_at=timezone.now(),
+        )
+
+        client = APIClient()
+
+        client.force_authenticate(
+            user=customer,
+        )
+
+        customer_response = client.get(
+            f"/api/mandates/{mandate.id}/sale-pack/",
+        )
+
+        self.assertEqual(
+            customer_response.status_code,
+            403,
+        )
+
+        client.force_authenticate(
+            user=other_partner_user,
+        )
+
+        other_partner_response = client.get(
+            f"/api/mandates/{mandate.id}/sale-pack/",
+        )
+
+        self.assertEqual(
+            other_partner_response.status_code,
+            404,
         )

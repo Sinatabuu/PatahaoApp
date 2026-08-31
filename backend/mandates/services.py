@@ -334,6 +334,169 @@ def evaluate_property_publication(property_obj):
     )
 
 
+
+def get_sale_mandate_pack_status(mandate):
+    """
+    Build the read-only partner-facing three-step Sale Pack status.
+
+    Private file paths are deliberately excluded.
+    """
+
+    property_obj = mandate.property
+
+    sale_pack_required = (
+        property_obj.listing_type
+        == property_obj.LISTING_SALE
+    )
+
+    required_steps = (
+        (
+            "owner_identity",
+            "Owner identity",
+            MandateDocument.DocumentType.OWNER_ID,
+        ),
+        (
+            "ownership_proof",
+            "Ownership proof",
+            MandateDocument.DocumentType.OWNERSHIP_PROOF,
+        ),
+        (
+            "sale_authority",
+            "Signed sale authority",
+            MandateDocument.DocumentType.SIGNED_MANDATE,
+        ),
+    )
+
+    current_documents = {
+        document.document_type: document
+        for document in mandate.documents.filter(
+            document_type__in=[
+                document_type
+                for _key, _label, document_type
+                in required_steps
+            ],
+            is_current=True,
+        )
+    }
+
+    agreement = mandate.commission_agreement
+
+    commission_ready = bool(
+        agreement is not None
+        and agreement.is_publish_ready()
+    )
+
+    steps = []
+
+    if sale_pack_required:
+        for key, label, document_type in required_steps:
+            document = current_documents.get(
+                document_type,
+            )
+
+            document_approved = bool(
+                document is not None
+                and document.status
+                == MandateDocument.Status.APPROVED
+            )
+
+            checks = {
+                "document_approved": document_approved,
+            }
+
+            if key == "owner_identity":
+                checks["owner_verified"] = (
+                    mandate.owner.is_verified
+                )
+
+            if key == "sale_authority":
+                checks["partner_declared"] = (
+                    mandate.partner_declared
+                )
+                checks["commission_agreement_ready"] = (
+                    commission_ready
+                )
+
+            document_data = None
+
+            if document is not None:
+                document_data = {
+                    "id": document.id,
+                    "document_type": document.document_type,
+                    "document_type_display": (
+                        document.get_document_type_display()
+                    ),
+                    "original_filename": (
+                        document.original_filename
+                    ),
+                    "file_hash": document.file_hash,
+                    "file_size": document.file_size,
+                    "status": document.status,
+                    "status_display": (
+                        document.get_status_display()
+                    ),
+                    "is_current": document.is_current,
+                    "rejection_reason": (
+                        document.rejection_reason
+                    ),
+                    "uploaded_at": document.uploaded_at,
+                    "reviewed_at": document.reviewed_at,
+                }
+
+            steps.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "completed": all(
+                        checks.values(),
+                    ),
+                    "checks": checks,
+                    "document": document_data,
+                }
+            )
+
+    completed_steps = sum(
+        1
+        for step in steps
+        if step["completed"]
+    )
+
+    readiness = evaluate_property_publication(
+        property_obj,
+    )
+
+    return {
+        "mandate_id": mandate.id,
+        "mandate_number": mandate.mandate_number,
+        "property_id": property_obj.id,
+        "property_title": property_obj.title,
+        "listing_type": property_obj.listing_type,
+        "sale_pack_required": sale_pack_required,
+        "completed_steps": completed_steps,
+        "total_steps": len(steps),
+        "pack_complete": (
+            completed_steps == len(steps)
+            if sale_pack_required
+            else None
+        ),
+        "publication_allowed": readiness.allowed,
+        "blocking_reasons": list(
+            readiness.reasons,
+        ),
+        "administrative_review": {
+            "mandate_status": mandate.status,
+            "mandate_status_display": (
+                mandate.get_status_display()
+            ),
+            "mandate_currently_valid": (
+                mandate.is_currently_valid
+            ),
+        },
+        "steps": steps,
+    }
+
+
+
 def validate_property_publication(property_obj):
     readiness = evaluate_property_publication(
         property_obj,

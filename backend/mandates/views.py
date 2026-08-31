@@ -10,6 +10,7 @@ from .serializers import (
     PartnerMandateDeclarationSerializer,
     PropertyMandateSerializer,
 )
+from .services import get_sale_mandate_pack_status
 
 
 class PropertyMandateViewSet(viewsets.ModelViewSet):
@@ -337,5 +338,23 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
 
         return Response(
             self.get_serializer(mandate).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="sale-pack",
+    )
+    def sale_pack(
+        self,
+        request,
+        pk=None,
+    ):
+        mandate = self.get_object()
+
+        return Response(
+            get_sale_mandate_pack_status(mandate),
             status=status.HTTP_200_OK,
         )
