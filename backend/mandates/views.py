@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 
 from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -9,14 +10,20 @@ from rest_framework.exceptions import (
 )
 from rest_framework.response import Response
 
-from .models import MandateEvent, PropertyMandate
+from .models import (
+    MandateDocument,
+    MandateEvent,
+    PropertyMandate,
+)
 from .serializers import (
+    MandateDocumentReplacementSerializer,
     MandateDocumentUploadSerializer,
     PartnerMandateDeclarationSerializer,
     PropertyMandateSerializer,
 )
 from .services import (
     get_sale_mandate_pack_status,
+    replace_rejected_mandate_document,
     upload_mandate_document,
 )
 
@@ -413,6 +420,71 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
         return Response(
             get_sale_mandate_pack_status(
                 document.mandate,
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=(
+            r"documents/"
+            r"(?P<document_id>[^/.]+)/"
+            r"replace"
+        ),
+        parser_classes=[
+            parsers.MultiPartParser,
+            parsers.FormParser,
+        ],
+    )
+    def replace_rejected_document(
+        self,
+        request,
+        pk=None,
+        document_id=None,
+    ):
+        mandate = self.get_object()
+
+        get_object_or_404(
+            MandateDocument.objects.only(
+                "id",
+            ),
+            pk=document_id,
+            mandate_id=mandate.id,
+        )
+
+        serializer = (
+            MandateDocumentReplacementSerializer(
+                data=request.data,
+            )
+        )
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        try:
+            replacement = (
+                replace_rejected_mandate_document(
+                    mandate_id=mandate.id,
+                    document_id=document_id,
+                    actor=request.user,
+                    file=serializer.validated_data[
+                        "file"
+                    ],
+                )
+            )
+
+        except DjangoValidationError as error:
+            raise APIValidationError(
+                {
+                    "detail": error.messages,
+                }
+            ) from error
+
+        return Response(
+            get_sale_mandate_pack_status(
+                replacement.mandate,
             ),
             status=status.HTTP_201_CREATED,
         )

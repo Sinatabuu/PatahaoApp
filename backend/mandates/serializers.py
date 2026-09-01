@@ -397,6 +397,25 @@ class MandateDocumentUploadSerializer(serializers.Serializer):
 
 
 
+
+class MandateDocumentReplacementSerializer(
+    serializers.Serializer,
+):
+    file = serializers.FileField(
+        write_only=True,
+    )
+
+    def validate_file(self, value):
+        upload_serializer = (
+            MandateDocumentUploadSerializer()
+        )
+
+        return upload_serializer.validate_file(
+            value,
+        )
+
+
+
 class PartnerMandateDeclarationSerializer(serializers.Serializer):
     owner_authority_confirmed = serializers.BooleanField()
     no_cash_acknowledged = serializers.BooleanField()

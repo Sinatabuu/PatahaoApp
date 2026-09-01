@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
@@ -145,6 +146,174 @@ def upload_mandate_document(
     )
 
     return document
+
+
+
+
+@transaction.atomic
+def replace_rejected_mandate_document(
+    *,
+    mandate_id,
+    document_id,
+    actor,
+    file,
+):
+    """
+    Replace one current rejected Sale Pack document.
+
+    The rejected version remains historical. The replacement starts
+    as uploaded and requires a completely fresh administrator review.
+    """
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated user is required "
+            "to replace rejected mandate evidence."
+        )
+
+    if file is None:
+        raise ValidationError(
+            "A replacement evidence file is required."
+        )
+
+    document = (
+        MandateDocument.objects
+        .select_for_update()
+        .select_related(
+            "mandate",
+            "mandate__property",
+            "mandate__partner",
+        )
+        .get(
+            pk=document_id,
+            mandate_id=mandate_id,
+        )
+    )
+
+    mandate = document.mandate
+
+    if not actor.is_staff:
+        partner = getattr(
+            actor,
+            "partner_profile",
+            None,
+        )
+
+        if partner is None or not partner.is_active:
+            raise ValidationError(
+                "An active partner account is required "
+                "to replace mandate evidence."
+            )
+
+        if mandate.partner_id != partner.id:
+            raise ValidationError(
+                "You may replace evidence only for "
+                "your own mandate."
+            )
+
+    if (
+        mandate.property.listing_type
+        != mandate.property.LISTING_SALE
+    ):
+        raise ValidationError(
+            "The Sale Mandate Pack applies only "
+            "to sale properties."
+        )
+
+    if mandate.status in {
+        PropertyMandate.Status.REJECTED,
+        PropertyMandate.Status.EXPIRED,
+        PropertyMandate.Status.CANCELLED,
+    }:
+        raise ValidationError(
+            "Evidence cannot be replaced on a closed mandate."
+        )
+
+    allowed_document_types = {
+        MandateDocument.DocumentType.OWNER_ID,
+        MandateDocument.DocumentType.OWNERSHIP_PROOF,
+        MandateDocument.DocumentType.SIGNED_MANDATE,
+    }
+
+    if document.document_type not in allowed_document_types:
+        raise ValidationError(
+            "This document type is not part of "
+            "the three-step Sale Mandate Pack."
+        )
+
+    if not document.is_current:
+        raise ValidationError(
+            "Only the current rejected evidence "
+            "may be replaced."
+        )
+
+    if document.status != MandateDocument.Status.REJECTED:
+        raise ValidationError(
+            "Only rejected evidence may be replaced "
+            "through this workflow."
+        )
+
+    replacement_digest = hashlib.sha256()
+
+    file.seek(0)
+
+    for chunk in file.chunks():
+        replacement_digest.update(
+            chunk,
+        )
+
+    file.seek(0)
+
+    replacement_hash = replacement_digest.hexdigest()
+
+    if replacement_hash == document.file_hash:
+        raise ValidationError(
+            "The replacement file must be different "
+            "from the rejected evidence."
+        )
+
+    old_document_id = document.id
+    old_file_hash = document.file_hash
+    old_rejection_reason = document.rejection_reason
+
+    document.is_current = False
+    document.save(
+        update_fields=[
+            "is_current",
+        ],
+    )
+
+    new_document = MandateDocument.objects.create(
+        mandate=mandate,
+        document_type=document.document_type,
+        file=file,
+        status=MandateDocument.Status.UPLOADED,
+        is_current=True,
+        uploaded_by=actor,
+    )
+
+    MandateEvent.objects.create(
+        mandate=mandate,
+        action="document_replaced_after_rejection",
+        actor=actor,
+        notes=(
+            f"Rejected {document.get_document_type_display()} "
+            "replaced and resubmitted for fresh review."
+        ),
+        metadata={
+            "document_type": document.document_type,
+            "old_document_id": old_document_id,
+            "old_file_hash": old_file_hash,
+            "old_status": MandateDocument.Status.REJECTED,
+            "old_rejection_reason": old_rejection_reason,
+            "new_document_id": new_document.id,
+            "new_file_hash": new_document.file_hash,
+            "new_status": new_document.status,
+            "new_is_current": new_document.is_current,
+        },
+    )
+
+    return new_document
 
 
 

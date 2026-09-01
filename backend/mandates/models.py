@@ -483,6 +483,12 @@ class MandateDocument(models.Model):
                 "This mandate document has already been approved."
             )
 
+        if self.status == self.Status.REJECTED:
+            raise ValidationError(
+                "A rejected mandate document cannot be approved. "
+                "Upload replacement evidence for fresh review."
+            )
+
         self.status = self.Status.APPROVED
         self.reviewed_by = reviewed_by
         self.reviewed_at = timezone.now()

@@ -23,6 +23,7 @@ from mandates.models import (
 from mandates.services import (
     evaluate_property_publication,
     reject_mandate_document,
+    replace_rejected_mandate_document,
     supersede_mandate_document,
     upload_mandate_document,
 )
@@ -2156,5 +2157,642 @@ class SaleMandatePublicationTests(TestCase):
         self.assertFalse(
             mandate.events.filter(
                 action="document_uploaded",
+            ).exists(),
+        )
+
+
+    def test_rejected_document_requires_replacement_before_approval(
+        self,
+    ):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        document = self._add_document(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+        )
+
+        reason = "Owner identification is unreadable."
+
+        reject_mandate_document(
+            document_id=document.id,
+            actor=self.admin,
+            reason=reason,
+        )
+
+        document.refresh_from_db()
+        rejected_reviewed_at = document.reviewed_at
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "A rejected mandate document cannot be approved.",
+        ):
+            document.approve(
+                reviewed_by=self.admin,
+            )
+
+        request = RequestFactory().post(
+            "/admin/mandates/mandatedocument/",
+        )
+        request.user = self.admin
+        request.session = {}
+        request._messages = FallbackStorage(request)
+
+        document_admin = MandateDocumentAdmin(
+            MandateDocument,
+            admin.site,
+        )
+
+        document_admin.approve_selected_documents(
+            request,
+            MandateDocument.objects.filter(
+                pk=document.pk,
+            ),
+        )
+
+        document.refresh_from_db()
+
+        self.assertEqual(
+            document.status,
+            MandateDocument.Status.REJECTED,
+        )
+        self.assertTrue(
+            document.is_current,
+        )
+        self.assertEqual(
+            document.rejection_reason,
+            reason,
+        )
+        self.assertEqual(
+            document.reviewed_at,
+            rejected_reviewed_at,
+        )
+        self.assertEqual(
+            mandate.events.filter(
+                action="document_rejected",
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_approved",
+            ).exists(),
+        )
+
+
+    def test_partner_can_replace_rejected_sale_pack_document(
+        self,
+    ):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        old_document = MandateDocument.objects.create(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            file=SimpleUploadedFile(
+                "rejected-owner-id.pdf",
+                b"%PDF-1.4\n% Rejected evidence\n%%EOF\n",
+                content_type="application/pdf",
+            ),
+            status=MandateDocument.Status.UPLOADED,
+            is_current=True,
+            uploaded_by=self.partner_user,
+        )
+
+        reason = "The owner identification is unreadable."
+
+        reject_mandate_document(
+            document_id=old_document.id,
+            actor=self.admin,
+            reason=reason,
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            (
+                f"/api/mandates/{mandate.id}/documents/"
+                f"{old_document.id}/replace/"
+            ),
+            data={
+                "file": SimpleUploadedFile(
+                    "clear-owner-id.pdf",
+                    (
+                        b"%PDF-1.4\n"
+                        b"% Clear replacement evidence\n"
+                        b"%%EOF\n"
+                    ),
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            201,
+            response.data,
+        )
+
+        old_document.refresh_from_db()
+
+        self.assertFalse(
+            old_document.is_current,
+        )
+        self.assertEqual(
+            old_document.status,
+            MandateDocument.Status.REJECTED,
+        )
+        self.assertEqual(
+            old_document.rejection_reason,
+            reason,
+        )
+
+        new_document = mandate.documents.get(
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            is_current=True,
+        )
+
+        self.assertNotEqual(
+            new_document.id,
+            old_document.id,
+        )
+        self.assertNotEqual(
+            new_document.file_hash,
+            old_document.file_hash,
+        )
+        self.assertEqual(
+            new_document.status,
+            MandateDocument.Status.UPLOADED,
+        )
+        self.assertEqual(
+            new_document.uploaded_by,
+            self.partner_user,
+        )
+        self.assertIsNone(
+            new_document.reviewed_by,
+        )
+        self.assertIsNone(
+            new_document.reviewed_at,
+        )
+        self.assertEqual(
+            new_document.rejection_reason,
+            "",
+        )
+
+        self.assertEqual(
+            mandate.documents.filter(
+                document_type=(
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                is_current=True,
+            ).count(),
+            1,
+        )
+
+        event = mandate.events.get(
+            action="document_replaced_after_rejection",
+        )
+
+        self.assertEqual(
+            event.actor,
+            self.partner_user,
+        )
+        self.assertEqual(
+            event.metadata["old_document_id"],
+            old_document.id,
+        )
+        self.assertEqual(
+            event.metadata["new_document_id"],
+            new_document.id,
+        )
+        self.assertEqual(
+            event.metadata["old_rejection_reason"],
+            reason,
+        )
+
+        owner_identity = next(
+            step
+            for step in response.data["steps"]
+            if step["key"] == "owner_identity"
+        )
+
+        self.assertFalse(
+            owner_identity["completed"],
+        )
+        self.assertEqual(
+            owner_identity["document"]["id"],
+            new_document.id,
+        )
+        self.assertEqual(
+            owner_identity["document"]["status"],
+            MandateDocument.Status.UPLOADED,
+        )
+
+    def test_partner_cannot_replace_non_rejected_evidence(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        document = self._add_document(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            (
+                f"/api/mandates/{mandate.id}/documents/"
+                f"{document.id}/replace/"
+            ),
+            data={
+                "file": SimpleUploadedFile(
+                    "premature-replacement.pdf",
+                    b"%PDF-1.4\n% Replacement\n%%EOF\n",
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+            response.data,
+        )
+        self.assertIn(
+            "Only rejected evidence may be replaced",
+            str(response.data),
+        )
+
+        document.refresh_from_db()
+
+        self.assertTrue(
+            document.is_current,
+        )
+        self.assertEqual(
+            document.status,
+            MandateDocument.Status.UPLOADED,
+        )
+        self.assertEqual(
+            mandate.documents.count(),
+            1,
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_replaced_after_rejection",
+            ).exists(),
+        )
+
+    def test_rejected_replacement_must_have_different_contents(
+        self,
+    ):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        original_contents = (
+            b"%PDF-1.4\n"
+            b"% Same rejected evidence\n"
+            b"%%EOF\n"
+        )
+
+        document = MandateDocument.objects.create(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            file=SimpleUploadedFile(
+                "same-owner-id.pdf",
+                original_contents,
+                content_type="application/pdf",
+            ),
+            status=MandateDocument.Status.UPLOADED,
+            is_current=True,
+            uploaded_by=self.partner_user,
+        )
+
+        reject_mandate_document(
+            document_id=document.id,
+            actor=self.admin,
+            reason="This evidence must be replaced.",
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            (
+                f"/api/mandates/{mandate.id}/documents/"
+                f"{document.id}/replace/"
+            ),
+            data={
+                "file": SimpleUploadedFile(
+                    "renamed-same-owner-id.pdf",
+                    original_contents,
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+            response.data,
+        )
+        self.assertIn(
+            "must be different",
+            str(response.data),
+        )
+
+        document.refresh_from_db()
+
+        self.assertTrue(
+            document.is_current,
+        )
+        self.assertEqual(
+            document.status,
+            MandateDocument.Status.REJECTED,
+        )
+        self.assertEqual(
+            mandate.documents.count(),
+            1,
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_replaced_after_rejection",
+            ).exists(),
+        )
+
+
+    def test_replacement_document_must_belong_to_url_mandate(
+        self,
+    ):
+        first_property = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+        second_property = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        first_mandate = self._create_approved_mandate(
+            property_obj=first_property,
+            owner=self._create_owner(),
+        )
+        second_mandate = self._create_approved_mandate(
+            property_obj=second_property,
+            owner=self._create_owner(),
+        )
+
+        document = self._add_document(
+            mandate=second_mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+        )
+
+        reject_mandate_document(
+            document_id=document.id,
+            actor=self.admin,
+            reason="Rejected evidence on the second mandate.",
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            (
+                f"/api/mandates/{first_mandate.id}/documents/"
+                f"{document.id}/replace/"
+            ),
+            data={
+                "file": SimpleUploadedFile(
+                    "wrong-mandate-replacement.pdf",
+                    b"%PDF-1.4\n% Wrong mandate\n%%EOF\n",
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            404,
+        )
+
+        document.refresh_from_db()
+
+        self.assertTrue(
+            document.is_current,
+        )
+        self.assertEqual(
+            document.status,
+            MandateDocument.Status.REJECTED,
+        )
+        self.assertEqual(
+            second_mandate.documents.count(),
+            1,
+        )
+        self.assertFalse(
+            second_mandate.events.filter(
+                action="document_replaced_after_rejection",
+            ).exists(),
+        )
+
+    def test_historical_rejected_document_cannot_be_replaced_again(
+        self,
+    ):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        old_document = self._add_document(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+        )
+
+        reject_mandate_document(
+            document_id=old_document.id,
+            actor=self.admin,
+            reason="Replace this rejected evidence.",
+        )
+
+        new_document = replace_rejected_mandate_document(
+            mandate_id=mandate.id,
+            document_id=old_document.id,
+            actor=self.partner_user,
+            file=SimpleUploadedFile(
+                "first-replacement.pdf",
+                (
+                    b"%PDF-1.4\n"
+                    b"% First replacement\n"
+                    b"%%EOF\n"
+                ),
+                content_type="application/pdf",
+            ),
+        )
+
+        old_document.refresh_from_db()
+
+        self.assertFalse(
+            old_document.is_current,
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Only the current rejected evidence may be replaced.",
+        ):
+            replace_rejected_mandate_document(
+                mandate_id=mandate.id,
+                document_id=old_document.id,
+                actor=self.partner_user,
+                file=SimpleUploadedFile(
+                    "second-replacement.pdf",
+                    (
+                        b"%PDF-1.4\n"
+                        b"% Second replacement\n"
+                        b"%%EOF\n"
+                    ),
+                    content_type="application/pdf",
+                ),
+            )
+
+        new_document.refresh_from_db()
+
+        self.assertTrue(
+            new_document.is_current,
+        )
+        self.assertEqual(
+            new_document.status,
+            MandateDocument.Status.UPLOADED,
+        )
+        self.assertEqual(
+            mandate.events.filter(
+                action="document_replaced_after_rejection",
+            ).count(),
+            1,
+        )
+
+    def test_rejected_replacement_rolls_back_when_event_fails(
+        self,
+    ):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        old_document = self._add_document(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+        )
+
+        reject_mandate_document(
+            document_id=old_document.id,
+            actor=self.admin,
+            reason="Replacement required.",
+        )
+
+        with patch.object(
+            MandateEvent.objects,
+            "create",
+            side_effect=RuntimeError(
+                "simulated replacement audit failure"
+            ),
+        ):
+            with self.assertRaisesMessage(
+                RuntimeError,
+                "simulated replacement audit failure",
+            ):
+                replace_rejected_mandate_document(
+                    mandate_id=mandate.id,
+                    document_id=old_document.id,
+                    actor=self.partner_user,
+                    file=SimpleUploadedFile(
+                        "rollback-replacement.pdf",
+                        (
+                            b"%PDF-1.4\n"
+                            b"% Rollback replacement\n"
+                            b"%%EOF\n"
+                        ),
+                        content_type="application/pdf",
+                    ),
+                )
+
+        old_document.refresh_from_db()
+
+        self.assertTrue(
+            old_document.is_current,
+        )
+        self.assertEqual(
+            old_document.status,
+            MandateDocument.Status.REJECTED,
+        )
+        self.assertEqual(
+            mandate.documents.count(),
+            1,
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_replaced_after_rejection",
             ).exists(),
         )

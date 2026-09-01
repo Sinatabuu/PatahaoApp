@@ -830,6 +830,7 @@ class MandateDocumentAdmin(admin.ModelAdmin):
         approved = 0
         skipped = 0
         already_approved = 0
+        rejected_documents = 0
 
         for selected_document in queryset:
             with transaction.atomic():
@@ -842,6 +843,10 @@ class MandateDocumentAdmin(admin.ModelAdmin):
 
                 if not document.is_current:
                     skipped += 1
+                    continue
+
+                if document.status == MandateDocument.Status.REJECTED:
+                    rejected_documents += 1
                     continue
 
                 if document.status == MandateDocument.Status.APPROVED:
@@ -894,6 +899,16 @@ class MandateDocumentAdmin(admin.ModelAdmin):
                     "skipped. No duplicate approval event was created."
                 ),
                 level=messages.INFO,
+            )
+
+        if rejected_documents:
+            self.message_user(
+                request,
+                (
+                    f"{rejected_documents} rejected document(s) skipped. "
+                    "Upload replacement evidence for fresh review."
+                ),
+                level=messages.WARNING,
             )
 
 
