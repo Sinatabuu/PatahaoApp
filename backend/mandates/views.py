@@ -1,16 +1,24 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
-from rest_framework import permissions, status, viewsets
+from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError as APIValidationError,
+)
 from rest_framework.response import Response
 
 from .models import MandateEvent, PropertyMandate
 from .serializers import (
+    MandateDocumentUploadSerializer,
     PartnerMandateDeclarationSerializer,
     PropertyMandateSerializer,
 )
-from .services import get_sale_mandate_pack_status
+from .services import (
+    get_sale_mandate_pack_status,
+    upload_mandate_document,
+)
 
 
 class PropertyMandateViewSet(viewsets.ModelViewSet):
@@ -357,4 +365,54 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
         return Response(
             get_sale_mandate_pack_status(mandate),
             status=status.HTTP_200_OK,
+        )
+
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents",
+        parser_classes=[
+            parsers.MultiPartParser,
+            parsers.FormParser,
+        ],
+    )
+    def upload_document(
+        self,
+        request,
+        pk=None,
+    ):
+        mandate = self.get_object()
+
+        serializer = MandateDocumentUploadSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        try:
+            document = upload_mandate_document(
+                mandate_id=mandate.id,
+                actor=request.user,
+                document_type=(
+                    serializer.validated_data[
+                        "document_type"
+                    ]
+                ),
+                file=serializer.validated_data["file"],
+            )
+
+        except DjangoValidationError as error:
+            raise APIValidationError(
+                {
+                    "detail": error.messages,
+                }
+            ) from error
+
+        return Response(
+            get_sale_mandate_pack_status(
+                document.mandate,
+            ),
+            status=status.HTTP_201_CREATED,
         )

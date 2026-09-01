@@ -1,7 +1,11 @@
 from rest_framework import serializers
 
 from commissions.models import CommissionAgreement
-from .models import PropertyMandate, PropertyOwner
+from .models import (
+    MandateDocument,
+    PropertyMandate,
+    PropertyOwner,
+)
 
 
 class PropertyOwnerSummarySerializer(serializers.ModelSerializer):
@@ -290,6 +294,107 @@ class PropertyMandateSerializer(serializers.ModelSerializer):
         return super().create(
             validated_data,
         )
+
+
+
+class MandateDocumentUploadSerializer(serializers.Serializer):
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+
+    document_type = serializers.ChoiceField(
+        choices=[
+            (
+                MandateDocument.DocumentType.OWNER_ID,
+                "Owner identification",
+            ),
+            (
+                MandateDocument.DocumentType.OWNERSHIP_PROOF,
+                "Ownership proof",
+            ),
+            (
+                MandateDocument.DocumentType.SIGNED_MANDATE,
+                "Signed property mandate",
+            ),
+        ],
+    )
+
+    file = serializers.FileField(
+        write_only=True,
+    )
+
+    def validate_file(self, value):
+        filename = (
+            getattr(value, "name", "")
+            or ""
+        ).lower()
+
+        extension = (
+            "." + filename.rsplit(".", 1)[-1]
+            if "." in filename
+            else ""
+        )
+
+        allowed_content_types = {
+            ".pdf": {
+                "application/pdf",
+                "application/octet-stream",
+            },
+            ".jpg": {
+                "image/jpeg",
+                "application/octet-stream",
+            },
+            ".jpeg": {
+                "image/jpeg",
+                "application/octet-stream",
+            },
+            ".png": {
+                "image/png",
+                "application/octet-stream",
+            },
+        }
+
+        expected_signatures = {
+            ".pdf": b"%PDF-",
+            ".jpg": b"\xff\xd8\xff",
+            ".jpeg": b"\xff\xd8\xff",
+            ".png": b"\x89PNG\r\n\x1a\n",
+        }
+
+        if extension not in allowed_content_types:
+            raise serializers.ValidationError(
+                "Upload a PDF, JPEG, or PNG evidence file."
+            )
+
+        if value.size > self.MAX_FILE_SIZE:
+            raise serializers.ValidationError(
+                "The evidence file must not exceed 10 MB."
+            )
+
+        content_type = (
+            getattr(value, "content_type", "")
+            or ""
+        ).lower()
+
+        if (
+            content_type
+            not in allowed_content_types[extension]
+        ):
+            raise serializers.ValidationError(
+                "The file content type does not match "
+                "an allowed evidence format."
+            )
+
+        header = value.read(8)
+        value.seek(0)
+
+        if not header.startswith(
+            expected_signatures[extension]
+        ):
+            raise serializers.ValidationError(
+                "The file contents do not match its extension."
+            )
+
+        return value
+
 
 
 class PartnerMandateDeclarationSerializer(serializers.Serializer):

@@ -24,6 +24,7 @@ from mandates.services import (
     evaluate_property_publication,
     reject_mandate_document,
     supersede_mandate_document,
+    upload_mandate_document,
 )
 
 from partners.models import Partner
@@ -1757,4 +1758,403 @@ class SaleMandatePublicationTests(TestCase):
         self.assertEqual(
             other_partner_response.status_code,
             404,
+        )
+
+
+    def test_partner_can_upload_initial_sale_pack_document(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            f"/api/mandates/{mandate.id}/documents/",
+            data={
+                "document_type": (
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                "file": SimpleUploadedFile(
+                    "partner-owner-id.pdf",
+                    (
+                        b"%PDF-1.4\n"
+                        b"% Pata Hao partner evidence\n"
+                        b"%%EOF\n"
+                    ),
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            201,
+            response.data,
+        )
+
+        document = mandate.documents.get(
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            is_current=True,
+        )
+
+        self.assertEqual(
+            document.status,
+            MandateDocument.Status.UPLOADED,
+        )
+        self.assertEqual(
+            document.uploaded_by,
+            self.partner_user,
+        )
+        self.assertIsNone(
+            document.reviewed_by,
+        )
+        self.assertIsNone(
+            document.reviewed_at,
+        )
+        self.assertTrue(
+            document.file_hash,
+        )
+
+        event = mandate.events.get(
+            action="document_uploaded",
+        )
+
+        self.assertEqual(
+            event.actor,
+            self.partner_user,
+        )
+        self.assertEqual(
+            event.metadata["document_id"],
+            document.id,
+        )
+        self.assertEqual(
+            event.metadata["file_hash"],
+            document.file_hash,
+        )
+
+        owner_identity = next(
+            step
+            for step in response.data["steps"]
+            if step["key"] == "owner_identity"
+        )
+
+        self.assertFalse(
+            owner_identity["completed"],
+        )
+        self.assertEqual(
+            owner_identity["document"]["status"],
+            MandateDocument.Status.UPLOADED,
+        )
+        self.assertNotIn(
+            "file",
+            owner_identity["document"],
+        )
+
+    def test_sale_pack_upload_rejects_fake_pdf_contents(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            f"/api/mandates/{mandate.id}/documents/",
+            data={
+                "document_type": (
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                "file": SimpleUploadedFile(
+                    "fake-owner-id.pdf",
+                    b"This is not a real PDF file.",
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+            response.data,
+        )
+        self.assertIn(
+            "file",
+            response.data,
+        )
+        self.assertFalse(
+            mandate.documents.exists(),
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_uploaded",
+            ).exists(),
+        )
+
+    def test_sale_pack_upload_rejects_duplicate_current_type(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        existing_document = self._add_document(
+            mandate=mandate,
+            document_type=(
+                MandateDocument.DocumentType.OWNER_ID
+            ),
+            approved=False,
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            f"/api/mandates/{mandate.id}/documents/",
+            data={
+                "document_type": (
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                "file": SimpleUploadedFile(
+                    "duplicate-owner-id.pdf",
+                    (
+                        b"%PDF-1.4\n"
+                        b"% Duplicate evidence\n"
+                        b"%%EOF\n"
+                    ),
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+            response.data,
+        )
+        self.assertIn(
+            "controlled replacement workflow",
+            str(response.data),
+        )
+        self.assertEqual(
+            mandate.documents.filter(
+                document_type=(
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+            ).count(),
+            1,
+        )
+        self.assertTrue(
+            MandateDocument.objects.filter(
+                pk=existing_document.pk,
+                is_current=True,
+            ).exists(),
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_uploaded",
+            ).exists(),
+        )
+
+
+    def test_sale_pack_upload_enforces_partner_ownership(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        customer = User.objects.create_user(
+            username="upload_customer",
+            email="upload-customer@example.com",
+            password="test-pass-123",
+            role=User.ROLE_CUSTOMER,
+        )
+
+        other_partner_user = User.objects.create_user(
+            username="upload_other_partner",
+            email="upload-other-partner@example.com",
+            password="test-pass-123",
+            role=User.ROLE_PARTNER,
+        )
+
+        Partner.objects.create(
+            user=other_partner_user,
+            business_name="Upload Other Partner",
+            verification_status=Partner.STATUS_APPROVED,
+            verified_by=self.admin,
+            verified_at=timezone.now(),
+        )
+
+        client = APIClient()
+
+        client.force_authenticate(
+            user=customer,
+        )
+
+        customer_response = client.post(
+            f"/api/mandates/{mandate.id}/documents/",
+            data={
+                "document_type": (
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                "file": SimpleUploadedFile(
+                    "customer-attempt.pdf",
+                    b"%PDF-1.4\n%%EOF\n",
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            customer_response.status_code,
+            403,
+        )
+
+        client.force_authenticate(
+            user=other_partner_user,
+        )
+
+        other_partner_response = client.post(
+            f"/api/mandates/{mandate.id}/documents/",
+            data={
+                "document_type": (
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                "file": SimpleUploadedFile(
+                    "other-partner-attempt.pdf",
+                    b"%PDF-1.4\n%%EOF\n",
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            other_partner_response.status_code,
+            404,
+        )
+        self.assertFalse(
+            mandate.documents.exists(),
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_uploaded",
+            ).exists(),
+        )
+
+    def test_sale_pack_upload_is_not_required_for_rental(self):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_RENT,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        client = APIClient()
+        client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = client.post(
+            f"/api/mandates/{mandate.id}/documents/",
+            data={
+                "document_type": (
+                    MandateDocument.DocumentType.OWNER_ID
+                ),
+                "file": SimpleUploadedFile(
+                    "rental-owner-id.pdf",
+                    b"%PDF-1.4\n%%EOF\n",
+                    content_type="application/pdf",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+            response.data,
+        )
+        self.assertIn(
+            "applies only to sale properties",
+            str(response.data),
+        )
+        self.assertFalse(
+            mandate.documents.exists(),
+        )
+
+    def test_sale_pack_upload_rolls_back_when_event_creation_fails(
+        self,
+    ):
+        property_obj = self._create_property(
+            listing_type=Property.LISTING_SALE,
+        )
+
+        mandate = self._create_approved_mandate(
+            property_obj=property_obj,
+            owner=self._create_owner(),
+        )
+
+        with patch.object(
+            MandateEvent.objects,
+            "create",
+            side_effect=RuntimeError(
+                "simulated upload audit failure"
+            ),
+        ):
+            with self.assertRaisesMessage(
+                RuntimeError,
+                "simulated upload audit failure",
+            ):
+                upload_mandate_document(
+                    mandate_id=mandate.id,
+                    actor=self.partner_user,
+                    document_type=(
+                        MandateDocument.DocumentType.OWNER_ID
+                    ),
+                    file=SimpleUploadedFile(
+                        "rollback-owner-id.pdf",
+                        b"%PDF-1.4\n%%EOF\n",
+                        content_type="application/pdf",
+                    ),
+                )
+
+        self.assertFalse(
+            mandate.documents.exists(),
+        )
+        self.assertFalse(
+            mandate.events.filter(
+                action="document_uploaded",
+            ).exists(),
         )

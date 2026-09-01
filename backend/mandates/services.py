@@ -18,6 +18,136 @@ class PublicationReadiness:
 
 
 
+
+@transaction.atomic
+def upload_mandate_document(
+    *,
+    mandate_id,
+    actor,
+    document_type,
+    file,
+):
+    """
+    Upload one initial piece of current Sale Pack evidence.
+
+    Approval is deliberately excluded from this operation.
+    """
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated user is required "
+            "to upload mandate evidence."
+        )
+
+    if file is None:
+        raise ValidationError(
+            "An evidence file is required."
+        )
+
+    mandate = (
+        PropertyMandate.objects
+        .select_for_update()
+        .select_related(
+            "property",
+            "partner",
+        )
+        .get(
+            pk=mandate_id,
+        )
+    )
+
+    if not actor.is_staff:
+        partner = getattr(
+            actor,
+            "partner_profile",
+            None,
+        )
+
+        if partner is None or not partner.is_active:
+            raise ValidationError(
+                "An active partner account is required "
+                "to upload mandate evidence."
+            )
+
+        if mandate.partner_id != partner.id:
+            raise ValidationError(
+                "You may upload evidence only for "
+                "your own mandate."
+            )
+
+    if (
+        mandate.property.listing_type
+        != mandate.property.LISTING_SALE
+    ):
+        raise ValidationError(
+            "The Sale Mandate Pack applies only "
+            "to sale properties."
+        )
+
+    if mandate.status in {
+        PropertyMandate.Status.REJECTED,
+        PropertyMandate.Status.EXPIRED,
+        PropertyMandate.Status.CANCELLED,
+    }:
+        raise ValidationError(
+            "Evidence cannot be uploaded to a closed mandate."
+        )
+
+    allowed_document_types = {
+        MandateDocument.DocumentType.OWNER_ID,
+        MandateDocument.DocumentType.OWNERSHIP_PROOF,
+        MandateDocument.DocumentType.SIGNED_MANDATE,
+    }
+
+    if document_type not in allowed_document_types:
+        raise ValidationError(
+            "This document type is not part of "
+            "the three-step Sale Mandate Pack."
+        )
+
+    if mandate.documents.filter(
+        document_type=document_type,
+        is_current=True,
+    ).exists():
+        raise ValidationError(
+            "Current evidence of this type already exists. "
+            "Use the controlled replacement workflow."
+        )
+
+    document = MandateDocument.objects.create(
+        mandate=mandate,
+        document_type=document_type,
+        file=file,
+        status=MandateDocument.Status.UPLOADED,
+        is_current=True,
+        uploaded_by=actor,
+    )
+
+    MandateEvent.objects.create(
+        mandate=mandate,
+        action="document_uploaded",
+        actor=actor,
+        notes=(
+            f"{document.get_document_type_display()} "
+            "uploaded for Pata Hao review."
+        ),
+        metadata={
+            "document_id": document.id,
+            "document_type": document.document_type,
+            "original_filename": (
+                document.original_filename
+            ),
+            "file_hash": document.file_hash,
+            "file_size": document.file_size,
+            "status": document.status,
+            "is_current": document.is_current,
+        },
+    )
+
+    return document
+
+
+
 @transaction.atomic
 def supersede_mandate_document(
     *,
