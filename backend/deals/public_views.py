@@ -77,7 +77,7 @@ def _secure_render(
     )
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
-    response["Referrer-Policy"] = "no-referrer"
+    response["Referrer-Policy"] = "same-origin"
     response["X-Robots-Tag"] = "noindex, nofollow"
 
     return response

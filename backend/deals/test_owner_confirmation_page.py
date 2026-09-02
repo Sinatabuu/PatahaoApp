@@ -88,7 +88,7 @@ class OwnerConfirmationPageTests(TestCase):
 
         self.assertEqual(
             response.headers["Referrer-Policy"],
-            "no-referrer",
+            "same-origin",
         )
 
         self.assertEqual(
