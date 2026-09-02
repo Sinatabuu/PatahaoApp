@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import 'package:mobile/services/property_service.dart';
 import 'package:mobile/services/staff_deal_admin_service.dart';
 
 class StaffDealDetailScreen extends StatefulWidget {
@@ -96,14 +98,23 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
       return;
     }
 
+    final isReissue = _ownerConfirmationResult != null;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Issue owner confirmation?'),
-          content: const Text(
-            'A new single-use owner confirmation token will be issued. '
-            'Any older unused token for this deal will be revoked.',
+          title: Text(
+            isReissue
+                ? 'Reissue owner confirmation?'
+                : 'Issue owner confirmation?',
+          ),
+          content: Text(
+            isReissue
+                ? 'The current unused link will be revoked and replaced '
+                    'with a new single-use owner confirmation link.'
+                : 'A new single-use owner confirmation link will be issued. '
+                    'Copy it and send it only to the verified property owner.',
           ),
           actions: [
             TextButton(
@@ -116,7 +127,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
               onPressed: () {
                 Navigator.of(dialogContext).pop(true);
               },
-              child: const Text('Issue'),
+              child: Text(isReissue ? 'Reissue' : 'Issue'),
             ),
           ],
         );
@@ -129,7 +140,6 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
 
     setState(() {
       _isIssuingOwnerConfirmation = true;
-      _ownerConfirmationResult = null;
     });
 
     try {
@@ -159,6 +169,44 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
     }
+  }
+
+  String _ownerConfirmationUrl(
+    Map<String, dynamic> confirmation,
+  ) {
+    final token = _text(confirmation, 'token');
+
+    if (token.isEmpty) {
+      return '';
+    }
+
+    final baseUrl = PropertyService.baseUrl.replaceFirst(
+      RegExp(r'/+$'),
+      '',
+    );
+
+    return '$baseUrl/owner-confirmation/'
+        '${Uri.encodeComponent(token)}/';
+  }
+
+  Future<void> _copyOwnerConfirmationLink(
+    String url,
+  ) async {
+    await Clipboard.setData(
+      ClipboardData(text: url),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Owner confirmation link copied.',
+        ),
+      ),
+    );
   }
 
   String _cleanError(Object error) {
@@ -419,6 +467,8 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
 
     final expiresAt = _text(confirmation, 'expires_at');
 
+    final confirmationUrl = _ownerConfirmationUrl(confirmation);
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -502,7 +552,9 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                   label: Text(
                     _isIssuingOwnerConfirmation
                         ? 'Issuing...'
-                        : 'Issue Owner Confirmation',
+                        : result == null
+                        ? 'Issue Owner Confirmation'
+                        : 'Reissue Owner Confirmation',
                   ),
                 ),
               ),
@@ -531,6 +583,30 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
 
               if (expiresAt.isNotEmpty)
                 _DealRow(label: 'Expires', value: _formatDateTime(expiresAt)),
+
+              if (confirmationUrl.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                const Text(
+                  'Copy this secure link now and send it only to the '
+                  'verified owner. Only the latest issued link works.',
+                  style: TextStyle(
+                    color: Colors.black54,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        _copyOwnerConfirmationLink(confirmationUrl),
+                    icon: const Icon(Icons.copy_outlined),
+                    label: const Text(
+                      'Copy Owner Confirmation Link',
+                    ),
+                  ),
+                ),
+              ],
             ],
           ],
         ),
