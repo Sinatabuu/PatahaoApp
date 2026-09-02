@@ -409,6 +409,166 @@ class PartnerMandateService {
     );
   }
 
+  Future<Map<String, dynamic>> fetchSaleMandatePack(int mandateId) async {
+    _validateId(mandateId, 'mandateId');
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/mandates/$mandateId/sale-pack/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .get(uri, headers: _authorizationHeaders(accessToken))
+          .timeout(_timeout);
+    });
+
+    final decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to load the Sale Mandate Pack.',
+        ),
+      );
+    }
+
+    return _requireMap(
+      decoded,
+      message: 'The Sale Mandate Pack server returned invalid data.',
+    );
+  }
+
+  Future<Map<String, dynamic>> uploadSalePackDocument({
+    required int mandateId,
+    required String documentType,
+    required String filename,
+    required List<int> fileBytes,
+  }) async {
+    _validateId(mandateId, 'mandateId');
+
+    final cleanedDocumentType = documentType.trim();
+    final cleanedFilename = filename.trim();
+
+    if (cleanedDocumentType.isEmpty) {
+      throw ArgumentError('documentType cannot be empty.');
+    }
+
+    if (cleanedFilename.isEmpty) {
+      throw ArgumentError('filename cannot be empty.');
+    }
+
+    if (fileBytes.isEmpty) {
+      throw ArgumentError('The evidence file cannot be empty.');
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/mandates/$mandateId/documents/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      final request = http.MultipartRequest('POST', uri);
+
+      request.headers.addAll(_authorizationHeaders(accessToken));
+
+      request.fields['document_type'] = cleanedDocumentType;
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          fileBytes,
+          filename: cleanedFilename,
+        ),
+      );
+
+      return _sendMultipartRequest(request);
+    });
+
+    final decoded = _decodeResponse(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to upload the mandate evidence.',
+        ),
+      );
+    }
+
+    return _requireMap(
+      decoded,
+      message: 'The evidence upload server returned invalid data.',
+    );
+  }
+
+  Future<Map<String, dynamic>> replaceRejectedSalePackDocument({
+    required int mandateId,
+    required int documentId,
+    required String filename,
+    required List<int> fileBytes,
+  }) async {
+    _validateId(mandateId, 'mandateId');
+    _validateId(documentId, 'documentId');
+
+    final cleanedFilename = filename.trim();
+
+    if (cleanedFilename.isEmpty) {
+      throw ArgumentError('filename cannot be empty.');
+    }
+
+    if (fileBytes.isEmpty) {
+      throw ArgumentError('The replacement file cannot be empty.');
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/mandates/$mandateId/'
+      'documents/$documentId/replace/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      final request = http.MultipartRequest('POST', uri);
+
+      request.headers.addAll(_authorizationHeaders(accessToken));
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          fileBytes,
+          filename: cleanedFilename,
+        ),
+      );
+
+      return _sendMultipartRequest(request);
+    });
+
+    final decoded = _decodeResponse(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to replace the rejected evidence.',
+        ),
+      );
+    }
+
+    return _requireMap(
+      decoded,
+      message: 'The evidence replacement server returned invalid data.',
+    );
+  }
+
+  Future<http.Response> _sendMultipartRequest(http.MultipartRequest request) {
+    return (() async {
+      final streamedResponse = await request.send();
+
+      return http.Response.fromStream(streamedResponse);
+    })().timeout(_timeout);
+  }
+
   Future<http.Response> _sendAuthorizedRequest(
     Future<http.Response> Function(String accessToken) requestBuilder,
   ) async {
