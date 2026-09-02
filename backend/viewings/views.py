@@ -38,7 +38,7 @@ from .models import Viewing, ViewingFeedback
 from .serializers import ViewingFeedbackSerializer
 from properties.models import PropertyPartner
 from deals.services import (
-    create_deal_from_viewing,
+    create_deal_from_pic,
 )
 
 def choose_participation_for_property(property_obj):
@@ -196,8 +196,15 @@ class ViewingViewSet(viewsets.ModelViewSet):
 
         partner = self._get_partner_profile()
 
+        queryset = (
+            self._base_queryset()
+            .select_for_update(
+                of=("self",),
+            )
+        )
+
         return get_object_or_404(
-            self._base_queryset(),
+            queryset,
             pk=pk,
             assigned_partner=partner,
         )
@@ -993,8 +1000,8 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 actor=request.user,
             )
         )
-        deal, deal_created = create_deal_from_viewing(
-            viewing=viewing,
+        deal, deal_created = create_deal_from_pic(
+            introduction=introduction,
             actor=request.user,
         )
 
