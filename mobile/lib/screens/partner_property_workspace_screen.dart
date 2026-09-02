@@ -398,7 +398,24 @@ class _PartnerPropertyWorkspaceScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('PROPERTY WORKSPACE V2')),
+      appBar: AppBar(
+        title: const Text('PROPERTY WORKSPACE V2'),
+        backgroundColor: const Color(0xFF14532D),
+        foregroundColor: Colors.white,
+        actions: [
+          TextButton.icon(
+            onPressed: _openPropertyMandate,
+            icon: const Icon(Icons.handshake_outlined, color: Colors.white),
+            label: const Text(
+              'Mandate',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _isUploading ? null : _pickAndUploadPhoto,
         icon: _isUploading
