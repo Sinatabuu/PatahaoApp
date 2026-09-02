@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <meta name="robots" content="noindex,nofollow">
+  <title>Owner Confirmation | Pata Hao</title>
+
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, sans-serif;
+      background: #f6f8f6;
+      color: #17201a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px 16px;
+    }
+
+    main {
+      width: 100%;
+      max-width: 620px;
+      margin: 0 auto;
+    }
+
+    .brand {
+      margin-bottom: 18px;
+      color: #14532d;
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .card {
+      padding: 24px;
+      background: white;
+      border: 1px solid #dfe7e1;
+      border-radius: 18px;
+      box-shadow: 0 8px 28px rgba(20, 83, 45, 0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 26px;
+    }
+
+    h2 {
+      margin-top: 0;
+      color: #14532d;
+    }
+
+    .details {
+      margin: 20px 0;
+      padding: 16px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 12px;
+    }
+
+    .details p {
+      margin: 7px 0;
+    }
+
+    fieldset {
+      margin: 20px 0;
+      padding: 0;
+      border: 0;
+    }
+
+    legend {
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+
+    .choice {
+      display: block;
+      margin-bottom: 10px;
+      padding: 14px;
+      border: 1px solid #d8e2da;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    .choice input {
+      margin-right: 9px;
+    }
+
+    label[for="notes"] {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 110px;
+      padding: 12px;
+      border: 1px solid #aebbb1;
+      border-radius: 10px;
+      font: inherit;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 18px;
+      padding: 14px 18px;
+      border: 0;
+      border-radius: 10px;
+      background: #14532d;
+      color: white;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .error {
+      padding: 14px;
+      color: #991b1b;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+    }
+
+    .success {
+      padding: 16px;
+      color: #14532d;
+      background: #f0fdf4;
+      border: 1px solid #86efac;
+      border-radius: 12px;
+    }
+
+    .muted {
+      color: #5d6960;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <div class="brand">Pata Hao</div>
+
+    <section class="card">
+      {% if invalid_link %}
+        <h1>Owner confirmation</h1>
+
+        <div class="error">
+          This confirmation link is invalid or no longer usable.
+        </div>
+
+        <p class="muted">
+          Please request a new confirmation link from Pata Hao.
+        </p>
+
+      {% elif submitted %}
+        <h1>Confirmation recorded</h1>
+
+        <div class="success">
+          Your property outcome was submitted successfully.
+        </div>
+
+        <div class="details">
+          <p>
+            <strong>Property:</strong>
+            {{ deal.property.title }}
+          </p>
+          <p>
+            <strong>Outcome:</strong>
+            {{ submitted_outcome_label }}
+          </p>
+          <p>
+            <strong>Deal status:</strong>
+            {{ deal_status_label }}
+          </p>
+        </div>
+
+        <p class="muted">
+          You may now close this page.
+        </p>
+
+      {% else %}
+        <h1>Confirm property outcome</h1>
+
+        <p>
+          Please confirm the outcome reported for this property.
+        </p>
+
+        <div class="details">
+          <p>
+            <strong>Property:</strong>
+            {{ deal.property.title }}
+          </p>
+          <p>
+            <strong>Owner:</strong>
+            {{ owner.legal_name }}
+          </p>
+          <p>
+            <strong>Deal reference:</strong>
+            {{ deal.deal_number }}
+          </p>
+          <p>
+            <strong>Link expires:</strong>
+            {{ expires_at|date:"j M Y, H:i T" }}
+          </p>
+        </div>
+
+        {% if error_message %}
+          <div class="error">
+            {{ error_message }}
+          </div>
+        {% endif %}
+
+        <form method="post">
+          {% csrf_token %}
+
+          <fieldset>
+            <legend>Select the property outcome</legend>
+
+            {% for value, label in outcome_choices %}
+              <label class="choice">
+                <input
+                  type="radio"
+                  name="outcome"
+                  value="{{ value }}"
+                  {% if selected_outcome == value %}checked{% endif %}
+                  required
+                >
+                {{ label }}
+              </label>
+            {% endfor %}
+          </fieldset>
+
+          <label for="notes">Additional notes (optional)</label>
+
+          <textarea
+            id="notes"
+            name="notes"
+            maxlength="2000"
+          >{{ notes }}</textarea>
+
+          <button type="submit">
+            Submit owner confirmation
+          </button>
+        </form>
+
+        <p class="muted">
+          This secure link can only be used once.
+        </p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

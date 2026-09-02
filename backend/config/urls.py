@@ -24,6 +24,7 @@ def home(request):
 urlpatterns = [
      
     path("", home, name="home"),
+    path("", include("deals.public_urls")),
     path("admin/", admin.site.urls),
 
     # Auth
