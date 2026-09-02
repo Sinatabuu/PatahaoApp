@@ -3,12 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:mobile/models/property.dart';
 import 'package:mobile/services/partner_mandate_service.dart';
 
-
 class PartnerPropertyMandateScreen extends StatefulWidget {
-  const PartnerPropertyMandateScreen({
-    super.key,
-    required this.property,
-  });
+  const PartnerPropertyMandateScreen({super.key, required this.property});
 
   final Property property;
 
@@ -18,16 +14,13 @@ class PartnerPropertyMandateScreen extends StatefulWidget {
   }
 }
 
-
 class _PartnerPropertyMandateScreenState
     extends State<PartnerPropertyMandateScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final TextEditingController _ownerNameController =
-      TextEditingController();
+  final TextEditingController _ownerNameController = TextEditingController();
 
-  final TextEditingController _ownerPhoneController =
-      TextEditingController();
+  final TextEditingController _ownerPhoneController = TextEditingController();
 
   final TextEditingController _commissionRateController =
       TextEditingController();
@@ -62,53 +55,36 @@ class _PartnerPropertyMandateScreenState
 
   bool get _hasAgreement => _agreement.isNotEmpty;
 
-  bool get _agreementAccepted =>
-      _agreement['partner_accepted'] == true;
+  bool get _agreementAccepted => _agreement['partner_accepted'] == true;
 
-  bool get _agreementVerified =>
-      _agreement['is_verified'] == true;
+  bool get _agreementVerified => _agreement['is_verified'] == true;
 
-  bool get _agreementLocked =>
-      _agreement['is_locked'] == true;
+  bool get _agreementLocked => _agreement['is_locked'] == true;
 
-  int? get _agreementId => int.tryParse(
-        _agreement['id']?.toString() ?? '',
-      );
+  int? get _agreementId => int.tryParse(_agreement['id']?.toString() ?? '');
 
   bool get _hasMandate => _mandate.isNotEmpty;
 
-  bool get _mandateDeclared =>
-      _mandate['partner_declared'] == true;
+  bool get _mandateDeclared => _mandate['partner_declared'] == true;
 
-  int? get _mandateId => int.tryParse(
-        _mandate['id']?.toString() ?? '',
-      );
+  int? get _mandateId => int.tryParse(_mandate['id']?.toString() ?? '');
 
-  String get _mandateStatus =>
-      _mandate['status']?.toString() ?? '';
+  String get _mandateStatus => _mandate['status']?.toString() ?? '';
 
-  bool get _mandateUnderReview =>
-      _mandateStatus == 'under_review';
+  bool get _mandateUnderReview => _mandateStatus == 'under_review';
 
-  bool get _mandateApproved =>
-      _mandateStatus == 'approved';
+  bool get _mandateApproved => _mandateStatus == 'approved';
 
   bool get _commercialTermsFrozen =>
-      _agreementAccepted ||
-      _agreementVerified ||
-      _agreementLocked;
+      _agreementAccepted || _agreementVerified || _agreementLocked;
 
   @override
   void initState() {
     super.initState();
 
-    _commissionRateController.addListener(
-      _rebuildCommissionPreview,
-    );
+    _commissionRateController.addListener(_rebuildCommissionPreview);
 
-    _fixedCommissionController.addListener(
-      _rebuildCommissionPreview,
-    );
+    _fixedCommissionController.addListener(_rebuildCommissionPreview);
 
     _loadData();
   }
@@ -141,17 +117,11 @@ class _PartnerPropertyMandateScreenState
     });
 
     try {
-      final agreement =
-          await PartnerMandateService.instance
-              .fetchCommissionAgreementForProperty(
-        property.id,
-      );
+      final agreement = await PartnerMandateService.instance
+          .fetchCommissionAgreementForProperty(property.id);
 
-      final mandate =
-          await PartnerMandateService.instance
-              .fetchMandateForProperty(
-        property.id,
-      );
+      final mandate = await PartnerMandateService.instance
+          .fetchMandateForProperty(property.id);
 
       if (!mounted) {
         return;
@@ -179,21 +149,18 @@ class _PartnerPropertyMandateScreenState
 
   void _hydrateFormFromServer() {
     if (_agreement.isNotEmpty) {
-      _ownerNameController.text =
-          _agreement['owner_name']?.toString() ?? '';
+      _ownerNameController.text = _agreement['owner_name']?.toString() ?? '';
 
       _ownerPhoneController.text =
           _agreement['owner_phone_number']?.toString() ?? '';
 
-      final method =
-          _agreement['commission_method']?.toString() ?? '';
+      final method = _agreement['commission_method']?.toString() ?? '';
 
       if (method == 'fixed' || method == 'percentage') {
         _commissionMethod = method;
       }
 
-      final basis =
-          _agreement['commission_basis']?.toString() ?? '';
+      final basis = _agreement['commission_basis']?.toString() ?? '';
 
       if (basis.isNotEmpty) {
         _commissionBasis = basis;
@@ -203,9 +170,7 @@ class _PartnerPropertyMandateScreenState
           _agreement['commission_rate']?.toString() ?? '';
 
       _fixedCommissionController.text =
-          _agreement['fixed_commission_amount']
-                  ?.toString() ??
-              '';
+          _agreement['fixed_commission_amount']?.toString() ?? '';
     }
 
     if (_mandate.isNotEmpty) {
@@ -219,11 +184,9 @@ class _PartnerPropertyMandateScreenState
       _authorizationNotesController.text =
           _mandate['authorization_notes']?.toString() ?? '';
 
-      _authorityConfirmed =
-          _mandate['owner_authority_confirmed'] == true;
+      _authorityConfirmed = _mandate['owner_authority_confirmed'] == true;
 
-      _paymentPolicyAccepted =
-          _mandate['no_cash_acknowledged'] == true;
+      _paymentPolicyAccepted = _mandate['no_cash_acknowledged'] == true;
 
       _antiCircumventionAccepted =
           _mandate['anti_circumvention_acknowledged'] == true;
@@ -231,12 +194,10 @@ class _PartnerPropertyMandateScreenState
       final ownerDetail = _mandate['owner_detail'];
 
       if (ownerDetail is Map) {
-        final ownerMap =
-            Map<String, dynamic>.from(ownerDetail);
+        final ownerMap = Map<String, dynamic>.from(ownerDetail);
 
         if (_ownerNameController.text.trim().isEmpty) {
-          _ownerNameController.text =
-              ownerMap['legal_name']?.toString() ?? '';
+          _ownerNameController.text = ownerMap['legal_name']?.toString() ?? '';
         }
 
         if (_ownerPhoneController.text.trim().isEmpty) {
@@ -248,8 +209,7 @@ class _PartnerPropertyMandateScreenState
   }
 
   Future<void> _saveCommission() async {
-    if (_isSavingCommission ||
-        _commercialTermsFrozen) {
+    if (_isSavingCommission || _commercialTermsFrozen) {
       return;
     }
 
@@ -271,49 +231,37 @@ class _PartnerPropertyMandateScreenState
         final agreementId = _agreementId;
 
         if (agreementId == null) {
-          throw Exception(
-            'The commission agreement ID is invalid.',
-          );
+          throw Exception('The commission agreement ID is invalid.');
         }
 
-        result =
-            await PartnerMandateService.instance
-                .updateCommissionAgreement(
+        result = await PartnerMandateService.instance.updateCommissionAgreement(
           agreementId: agreementId,
           ownerName: _ownerNameController.text,
-          ownerPhoneNumber:
-              _ownerPhoneController.text,
+          ownerPhoneNumber: _ownerPhoneController.text,
           commissionMethod: _commissionMethod,
           commissionBasis: _commissionBasis,
           transactionValue: transactionValue,
-          commissionRate:
-              _commissionMethod == 'percentage'
-                  ? _commissionRateController.text
-                  : null,
-          fixedCommissionAmount:
-              _commissionMethod == 'fixed'
-                  ? _fixedCommissionController.text
-                  : null,
+          commissionRate: _commissionMethod == 'percentage'
+              ? _commissionRateController.text
+              : null,
+          fixedCommissionAmount: _commissionMethod == 'fixed'
+              ? _fixedCommissionController.text
+              : null,
         );
       } else {
-        result =
-            await PartnerMandateService.instance
-                .createCommissionAgreement(
+        result = await PartnerMandateService.instance.createCommissionAgreement(
           propertyId: property.id,
           ownerName: _ownerNameController.text,
-          ownerPhoneNumber:
-              _ownerPhoneController.text,
+          ownerPhoneNumber: _ownerPhoneController.text,
           commissionMethod: _commissionMethod,
           commissionBasis: _commissionBasis,
           transactionValue: transactionValue,
-          commissionRate:
-              _commissionMethod == 'percentage'
-                  ? _commissionRateController.text
-                  : null,
-          fixedCommissionAmount:
-              _commissionMethod == 'fixed'
-                  ? _fixedCommissionController.text
-                  : null,
+          commissionRate: _commissionMethod == 'percentage'
+              ? _commissionRateController.text
+              : null,
+          fixedCommissionAmount: _commissionMethod == 'fixed'
+              ? _fixedCommissionController.text
+              : null,
         );
       }
 
@@ -326,13 +274,9 @@ class _PartnerPropertyMandateScreenState
         _hydrateFormFromServer();
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Commission terms saved.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Commission terms saved.')));
     } catch (error) {
       if (!mounted) {
         return;
@@ -342,13 +286,9 @@ class _PartnerPropertyMandateScreenState
         _errorMessage = _cleanError(error);
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _cleanError(error),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -359,8 +299,7 @@ class _PartnerPropertyMandateScreenState
   }
 
   Future<void> _acceptCommission() async {
-    if (_isAcceptingCommission ||
-        _agreementAccepted) {
+    if (_isAcceptingCommission || _agreementAccepted) {
       return;
     }
 
@@ -374,9 +313,7 @@ class _PartnerPropertyMandateScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text(
-            'Accept Commission Terms?',
-          ),
+          title: const Text('Accept Commission Terms?'),
           content: Text(
             'You are confirming that the commission shown '
             'for "${property.title}" is the commission agreed '
@@ -411,11 +348,8 @@ class _PartnerPropertyMandateScreenState
     });
 
     try {
-      final result =
-          await PartnerMandateService.instance
-              .acceptCommissionAgreement(
-        agreementId,
-      );
+      final result = await PartnerMandateService.instance
+          .acceptCommissionAgreement(agreementId);
 
       if (!mounted) {
         return;
@@ -427,11 +361,7 @@ class _PartnerPropertyMandateScreenState
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Commission terms accepted.',
-          ),
-        ),
+        const SnackBar(content: Text('Commission terms accepted.')),
       );
     } catch (error) {
       if (!mounted) {
@@ -442,13 +372,9 @@ class _PartnerPropertyMandateScreenState
         _errorMessage = _cleanError(error);
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _cleanError(error),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -459,9 +385,7 @@ class _PartnerPropertyMandateScreenState
   }
 
   Future<void> _createMandate() async {
-    if (_isCreatingMandate ||
-        _hasMandate ||
-        !_agreementAccepted) {
+    if (_isCreatingMandate || _hasMandate || !_agreementAccepted) {
       return;
     }
 
@@ -477,18 +401,13 @@ class _PartnerPropertyMandateScreenState
     });
 
     try {
-      final result =
-          await PartnerMandateService.instance
-              .createMandate(
+      final result = await PartnerMandateService.instance.createMandate(
         propertyId: property.id,
         ownerName: _ownerNameController.text,
-        ownerPhoneNumber:
-            _ownerPhoneController.text,
+        ownerPhoneNumber: _ownerPhoneController.text,
         commissionAgreementId: agreementId,
-        authorizationMethod:
-            _authorizationMethod,
-        authorizationNotes:
-            _authorizationNotesController.text,
+        authorizationMethod: _authorizationMethod,
+        authorizationNotes: _authorizationNotesController.text,
       );
 
       if (!mounted) {
@@ -500,13 +419,9 @@ class _PartnerPropertyMandateScreenState
         _hydrateFormFromServer();
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Digital mandate created.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Digital mandate created.')));
     } catch (error) {
       if (!mounted) {
         return;
@@ -516,13 +431,9 @@ class _PartnerPropertyMandateScreenState
         _errorMessage = _cleanError(error);
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _cleanError(error),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -533,9 +444,7 @@ class _PartnerPropertyMandateScreenState
   }
 
   Future<void> _declareMandate() async {
-    if (_isDeclaringMandate ||
-        !_hasMandate ||
-        _mandateDeclared) {
+    if (_isDeclaringMandate || !_hasMandate || _mandateDeclared) {
       return;
     }
 
@@ -544,9 +453,7 @@ class _PartnerPropertyMandateScreenState
         !_antiCircumventionAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Please accept all three declarations first.',
-          ),
+          content: Text('Please accept all three declarations first.'),
         ),
       );
 
@@ -563,9 +470,7 @@ class _PartnerPropertyMandateScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text(
-            'Accept Digital Mandate?',
-          ),
+          title: const Text('Accept Digital Mandate?'),
           content: const Text(
             'By continuing, you confirm that the information '
             'you provided is accurate and that you have authority '
@@ -599,14 +504,10 @@ class _PartnerPropertyMandateScreenState
     });
 
     try {
-      final result =
-          await PartnerMandateService.instance
-              .declareMandate(
+      final result = await PartnerMandateService.instance.declareMandate(
         mandateId: mandateId,
-        authorizationMethod:
-            _authorizationMethod,
-        authorizationNotes:
-            _authorizationNotesController.text,
+        authorizationMethod: _authorizationMethod,
+        authorizationNotes: _authorizationNotesController.text,
       );
 
       if (!mounted) {
@@ -619,11 +520,7 @@ class _PartnerPropertyMandateScreenState
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Digital mandate accepted.',
-          ),
-        ),
+        const SnackBar(content: Text('Digital mandate accepted.')),
       );
     } catch (error) {
       if (!mounted) {
@@ -634,13 +531,9 @@ class _PartnerPropertyMandateScreenState
         _errorMessage = _cleanError(error);
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _cleanError(error),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -670,11 +563,8 @@ class _PartnerPropertyMandateScreenState
     });
 
     try {
-      final result =
-          await PartnerMandateService.instance
-              .submitMandateForReview(
-        mandateId,
-      );
+      final result = await PartnerMandateService.instance
+          .submitMandateForReview(mandateId);
 
       if (!mounted) {
         return;
@@ -687,9 +577,7 @@ class _PartnerPropertyMandateScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Mandate submitted to Pata Hao for review.',
-          ),
+          content: Text('Mandate submitted to Pata Hao for review.'),
         ),
       );
     } catch (error) {
@@ -701,13 +589,9 @@ class _PartnerPropertyMandateScreenState
         _errorMessage = _cleanError(error);
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _cleanError(error),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -718,33 +602,22 @@ class _PartnerPropertyMandateScreenState
   }
 
   double _propertyValue() {
-    return double.tryParse(
-          property.price.trim(),
-        ) ??
-        0;
+    return double.tryParse(property.price.trim()) ?? 0;
   }
 
   double _previewCommission() {
     final propertyValue = _propertyValue();
 
     if (_commissionMethod == 'percentage') {
-      final rate = double.tryParse(
-            _commissionRateController.text.trim(),
-          ) ??
-          0;
+      final rate = double.tryParse(_commissionRateController.text.trim()) ?? 0;
 
       return propertyValue * rate / 100;
     }
 
-    return double.tryParse(
-          _fixedCommissionController.text.trim(),
-        ) ??
-        0;
+    return double.tryParse(_fixedCommissionController.text.trim()) ?? 0;
   }
 
-  String _formatKes(
-    num value,
-  ) {
+  String _formatKes(num value) {
     final whole = value.round();
 
     final text = whole.toString();
@@ -758,57 +631,33 @@ class _PartnerPropertyMandateScreenState
   }
 
   String _serverCommissionLabel() {
-    final raw =
-        _agreement['expected_total_commission']
-            ?.toString();
+    final raw = _agreement['expected_total_commission']?.toString();
 
-    final amount = double.tryParse(
-      raw ?? '',
-    );
+    final amount = double.tryParse(raw ?? '');
 
     if (amount == null) {
-      return _formatKes(
-        _previewCommission(),
-      );
+      return _formatKes(_previewCommission());
     }
 
     return _formatKes(amount);
   }
 
-  String _cleanError(
-    Object error,
-  ) {
-    return error
-        .toString()
-        .replaceFirst(
-          RegExp(r'^Exception:\s*'),
-          '',
-        )
-        .trim();
+  String _cleanError(Object error) {
+    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
   }
 
-  String? _validateRequiredText(
-    String? value,
-    String message,
-  ) {
-    if (value == null ||
-        value.trim().isEmpty) {
+  String? _validateRequiredText(String? value, String message) {
+    if (value == null || value.trim().isEmpty) {
       return message;
     }
 
     return null;
   }
 
-  String? _validatePositiveNumber(
-    String? value,
-    String message,
-  ) {
-    final number = double.tryParse(
-      value?.trim() ?? '',
-    );
+  String? _validatePositiveNumber(String? value, String message) {
+    final number = double.tryParse(value?.trim() ?? '');
 
-    if (number == null ||
-        number <= 0) {
+    if (number == null || number <= 0) {
       return message;
     }
 
@@ -816,67 +665,38 @@ class _PartnerPropertyMandateScreenState
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          const Color(0xFFF6F8F6),
+      backgroundColor: const Color(0xFFF6F8F6),
       appBar: AppBar(
-        title: const Text(
-          'Property Mandate',
-        ),
-        backgroundColor:
-            const Color(0xFF14532D),
+        title: const Text('Property Mandate'),
+        backgroundColor: const Color(0xFF14532D),
         foregroundColor: Colors.white,
       ),
       body: _isLoading
-          ? const Center(
-              child:
-                  CircularProgressIndicator(),
-            )
+          ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _loadData,
               child: ListView(
-                physics:
-                    const AlwaysScrollableScrollPhysics(),
-                padding:
-                    const EdgeInsets.fromLTRB(
-                  16,
-                  18,
-                  16,
-                  36,
-                ),
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 36),
                 children: [
-                  _PropertySummaryCard(
-                    property: property,
-                  ),
+                  _PropertySummaryCard(property: property),
                   const SizedBox(height: 16),
 
                   if (_errorMessage != null)
-                    _ErrorCard(
-                      message:
-                          _errorMessage!,
-                    ),
+                    _ErrorCard(message: _errorMessage!),
 
-                  if (_errorMessage != null)
-                    const SizedBox(height: 16),
+                  if (_errorMessage != null) const SizedBox(height: 16),
 
                   _WorkflowStatusCard(
-                    hasAgreement:
-                        _hasAgreement,
-                    agreementAccepted:
-                        _agreementAccepted,
-                    agreementVerified:
-                        _agreementVerified,
-                    agreementLocked:
-                        _agreementLocked,
-                    hasMandate:
-                        _hasMandate,
-                    mandateDeclared:
-                        _mandateDeclared,
-                    mandateStatus:
-                        _mandateStatus,
+                    hasAgreement: _hasAgreement,
+                    agreementAccepted: _agreementAccepted,
+                    agreementVerified: _agreementVerified,
+                    agreementLocked: _agreementLocked,
+                    hasMandate: _hasMandate,
+                    mandateDeclared: _mandateDeclared,
+                    mandateStatus: _mandateStatus,
                   ),
 
                   const SizedBox(height: 18),
@@ -884,53 +704,36 @@ class _PartnerPropertyMandateScreenState
                   Form(
                     key: _formKey,
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _SectionCard(
-                          title:
-                              'Owner / Landlord',
-                          icon:
-                              Icons.person_outline,
+                          title: 'Owner / Landlord',
+                          icon: Icons.person_outline,
                           child: Column(
                             children: [
                               TextFormField(
-                                controller:
-                                    _ownerNameController,
-                                enabled:
-                                    !_commercialTermsFrozen,
-                                textInputAction:
-                                    TextInputAction.next,
-                                decoration:
-                                    const InputDecoration(
-                                  labelText:
-                                      'Owner / landlord name',
-                                  border:
-                                      OutlineInputBorder(),
+                                controller: _ownerNameController,
+                                enabled: !_commercialTermsFrozen,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: 'Owner / landlord name',
+                                  border: OutlineInputBorder(),
                                 ),
-                                validator: (value) =>
-                                    _validateRequiredText(
+                                validator: (value) => _validateRequiredText(
                                   value,
                                   'Enter the owner or landlord name.',
                                 ),
                               ),
                               const SizedBox(height: 12),
                               TextFormField(
-                                controller:
-                                    _ownerPhoneController,
-                                enabled:
-                                    !_commercialTermsFrozen,
-                                keyboardType:
-                                    TextInputType.phone,
-                                decoration:
-                                    const InputDecoration(
-                                  labelText:
-                                      'Owner / landlord phone',
-                                  border:
-                                      OutlineInputBorder(),
+                                controller: _ownerPhoneController,
+                                enabled: !_commercialTermsFrozen,
+                                keyboardType: TextInputType.phone,
+                                decoration: const InputDecoration(
+                                  labelText: 'Owner / landlord phone',
+                                  border: OutlineInputBorder(),
                                 ),
-                                validator: (value) =>
-                                    _validateRequiredText(
+                                validator: (value) => _validateRequiredText(
                                   value,
                                   'Enter the owner or landlord phone number.',
                                 ),
@@ -942,222 +745,149 @@ class _PartnerPropertyMandateScreenState
                         const SizedBox(height: 16),
 
                         _SectionCard(
-                          title:
-                              'Commission Agreement',
-                          icon:
-                              Icons.handshake_outlined,
+                          title: 'Commission Agreement',
+                          icon: Icons.handshake_outlined,
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 property.formattedPrice,
-                                style:
-                                    Theme.of(context)
-                                        .textTheme
-                                        .titleLarge
-                                        ?.copyWith(
-                                          fontWeight:
-                                              FontWeight.w700,
-                                        ),
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                property.listingType
-                                            .toLowerCase() ==
-                                        'rent'
+                                property.listingType.toLowerCase() == 'rent'
                                     ? 'Property rent used for commission calculation.'
                                     : 'Property value used for commission calculation.',
-                                style:
-                                    const TextStyle(
-                                  color:
-                                      Colors.black54,
-                                ),
+                                style: const TextStyle(color: Colors.black54),
                               ),
                               const SizedBox(height: 18),
 
                               SegmentedButton<String>(
-                                segments:
-                                    const [
+                                segments: const [
                                   ButtonSegment<String>(
-                                    value:
-                                        'percentage',
-                                    label:
-                                        Text(
-                                      'Percentage',
-                                    ),
-                                    icon: Icon(
-                                      Icons.percent,
-                                    ),
+                                    value: 'percentage',
+                                    label: Text('Percentage'),
+                                    icon: Icon(Icons.percent),
                                   ),
                                   ButtonSegment<String>(
-                                    value:
-                                        'fixed',
-                                    label:
-                                        Text(
-                                      'Fixed',
-                                    ),
-                                    icon: Icon(
-                                      Icons.payments_outlined,
-                                    ),
+                                    value: 'fixed',
+                                    label: Text('Fixed'),
+                                    icon: Icon(Icons.payments_outlined),
                                   ),
                                 ],
-                                selected: {
-                                  _commissionMethod,
-                                },
-                                onSelectionChanged:
-                                    _commercialTermsFrozen
-                                        ? null
-                                        : (selection) {
-                                            setState(() {
-                                              _commissionMethod =
-                                                  selection.first;
-                                            });
-                                          },
+                                selected: {_commissionMethod},
+                                onSelectionChanged: _commercialTermsFrozen
+                                    ? null
+                                    : (selection) {
+                                        setState(() {
+                                          _commissionMethod = selection.first;
+                                        });
+                                      },
                               ),
 
                               const SizedBox(height: 16),
 
-                              if (_commissionMethod ==
-                                  'percentage')
+                              if (_commissionMethod == 'percentage')
                                 TextFormField(
-                                  controller:
-                                      _commissionRateController,
-                                  enabled:
-                                      !_commercialTermsFrozen,
+                                  controller: _commissionRateController,
+                                  enabled: !_commercialTermsFrozen,
                                   keyboardType:
                                       const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                                  decoration:
-                                      const InputDecoration(
-                                    labelText:
-                                        'Commission rate (%)',
-                                    border:
-                                        OutlineInputBorder(),
+                                        decimal: true,
+                                      ),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Commission rate (%)',
+                                    border: OutlineInputBorder(),
                                   ),
                                   validator: (value) =>
-                                      _commissionMethod ==
-                                              'percentage'
-                                          ? _validatePositiveNumber(
-                                              value,
-                                              'Enter a commission percentage greater than zero.',
-                                            )
-                                          : null,
+                                      _commissionMethod == 'percentage'
+                                      ? _validatePositiveNumber(
+                                          value,
+                                          'Enter a commission percentage greater than zero.',
+                                        )
+                                      : null,
                                 )
                               else
                                 TextFormField(
-                                  controller:
-                                      _fixedCommissionController,
-                                  enabled:
-                                      !_commercialTermsFrozen,
+                                  controller: _fixedCommissionController,
+                                  enabled: !_commercialTermsFrozen,
                                   keyboardType:
                                       const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                                  decoration:
-                                      const InputDecoration(
-                                    labelText:
-                                        'Fixed commission (KES)',
-                                    border:
-                                        OutlineInputBorder(),
+                                        decimal: true,
+                                      ),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Fixed commission (KES)',
+                                    border: OutlineInputBorder(),
                                   ),
                                   validator: (value) =>
-                                      _commissionMethod ==
-                                              'fixed'
-                                          ? _validatePositiveNumber(
-                                              value,
-                                              'Enter a fixed commission greater than zero.',
-                                            )
-                                          : null,
+                                      _commissionMethod == 'fixed'
+                                      ? _validatePositiveNumber(
+                                          value,
+                                          'Enter a fixed commission greater than zero.',
+                                        )
+                                      : null,
                                 ),
 
                               const SizedBox(height: 16),
 
                               _CommissionPreview(
-                                propertyValue:
-                                    _formatKes(
-                                  _propertyValue(),
-                                ),
-                                commissionMethod:
-                                    _commissionMethod,
-                                rate:
-                                    _commissionRateController.text
-                                        .trim(),
-                                commission:
-                                    _hasAgreement
-                                        ? _serverCommissionLabel()
-                                        : _formatKes(
-                                            _previewCommission(),
-                                          ),
+                                propertyValue: _formatKes(_propertyValue()),
+                                commissionMethod: _commissionMethod,
+                                rate: _commissionRateController.text.trim(),
+                                commission: _hasAgreement
+                                    ? _serverCommissionLabel()
+                                    : _formatKes(_previewCommission()),
                               ),
 
                               if (!_commercialTermsFrozen) ...[
                                 const SizedBox(height: 16),
                                 SizedBox(
-                                  width:
-                                      double.infinity,
-                                  child:
-                                      FilledButton.icon(
-                                    onPressed:
-                                        _isSavingCommission
-                                            ? null
-                                            : _saveCommission,
-                                    icon:
-                                        _isSavingCommission
-                                            ? const SizedBox(
-                                                width:
-                                                    18,
-                                                height:
-                                                    18,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth:
-                                                      2,
-                                                ),
-                                              )
-                                            : const Icon(
-                                                Icons.save_outlined,
-                                              ),
+                                  width: double.infinity,
+                                  child: FilledButton.icon(
+                                    onPressed: _isSavingCommission
+                                        ? null
+                                        : _saveCommission,
+                                    icon: _isSavingCommission
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Icon(Icons.save_outlined),
                                     label: Text(
                                       _isSavingCommission
                                           ? 'Saving...'
                                           : _hasAgreement
-                                              ? 'Update Commission Terms'
-                                              : 'Save Commission Terms',
+                                          ? 'Update Commission Terms'
+                                          : 'Save Commission Terms',
                                     ),
                                   ),
                                 ),
                               ],
 
-                              if (_hasAgreement &&
-                                  !_agreementAccepted) ...[
+                              if (_hasAgreement && !_agreementAccepted) ...[
                                 const SizedBox(height: 12),
                                 SizedBox(
-                                  width:
-                                      double.infinity,
-                                  child:
-                                      FilledButton.icon(
-                                    onPressed:
-                                        _isAcceptingCommission
-                                            ? null
-                                            : _acceptCommission,
-                                    icon:
-                                        _isAcceptingCommission
-                                            ? const SizedBox(
-                                                width:
-                                                    18,
-                                                height:
-                                                    18,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth:
-                                                      2,
-                                                ),
-                                              )
-                                            : const Icon(
-                                                Icons.check_circle_outline,
-                                              ),
+                                  width: double.infinity,
+                                  child: FilledButton.icon(
+                                    onPressed: _isAcceptingCommission
+                                        ? null
+                                        : _acceptCommission,
+                                    icon: _isAcceptingCommission
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.check_circle_outline,
+                                          ),
                                     label: Text(
                                       _isAcceptingCommission
                                           ? 'Accepting...'
@@ -1169,12 +899,8 @@ class _PartnerPropertyMandateScreenState
 
                               if (_agreementAccepted)
                                 const Padding(
-                                  padding:
-                                      EdgeInsets.only(
-                                    top: 14,
-                                  ),
-                                  child:
-                                      _SuccessBanner(
+                                  padding: EdgeInsets.only(top: 14),
+                                  child: _SuccessBanner(
                                     text:
                                         'Commission terms accepted. These commercial terms can no longer be edited.',
                                   ),
@@ -1187,149 +913,100 @@ class _PartnerPropertyMandateScreenState
                           const SizedBox(height: 16),
 
                           _SectionCard(
-                            title:
-                                'Digital Property Mandate',
-                            icon:
-                                Icons.assignment_turned_in_outlined,
+                            title: 'Digital Property Mandate',
+                            icon: Icons.assignment_turned_in_outlined,
                             child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 DropdownButtonFormField<String>(
-                                  initialValue:
-                                      _authorizationMethod,
-                                  decoration:
-                                      const InputDecoration(
+                                  initialValue: _authorizationMethod,
+                                  decoration: const InputDecoration(
                                     labelText:
                                         'How did the owner authorize you?',
-                                    border:
-                                        OutlineInputBorder(),
+                                    border: OutlineInputBorder(),
                                   ),
-                                  items:
-                                      const [
+                                  items: const [
                                     DropdownMenuItem(
-                                      value:
-                                          'verbal',
-                                      child:
-                                          Text(
-                                        'Verbal authorization',
-                                      ),
+                                      value: 'verbal',
+                                      child: Text('Verbal authorization'),
                                     ),
                                     DropdownMenuItem(
-                                      value:
-                                          'phone',
-                                      child:
-                                          Text(
-                                        'Phone authorization',
-                                      ),
+                                      value: 'phone',
+                                      child: Text('Phone authorization'),
                                     ),
                                     DropdownMenuItem(
-                                      value:
-                                          'whatsapp',
-                                      child:
-                                          Text(
-                                        'WhatsApp / message',
-                                      ),
+                                      value: 'whatsapp',
+                                      child: Text('WhatsApp / message'),
                                     ),
                                     DropdownMenuItem(
-                                      value:
-                                          'written',
-                                      child:
-                                          Text(
-                                        'Written authorization',
-                                      ),
+                                      value: 'written',
+                                      child: Text('Written authorization'),
                                     ),
                                     DropdownMenuItem(
-                                      value:
-                                          'property_manager',
-                                      child:
-                                          Text(
+                                      value: 'property_manager',
+                                      child: Text(
                                         'Property management authority',
                                       ),
                                     ),
                                     DropdownMenuItem(
-                                      value:
-                                          'owner_self',
-                                      child:
-                                          Text(
-                                        'I am the owner',
-                                      ),
+                                      value: 'owner_self',
+                                      child: Text('I am the owner'),
                                     ),
                                     DropdownMenuItem(
-                                      value:
-                                          'other',
-                                      child:
-                                          Text(
-                                        'Other',
-                                      ),
+                                      value: 'other',
+                                      child: Text('Other'),
                                     ),
                                   ],
                                   onChanged:
                                       _mandateDeclared ||
-                                              _mandateUnderReview ||
-                                              _mandateApproved
-                                          ? null
-                                          : (value) {
-                                              if (value ==
-                                                  null) {
-                                                return;
-                                              }
+                                          _mandateUnderReview ||
+                                          _mandateApproved
+                                      ? null
+                                      : (value) {
+                                          if (value == null) {
+                                            return;
+                                          }
 
-                                              setState(() {
-                                                _authorizationMethod =
-                                                    value;
-                                              });
-                                            },
+                                          setState(() {
+                                            _authorizationMethod = value;
+                                          });
+                                        },
                                 ),
 
                                 const SizedBox(height: 12),
 
                                 TextFormField(
-                                  controller:
-                                      _authorizationNotesController,
+                                  controller: _authorizationNotesController,
                                   enabled:
                                       !_mandateDeclared &&
-                                          !_mandateUnderReview &&
-                                          !_mandateApproved,
+                                      !_mandateUnderReview &&
+                                      !_mandateApproved,
                                   maxLines: 3,
-                                  decoration:
-                                      const InputDecoration(
-                                    labelText:
-                                        'Authorization notes (optional)',
+                                  decoration: const InputDecoration(
+                                    labelText: 'Authorization notes (optional)',
                                     hintText:
                                         'Example: Owner authorized me by phone.',
-                                    border:
-                                        OutlineInputBorder(),
+                                    border: OutlineInputBorder(),
                                   ),
                                 ),
 
                                 if (!_hasMandate) ...[
                                   const SizedBox(height: 16),
                                   SizedBox(
-                                    width:
-                                        double.infinity,
-                                    child:
-                                        FilledButton.icon(
-                                      onPressed:
-                                          _isCreatingMandate
-                                              ? null
-                                              : _createMandate,
-                                      icon:
-                                          _isCreatingMandate
-                                              ? const SizedBox(
-                                                  width:
-                                                      18,
-                                                  height:
-                                                      18,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                    strokeWidth:
-                                                        2,
-                                                  ),
-                                                )
-                                              : const Icon(
-                                                  Icons.note_add_outlined,
-                                                ),
+                                    width: double.infinity,
+                                    child: FilledButton.icon(
+                                      onPressed: _isCreatingMandate
+                                          ? null
+                                          : _createMandate,
+                                      icon: _isCreatingMandate
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(Icons.note_add_outlined),
                                       label: Text(
                                         _isCreatingMandate
                                             ? 'Creating...'
@@ -1339,63 +1016,45 @@ class _PartnerPropertyMandateScreenState
                                   ),
                                 ],
 
-                                if (_hasMandate &&
-                                    !_mandateDeclared) ...[
+                                if (_hasMandate && !_mandateDeclared) ...[
                                   const SizedBox(height: 18),
 
                                   CheckboxListTile(
-                                    contentPadding:
-                                        EdgeInsets.zero,
-                                    value:
-                                        _authorityConfirmed,
-                                    onChanged:
-                                        (value) {
+                                    contentPadding: EdgeInsets.zero,
+                                    value: _authorityConfirmed,
+                                    onChanged: (value) {
                                       setState(() {
-                                        _authorityConfirmed =
-                                            value ??
-                                                false;
+                                        _authorityConfirmed = value ?? false;
                                       });
                                     },
-                                    title:
-                                        const Text(
+                                    title: const Text(
                                       'I confirm that I have authority to market this property.',
                                     ),
                                   ),
 
                                   CheckboxListTile(
-                                    contentPadding:
-                                        EdgeInsets.zero,
-                                    value:
-                                        _paymentPolicyAccepted,
-                                    onChanged:
-                                        (value) {
+                                    contentPadding: EdgeInsets.zero,
+                                    value: _paymentPolicyAccepted,
+                                    onChanged: (value) {
                                       setState(() {
-                                        _paymentPolicyAccepted =
-                                            value ??
-                                                false;
+                                        _paymentPolicyAccepted = value ?? false;
                                       });
                                     },
-                                    title:
-                                        const Text(
+                                    title: const Text(
                                       'I agree to use Pata Hao\'s recorded payment and transaction workflow.',
                                     ),
                                   ),
 
                                   CheckboxListTile(
-                                    contentPadding:
-                                        EdgeInsets.zero,
-                                    value:
-                                        _antiCircumventionAccepted,
-                                    onChanged:
-                                        (value) {
+                                    contentPadding: EdgeInsets.zero,
+                                    value: _antiCircumventionAccepted,
+                                    onChanged: (value) {
                                       setState(() {
                                         _antiCircumventionAccepted =
-                                            value ??
-                                                false;
+                                            value ?? false;
                                       });
                                     },
-                                    title:
-                                        const Text(
+                                    title: const Text(
                                       'I will not knowingly bypass Pata Hao for customers introduced through the platform.',
                                     ),
                                   ),
@@ -1403,30 +1062,22 @@ class _PartnerPropertyMandateScreenState
                                   const SizedBox(height: 10),
 
                                   SizedBox(
-                                    width:
-                                        double.infinity,
-                                    child:
-                                        FilledButton.icon(
-                                      onPressed:
-                                          _isDeclaringMandate
-                                              ? null
-                                              : _declareMandate,
-                                      icon:
-                                          _isDeclaringMandate
-                                              ? const SizedBox(
-                                                  width:
-                                                      18,
-                                                  height:
-                                                      18,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                    strokeWidth:
-                                                        2,
-                                                  ),
-                                                )
-                                              : const Icon(
-                                                  Icons.verified_user_outlined,
-                                                ),
+                                    width: double.infinity,
+                                    child: FilledButton.icon(
+                                      onPressed: _isDeclaringMandate
+                                          ? null
+                                          : _declareMandate,
+                                      icon: _isDeclaringMandate
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.verified_user_outlined,
+                                            ),
                                       label: Text(
                                         _isDeclaringMandate
                                             ? 'Accepting...'
@@ -1446,30 +1097,20 @@ class _PartnerPropertyMandateScreenState
                                   ),
                                   const SizedBox(height: 12),
                                   SizedBox(
-                                    width:
-                                        double.infinity,
-                                    child:
-                                        FilledButton.icon(
-                                      onPressed:
-                                          _isSubmittingForReview
-                                              ? null
-                                              : _submitForReview,
-                                      icon:
-                                          _isSubmittingForReview
-                                              ? const SizedBox(
-                                                  width:
-                                                      18,
-                                                  height:
-                                                      18,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                    strokeWidth:
-                                                        2,
-                                                  ),
-                                                )
-                                              : const Icon(
-                                                  Icons.send_outlined,
-                                                ),
+                                    width: double.infinity,
+                                    child: FilledButton.icon(
+                                      onPressed: _isSubmittingForReview
+                                          ? null
+                                          : _submitForReview,
+                                      icon: _isSubmittingForReview
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(Icons.send_outlined),
                                       label: Text(
                                         _isSubmittingForReview
                                             ? 'Submitting...'
@@ -1481,14 +1122,9 @@ class _PartnerPropertyMandateScreenState
 
                                 if (_mandateUnderReview)
                                   const Padding(
-                                    padding:
-                                        EdgeInsets.only(
-                                      top: 16,
-                                    ),
-                                    child:
-                                        _InfoBanner(
-                                      icon:
-                                          Icons.hourglass_top_rounded,
+                                    padding: EdgeInsets.only(top: 16),
+                                    child: _InfoBanner(
+                                      icon: Icons.hourglass_top_rounded,
                                       text:
                                           'Your digital mandate is under Pata Hao review.',
                                     ),
@@ -1496,12 +1132,8 @@ class _PartnerPropertyMandateScreenState
 
                                 if (_mandateApproved)
                                   const Padding(
-                                    padding:
-                                        EdgeInsets.only(
-                                      top: 16,
-                                    ),
-                                    child:
-                                        _SuccessBanner(
+                                    padding: EdgeInsets.only(top: 16),
+                                    child: _SuccessBanner(
                                       text:
                                           'Digital mandate approved. Commercial authorization is complete.',
                                     ),
@@ -1520,60 +1152,37 @@ class _PartnerPropertyMandateScreenState
   }
 }
 
-
 class _PropertySummaryCard extends StatelessWidget {
-  const _PropertySummaryCard({
-    required this.property,
-  });
+  const _PropertySummaryCard({required this.property});
 
   final Property property;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               property.title,
-              style:
-                  Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(
-                        fontWeight:
-                            FontWeight.w700,
-                      ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 5),
-            Text(
-              property.locationLabel,
-            ),
+            Text(property.locationLabel),
             const SizedBox(height: 8),
             Row(
               children: [
-                Chip(
-                  label: Text(
-                    property.formattedListingType,
-                  ),
-                ),
+                Chip(label: Text(property.formattedListingType)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     property.formattedPrice,
-                    textAlign:
-                        TextAlign.end,
-                    style:
-                        const TextStyle(
-                      fontWeight:
-                          FontWeight.w700,
-                    ),
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ],
@@ -1584,7 +1193,6 @@ class _PropertySummaryCard extends StatelessWidget {
     );
   }
 }
-
 
 class _WorkflowStatusCard extends StatelessWidget {
   const _WorkflowStatusCard({
@@ -1606,68 +1214,38 @@ class _WorkflowStatusCard extends StatelessWidget {
   final String mandateStatus;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Commercial authorization',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight:
-                    FontWeight.w700,
-              ),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 14),
+            _StatusRow(label: 'Commission terms', complete: hasAgreement),
             _StatusRow(
-              label:
-                  'Commission terms',
-              complete: hasAgreement,
+              label: 'Partner accepted commission',
+              complete: agreementAccepted,
             ),
             _StatusRow(
-              label:
-                  'Partner accepted commission',
+              label: 'Pata Hao commission review',
+              complete: agreementVerified,
+            ),
+            _StatusRow(label: 'Commission locked', complete: agreementLocked),
+            _StatusRow(label: 'Digital mandate created', complete: hasMandate),
+            _StatusRow(
+              label: 'Partner accepted mandate',
+              complete: mandateDeclared,
+            ),
+            _StatusRow(
+              label: 'Mandate submitted / approved',
               complete:
-                  agreementAccepted,
-            ),
-            _StatusRow(
-              label:
-                  'Pata Hao commission review',
-              complete:
-                  agreementVerified,
-            ),
-            _StatusRow(
-              label:
-                  'Commission locked',
-              complete:
-                  agreementLocked,
-            ),
-            _StatusRow(
-              label:
-                  'Digital mandate created',
-              complete: hasMandate,
-            ),
-            _StatusRow(
-              label:
-                  'Partner accepted mandate',
-              complete:
-                  mandateDeclared,
-            ),
-            _StatusRow(
-              label:
-                  'Mandate submitted / approved',
-              complete:
-                  mandateStatus ==
-                          'under_review' ||
-                      mandateStatus ==
-                          'approved',
+                  mandateStatus == 'under_review' ||
+                  mandateStatus == 'approved',
             ),
           ],
         ),
@@ -1676,46 +1254,30 @@ class _WorkflowStatusCard extends StatelessWidget {
   }
 }
 
-
 class _StatusRow extends StatelessWidget {
-  const _StatusRow({
-    required this.label,
-    required this.complete,
-  });
+  const _StatusRow({required this.label, required this.complete});
 
   final String label;
   final bool complete;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(
-        vertical: 4,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Icon(
-            complete
-                ? Icons.check_circle
-                : Icons.radio_button_unchecked,
+            complete ? Icons.check_circle : Icons.radio_button_unchecked,
             size: 20,
-            color: complete
-                ? const Color(0xFF15803D)
-                : Colors.black38,
+            color: complete ? const Color(0xFF15803D) : Colors.black38,
           ),
           const SizedBox(width: 9),
-          Expanded(
-            child: Text(label),
-          ),
+          Expanded(child: Text(label)),
         ],
       ),
     );
   }
 }
-
 
 class _CommissionPreview extends StatelessWidget {
   const _CommissionPreview({
@@ -1731,69 +1293,45 @@ class _CommissionPreview extends StatelessWidget {
   final String commission;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color:
-            const Color(0xFFF0FDF4),
-        borderRadius:
-            BorderRadius.circular(14),
-        border: Border.all(
-          color:
-              const Color(0xFFBBF7D0),
-        ),
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
       ),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Commission preview',
-            style: TextStyle(
-              fontWeight:
-                  FontWeight.w700,
-            ),
+            style: TextStyle(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
-          Text(
-            'Property value: $propertyValue',
-          ),
-          if (commissionMethod ==
-              'percentage')
-            Text(
-              'Rate: ${rate.isEmpty ? '—' : '$rate%'}',
-            ),
+          Text('Property value: $propertyValue'),
+          if (commissionMethod == 'percentage')
+            Text('Rate: ${rate.isEmpty ? '—' : '$rate%'}'),
           const SizedBox(height: 8),
           Text(
             commission,
-            style:
-                const TextStyle(
+            style: const TextStyle(
               fontSize: 22,
-              fontWeight:
-                  FontWeight.bold,
-              color:
-                  Color(0xFF14532D),
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF14532D),
             ),
           ),
           const SizedBox(height: 4),
           const Text(
             'Commission payable to Pata Hao on a successful transaction.',
-            style: TextStyle(
-              color:
-                  Colors.black54,
-            ),
+            style: TextStyle(color: Colors.black54),
           ),
         ],
       ),
     );
   }
 }
-
 
 class _SectionCard extends StatelessWidget {
   const _SectionCard({
@@ -1807,16 +1345,12 @@ class _SectionCard extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding:
-            const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1824,11 +1358,9 @@ class _SectionCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   title,
-                  style:
-                      const TextStyle(
+                  style: const TextStyle(
                     fontSize: 18,
-                    fontWeight:
-                        FontWeight.w700,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -1842,137 +1374,82 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
-
 class _SuccessBanner extends StatelessWidget {
-  const _SuccessBanner({
-    required this.text,
-  });
+  const _SuccessBanner({required this.text});
 
   final String text;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color:
-            const Color(0xFFF0FDF4),
-        borderRadius:
-            BorderRadius.circular(12),
-        border: Border.all(
-          color:
-              const Color(0xFFBBF7D0),
-        ),
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
       ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.check_circle_outline,
-            color:
-                Color(0xFF15803D),
-          ),
+          const Icon(Icons.check_circle_outline, color: Color(0xFF15803D)),
           const SizedBox(width: 9),
-          Expanded(
-            child: Text(text),
-          ),
+          Expanded(child: Text(text)),
         ],
       ),
     );
   }
 }
 
-
 class _InfoBanner extends StatelessWidget {
-  const _InfoBanner({
-    required this.icon,
-    required this.text,
-  });
+  const _InfoBanner({required this.icon, required this.text});
 
   final IconData icon;
   final String text;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color:
-            const Color(0xFFEFF6FF),
-        borderRadius:
-            BorderRadius.circular(12),
-        border: Border.all(
-          color:
-              const Color(0xFFBFDBFE),
-        ),
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
       ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            color:
-                const Color(0xFF1D4ED8),
-          ),
+          Icon(icon, color: const Color(0xFF1D4ED8)),
           const SizedBox(width: 9),
-          Expanded(
-            child: Text(text),
-          ),
+          Expanded(child: Text(text)),
         ],
       ),
     );
   }
 }
 
-
 class _ErrorCard extends StatelessWidget {
-  const _ErrorCard({
-    required this.message,
-  });
+  const _ErrorCard({required this.message});
 
   final String message;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color:
-            const Color(0xFFFEF2F2),
-        borderRadius:
-            BorderRadius.circular(12),
-        border: Border.all(
-          color:
-              const Color(0xFFFECACA),
-        ),
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
       ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.error_outline,
-            color:
-                Color(0xFFB91C1C),
-          ),
+          const Icon(Icons.error_outline, color: Color(0xFFB91C1C)),
           const SizedBox(width: 9),
-          Expanded(
-            child: Text(message),
-          ),
+          Expanded(child: Text(message)),
         ],
       ),
     );
