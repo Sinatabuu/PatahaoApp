@@ -136,10 +136,7 @@ class _PartnerPropertyWorkspaceScreenState
         return;
       }
 
-      await _showPhotoQualityDetails(
-        uploadedPhoto,
-        justUploaded: true,
-      );
+      await _showPhotoQualityDetails(uploadedPhoto, justUploaded: true);
     } catch (error) {
       if (!mounted) {
         return;
@@ -182,7 +179,9 @@ class _PartnerPropertyWorkspaceScreenState
         ? (justUploaded
               ? 'Photo uploaded — improvements suggested'
               : 'Improve this photo')
-        : (justUploaded ? 'Photo uploaded and accepted' : 'Photo quality passed');
+        : (justUploaded
+              ? 'Photo uploaded and accepted'
+              : 'Photo quality passed');
 
     await showModalBottomSheet<void>(
       context: context,
@@ -912,10 +911,7 @@ class _PhotoQualitySummary extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: TextStyle(color: color, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(message),
@@ -954,10 +950,7 @@ class _PhotoQualityBadge extends StatelessWidget {
         : 'Not checked';
 
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 5,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(20),
