@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'package:mobile/models/partner_dashboard.dart';
+import 'package:mobile/models/partner_commission.dart';
 import 'package:mobile/services/partner_dashboard_service.dart';
+import 'package:mobile/services/partner_commission_service.dart';
+import 'package:mobile/screens/partner_commission_settlement_detail_screen.dart';
+import 'package:mobile/screens/partner_transaction_history_screen.dart';
 import 'package:mobile/screens/partner_viewing_detail_screen.dart';
 import 'package:mobile/screens/property_list_screen.dart';
 import 'package:mobile/screens/my_properties_screen.dart';
@@ -21,6 +25,8 @@ class PartnerDashboardScreen extends StatefulWidget {
 class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
   late Future<PartnerDashboard> _dashboardFuture;
   late Future<List<Map<String, dynamic>>> _governanceCasesFuture;
+  late Future<PartnerCommissionSummary> _commissionSummaryFuture;
+  late Future<List<PartnerCommissionSettlement>> _commissionSettlementsFuture;
 
   final Set<int> _processingViewingIds = <int>{};
   final Set<int> _processingGovernanceCaseIds = <int>{};
@@ -36,12 +42,38 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
 
     _governanceCasesFuture = PartnerGovernanceService.instance
         .fetchActiveCases();
+
+    _commissionSummaryFuture = PartnerCommissionService.instance.getSummary();
+
+    _commissionSettlementsFuture = PartnerCommissionService.instance
+        .getSettlements();
+  }
+
+  Future<void> _openTransactionHistory() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) {
+          return const PartnerTransactionHistoryScreen();
+        },
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _refreshDashboard();
   }
 
   Future<void> _refreshDashboard() async {
     setState(_loadDashboard);
 
-    await Future.wait([_dashboardFuture, _governanceCasesFuture]);
+    await Future.wait([
+      _dashboardFuture,
+      _governanceCasesFuture,
+      _commissionSummaryFuture,
+      _commissionSettlementsFuture,
+    ]);
   }
 
   Future<void> _logout() async {
@@ -746,6 +778,38 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                 ),
 
                 _SummarySection(summary: dashboard.summary),
+                const SizedBox(height: 24),
+
+                FutureBuilder<PartnerCommissionSummary>(
+                  future: _commissionSummaryFuture,
+                  builder: (context, commissionSnapshot) {
+                    if (commissionSnapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const _CommissionLoadingCard();
+                    }
+
+                    if (commissionSnapshot.hasError ||
+                        !commissionSnapshot.hasData) {
+                      return const _CommissionUnavailableCard();
+                    }
+
+                    return FutureBuilder<List<PartnerCommissionSettlement>>(
+                      future: _commissionSettlementsFuture,
+                      builder: (context, settlementsSnapshot) {
+                        final settlements =
+                            settlementsSnapshot.data ??
+                            const <PartnerCommissionSettlement>[];
+
+                        return _PartnerCommissionSection(
+                          summary: commissionSnapshot.data!,
+                          settlements: settlements,
+                          onTransactionHistory: _openTransactionHistory,
+                        );
+                      },
+                    );
+                  },
+                ),
+
                 const SizedBox(height: 24),
 
                 _QuickActionsSection(
@@ -1699,6 +1763,17 @@ class _ViewingCard extends StatelessWidget {
               ),
             ],
 
+            const SizedBox(height: 14),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: isProcessing ? null : onOpen,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Open Viewing'),
+              ),
+            ),
+
             if (viewing.status == 'paid_pending_partner') ...[
               const SizedBox(height: 16),
               if (isProcessing)
@@ -2050,4 +2125,306 @@ class _PartnerClearanceNotice extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PartnerCommissionSection extends StatelessWidget {
+  const _PartnerCommissionSection({
+    required this.summary,
+    required this.settlements,
+    required this.onTransactionHistory,
+  });
+
+  final PartnerCommissionSummary summary;
+  final List<PartnerCommissionSettlement> settlements;
+  final VoidCallback onTransactionHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    final recentSettlements = settlements.take(3).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'My Commission',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.55,
+          children: [
+            _CommissionMetricCard(
+              label: 'Total Earned',
+              value: _commissionMoney(summary.totalCommission),
+              icon: Icons.account_balance_wallet_outlined,
+            ),
+            _CommissionMetricCard(
+              label: 'Paid to Date',
+              value: _commissionMoney(summary.paidToDate),
+              icon: Icons.payments_outlined,
+            ),
+            _CommissionMetricCard(
+              label: 'Outstanding',
+              value: _commissionMoney(summary.outstandingCommission),
+              icon: Icons.hourglass_bottom_outlined,
+            ),
+            _CommissionMetricCard(
+              label: 'Settlements',
+              value: summary.settlementCount.toString(),
+              icon: Icons.receipt_long_outlined,
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 12),
+
+        Card(
+          elevation: 0,
+          color: Colors.white,
+          clipBehavior: Clip.antiAlias,
+          child: ListTile(
+            onTap: onTransactionHistory,
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFE7F5EC),
+              child: Icon(
+                Icons.receipt_long_outlined,
+                color: Color(0xFF14532D),
+              ),
+            ),
+            title: const Text(
+              'Transaction History',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            subtitle: const Text('View your commission and payment history'),
+            trailing: const Icon(Icons.chevron_right, color: Colors.black38),
+          ),
+        ),
+
+        if (recentSettlements.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const Text(
+            'Recent Settlements',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          ...recentSettlements.map(
+            (settlement) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _CommissionSettlementCard(settlement: settlement),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _CommissionMetricCard extends StatelessWidget {
+  const _CommissionMetricCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE4F3E2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: const Color(0xFF2E8B28)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommissionSettlementCard extends StatelessWidget {
+  const _CommissionSettlementCard({required this.settlement});
+
+  final PartnerCommissionSettlement settlement;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PartnerCommissionSettlementDetailScreen(
+                settlement: settlement,
+              ),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      settlement.propertyTitle.isEmpty
+                          ? 'Commission Settlement'
+                          : settlement.propertyTitle,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: Colors.black38),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _CommissionRow(
+                label: 'My share',
+                value: _commissionMoney(settlement.myShare),
+              ),
+              const SizedBox(height: 4),
+              _CommissionRow(
+                label: 'Paid',
+                value: _commissionMoney(settlement.myPaidAmount),
+              ),
+              const SizedBox(height: 4),
+              _CommissionRow(
+                label: 'Outstanding',
+                value: _commissionMoney(settlement.myOutstandingAmount),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _humanize(settlement.myPaymentStatus),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _statusForeground(settlement.myPaymentStatus),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CommissionRow extends StatelessWidget {
+  const _CommissionRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(label, style: const TextStyle(color: Colors.black54)),
+        ),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+}
+
+class _CommissionLoadingCard extends StatelessWidget {
+  const _CommissionLoadingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      elevation: 0,
+      child: Padding(
+        padding: EdgeInsets.all(18),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Loading commission information...')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommissionUnavailableCard extends StatelessWidget {
+  const _CommissionUnavailableCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      elevation: 0,
+      child: Padding(
+        padding: EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.black54),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Commission information is '
+                'temporarily unavailable.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _commissionMoney(double value) {
+  return 'KES ${value.toStringAsFixed(2)}';
 }
