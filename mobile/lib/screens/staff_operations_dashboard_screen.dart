@@ -7,6 +7,7 @@ import 'package:mobile/services/auth_service.dart';
 import 'package:mobile/screens/staff_partners_screen.dart';
 import 'package:mobile/screens/staff_viewings_screen.dart';
 import 'package:mobile/screens/staff_deals_screen.dart';
+import 'package:mobile/screens/staff_completed_deals_revenue_screen.dart';
 import 'package:mobile/screens/staff_governance_cases_screen.dart';
 
 class StaffOperationsDashboardScreen extends StatefulWidget {
@@ -143,6 +144,22 @@ class _StaffOperationsDashboardScreenState
       MaterialPageRoute<void>(
         builder: (_) {
           return const StaffDealsScreen();
+        },
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadSummary();
+  }
+
+  Future<void> _openCompletedDealsRevenue() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) {
+          return const StaffCompletedDealsRevenueScreen();
         },
       ),
     );
@@ -441,12 +458,25 @@ class _StaffOperationsDashboardScreenState
             onTap: _openGovernanceCases,
           ),
         ),
-        const Card(
+        Card(
           child: ListTile(
-            contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            leading: CircleAvatar(child: Icon(Icons.payments_outlined)),
-            title: Text('Commissions'),
-            subtitle: Text('Commission operations — coming next'),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 10,
+            ),
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFE7F5EC),
+              child: Icon(Icons.bar_chart_outlined, color: Color(0xFF14532D)),
+            ),
+            title: const Text(
+              'Completed Deals & Revenue',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            subtitle: const Text(
+              'Commission, partner payouts, and Pata Hao retained revenue',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openCompletedDealsRevenue,
           ),
         ),
 
