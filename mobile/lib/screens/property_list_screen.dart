@@ -10,6 +10,7 @@ import '../models/property_type_option.dart';
 import '../widgets/pata_hao_network_image.dart';
 import 'package:mobile/screens/saved_properties_screen.dart';
 import 'package:mobile/screens/customer_profile_screen.dart';
+import 'package:mobile/screens/customer_deals_screen.dart';
 
 class PropertyListScreen extends StatefulWidget {
   const PropertyListScreen({super.key, this.onLogout});
@@ -224,6 +225,13 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
     }
 
     await _loadPendingViewingOutcome();
+  }
+  void _openMyDeals() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const CustomerDealsScreen(),
+      ),
+    );
   }
 
   void _openProfile() {
@@ -723,6 +731,11 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                   label: 'Viewings',
                 ),
                 NavigationDestination(
+                  icon: Icon(Icons.handshake_outlined),
+                  selectedIcon: Icon(Icons.handshake),
+                  label: 'Deals',
+                ),
+                NavigationDestination(
                   icon: Icon(Icons.person_outline),
                   selectedIcon: Icon(Icons.person),
                   label: 'Profile',
@@ -742,9 +755,14 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                     break;
 
                   case 3:
+                    _openMyDeals();
+                    break;
+
+                  case 4:
                     _openProfile();
                     break;
                 }
+
               },
             ),
     );
