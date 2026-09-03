@@ -111,6 +111,10 @@ class Property {
   final String status;
   final String verificationReturnReason;
   final String trustBadge;
+  final bool isSuccessBroadcastActive;
+  final String successBadge;
+  final DateTime? transactionCompletedAt;
+  final DateTime? successBroadcastUntil;
   final bool isFavorite;
   final int? favoriteId;
   final List<PropertyPhoto> photos;
@@ -138,6 +142,10 @@ class Property {
     required this.photos,
     required this.videos,
     required this.amenities,
+    this.isSuccessBroadcastActive = false,
+    this.successBadge = '',
+    this.transactionCompletedAt,
+    this.successBroadcastUntil,
   });
 
   factory Property.fromJson(Map<String, dynamic> json) {
@@ -164,8 +172,13 @@ class Property {
       bathrooms: _toInt(json['bathrooms']),
       description: json['description']?.toString() ?? '',
       status: json['status']?.toString() ?? '',
-      verificationReturnReason: json['verification_return_reason']?.toString() ?? '',
+      verificationReturnReason:
+          json['verification_return_reason']?.toString() ?? '',
       trustBadge: json['trust_badge']?.toString() ?? 'none',
+      isSuccessBroadcastActive: json['is_success_broadcast_active'] == true,
+      successBadge: json['success_badge']?.toString() ?? '',
+      transactionCompletedAt: _toDateTime(json['transaction_completed_at']),
+      successBroadcastUntil: _toDateTime(json['success_broadcast_until']),
       isFavorite: json['is_favorite'] == true,
       favoriteId: json['favorite_id'] == null
           ? null
@@ -328,11 +341,11 @@ class Property {
   bool get hasVideoThumbnail {
     return coverVideo != null;
   }
+
   bool get hasVideo {
-    return videos.any(
-      (video) => video.video.trim().isNotEmpty,
-    );
+    return videos.any((video) => video.video.trim().isNotEmpty);
   }
+
   String? get coverMediaUrl {
     final video = coverVideo;
 
@@ -355,6 +368,24 @@ class Property {
     return video != null && video.thumbnail.trim().isNotEmpty;
   }
 
+  bool get isCompletedTransaction {
+    final normalizedStatus = status.trim().toLowerCase();
+
+    return normalizedStatus == 'sold' || normalizedStatus == 'rented';
+  }
+
+  String get successDisplayLabel {
+    final serverLabel = successBadge.trim();
+
+    if (serverLabel.isNotEmpty) {
+      return serverLabel;
+    }
+
+    return status.trim().toLowerCase() == 'sold'
+        ? 'Sold Through Pata Hao'
+        : 'Rented Through Pata Hao';
+  }
+
   Property copyWith({
     int? id,
     String? title,
@@ -371,6 +402,10 @@ class Property {
     String? status,
     String? verificationReturnReason,
     String? trustBadge,
+    bool? isSuccessBroadcastActive,
+    String? successBadge,
+    DateTime? transactionCompletedAt,
+    DateTime? successBroadcastUntil,
     bool? isFavorite,
     int? favoriteId,
     bool clearFavoriteId = false,
@@ -393,15 +428,31 @@ class Property {
       description: description ?? this.description,
       status: status ?? this.status,
       verificationReturnReason:
-          verificationReturnReason ??
-          this.verificationReturnReason,
+          verificationReturnReason ?? this.verificationReturnReason,
       trustBadge: trustBadge ?? this.trustBadge,
+      isSuccessBroadcastActive:
+          isSuccessBroadcastActive ?? this.isSuccessBroadcastActive,
+      successBadge: successBadge ?? this.successBadge,
+      transactionCompletedAt:
+          transactionCompletedAt ?? this.transactionCompletedAt,
+      successBroadcastUntil:
+          successBroadcastUntil ?? this.successBroadcastUntil,
       isFavorite: isFavorite ?? this.isFavorite,
       favoriteId: clearFavoriteId ? null : favoriteId ?? this.favoriteId,
       photos: photos ?? this.photos,
       videos: videos ?? this.videos,
       amenities: amenities ?? this.amenities,
     );
+  }
+
+  static DateTime? _toDateTime(dynamic value) {
+    final rawValue = value?.toString().trim() ?? '';
+
+    if (rawValue.isEmpty) {
+      return null;
+    }
+
+    return DateTime.tryParse(rawValue);
   }
 
   static int _toInt(dynamic value) {

@@ -102,6 +102,10 @@ class PropertyDetailScreen extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (property.isSuccessBroadcastActive) ...[
+                            _buildSuccessBroadcastBanner(),
+                            const SizedBox(height: 18),
+                          ],
                           Text(
                             property.title,
                             style: const TextStyle(
@@ -180,10 +184,15 @@ class PropertyDetailScreen extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          const Text(
-                            'Contact the property partner and request a viewing '
-                            'to receive more information about this property.',
-                            style: TextStyle(
+                          Text(
+                            property.isCompletedTransaction
+                                ? ('This successful transaction '
+                                      'was completed through Pata Hao.')
+                                : ('Contact the property partner '
+                                      'and request a viewing to receive '
+                                      'more information about this '
+                                      'property.'),
+                            style: const TextStyle(
                               fontSize: 15,
                               height: 1.5,
                               color: Colors.black87,
@@ -214,10 +223,19 @@ class PropertyDetailScreen extends StatelessWidget {
                                 SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    'Viewing requests are managed through '
-                                    'Pata Hao. The viewing commitment fee is '
-                                    'KES $formattedViewingFee, no cash and must be paid in the app.',
-                                    style: TextStyle(
+                                    property.isCompletedTransaction
+                                        ? ('Pata Hao verified this '
+                                              'completed transaction. '
+                                              'The property is no longer '
+                                              'accepting viewing requests.')
+                                        : ('Viewing requests are '
+                                              'managed through Pata Hao. '
+                                              'The viewing commitment fee '
+                                              'is KES '
+                                              '$formattedViewingFee, '
+                                              'no cash and must be paid '
+                                              'in the app.'),
+                                    style: const TextStyle(
                                       fontSize: 14,
                                       height: 1.4,
                                       color: Color(0xFF14532D),
@@ -758,7 +776,123 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildSuccessBroadcastBanner() {
+    final isSold = property.status.trim().toLowerCase() == 'sold';
+
+    final accentColor = isSold
+        ? const Color(0xFFB91C1C)
+        : const Color(0xFFD97706);
+
+    final backgroundColor = isSold
+        ? const Color(0xFFFEF2F2)
+        : const Color(0xFFFFFBEB);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accentColor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            backgroundColor: accentColor,
+            foregroundColor: Colors.white,
+            child: Icon(isSold ? Icons.sell_outlined : Icons.key_outlined),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  property.successDisplayLabel,
+                  style: TextStyle(
+                    color: accentColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                const Text(
+                  'Verified transaction completed through '
+                  'Pata Hao.',
+                  style: TextStyle(color: Color(0xFF374151), height: 1.35),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRequestViewingButton(BuildContext context) {
+    if (property.isCompletedTransaction) {
+      final isSold = property.status.trim().toLowerCase() == 'sold';
+
+      final accentColor = isSold
+          ? const Color(0xFFB91C1C)
+          : const Color(0xFFD97706);
+
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x1A000000),
+              blurRadius: 10,
+              offset: Offset(0, -2),
+            ),
+          ],
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: accentColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accentColor.withValues(alpha: 0.30)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.verified_outlined, color: accentColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      property.successDisplayLabel,
+                      style: TextStyle(
+                        color: accentColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      isSold
+                          ? ('This property has been sold '
+                                'and is no longer available.')
+                          : ('This property has been rented '
+                                'and is no longer available.'),
+                      style: const TextStyle(
+                        color: Color(0xFF4B5563),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),

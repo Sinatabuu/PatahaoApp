@@ -226,11 +226,10 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
 
     await _loadPendingViewingOutcome();
   }
+
   void _openMyDeals() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const CustomerDealsScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const CustomerDealsScreen()),
     );
   }
 
@@ -634,6 +633,26 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
 
           final filteredProperties = _filterProperties(properties);
 
+          final availableProperties = filteredProperties
+              .where((property) => !property.isSuccessBroadcastActive)
+              .toList();
+
+          final successBroadcastProperties =
+              filteredProperties
+                  .where((property) => property.isSuccessBroadcastActive)
+                  .toList()
+                ..sort((first, second) {
+                  final firstCompletedAt =
+                      first.transactionCompletedAt ??
+                      DateTime.fromMillisecondsSinceEpoch(0);
+
+                  final secondCompletedAt =
+                      second.transactionCompletedAt ??
+                      DateTime.fromMillisecondsSinceEpoch(0);
+
+                  return secondCompletedAt.compareTo(firstCompletedAt);
+                });
+
           if (properties.isEmpty) {
             return RefreshIndicator(
               onRefresh: _refreshProperties,
@@ -682,13 +701,14 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                   SliverFillRemaining(
                     hasScrollBody: false,
                     child: _NoMatchingProperties(onClearFilters: _clearFilters),
-                  )
-                else
+                  ),
+
+                if (availableProperties.isNotEmpty)
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate((context, index) {
-                        final property = filteredProperties[index];
+                        final property = availableProperties[index];
 
                         return _PropertyCard(
                           property: property,
@@ -696,7 +716,77 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                           location: _location(property),
                           price: _formatPrice(property),
                         );
-                      }, childCount: filteredProperties.length),
+                      }, childCount: availableProperties.length),
+                    ),
+                  ),
+
+                if (successBroadcastProperties.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        availableProperties.isEmpty ? 0 : 4,
+                        16,
+                        14,
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.emoji_events_outlined,
+                                  color: Color(0xFFD97706),
+                                ),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Recently Sold & Rented',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF92400E),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              'Successful property transactions '
+                              'completed through Pata Hao.',
+                              style: TextStyle(
+                                color: Color(0xFF78350F),
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                if (successBroadcastProperties.isNotEmpty)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final property = successBroadcastProperties[index];
+
+                        return _PropertyCard(
+                          property: property,
+                          mediaUrl: _mediaUrl(property),
+                          location: _location(property),
+                          price: _formatPrice(property),
+                        );
+                      }, childCount: successBroadcastProperties.length),
                     ),
                   ),
               ],
@@ -762,7 +852,6 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                     _openProfile();
                     break;
                 }
-
               },
             ),
     );
@@ -980,6 +1069,10 @@ class _PropertyCardState extends State<_PropertyCard> {
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.property.id != widget.property.id ||
+        oldWidget.property.status != widget.property.status ||
+        oldWidget.property.isSuccessBroadcastActive !=
+            widget.property.isSuccessBroadcastActive ||
+        oldWidget.property.successBadge != widget.property.successBadge ||
         oldWidget.property.isFavorite != widget.property.isFavorite ||
         oldWidget.property.favoriteId != widget.property.favoriteId) {
       _property = widget.property;
@@ -1164,20 +1257,51 @@ class _PropertyCardState extends State<_PropertyCard> {
                 Positioned(
                   top: 12,
                   left: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF34AD2C),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _property.listingType == 'rent' ? 'For Rent' : 'For Sale',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 215),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _property.isSuccessBroadcastActive
+                            ? (_property.status.trim().toLowerCase() == 'sold'
+                                  ? const Color(0xFFB91C1C)
+                                  : const Color(0xFFD97706))
+                            : const Color(0xFF34AD2C),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_property.isSuccessBroadcastActive) ...[
+                            Icon(
+                              _property.status.trim().toLowerCase() == 'sold'
+                                  ? Icons.sell_outlined
+                                  : Icons.key_outlined,
+                              size: 15,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 5),
+                          ],
+                          Flexible(
+                            child: Text(
+                              _property.isSuccessBroadcastActive
+                                  ? _property.successDisplayLabel.toUpperCase()
+                                  : (_property.listingType == 'rent'
+                                        ? 'For Rent'
+                                        : 'For Sale'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
