@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Property(models.Model):
@@ -26,6 +29,9 @@ class Property(models.Model):
         (LISTING_RENT, "Rent"),
         (LISTING_SALE, "Sale"),
     ]
+
+    RENT_SUCCESS_BROADCAST_DAYS = 15
+    SALE_SUCCESS_BROADCAST_DAYS = 30
 
     STATUS_DRAFT = "draft"
     STATUS_PENDING = "pending"
@@ -158,6 +164,19 @@ class Property(models.Model):
         ),
     )
 
+    transaction_completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    success_broadcast_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        db_index=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -170,6 +189,73 @@ class Property(models.Model):
     @property
     def is_available(self):
         return self.status == self.STATUS_PUBLISHED
+
+    @property
+    def is_success_broadcast_active(self):
+        return (
+            self.status
+            in {
+                self.STATUS_RENTED,
+                self.STATUS_SOLD,
+            }
+            and self.success_broadcast_until is not None
+            and self.success_broadcast_until > timezone.now()
+        )
+
+    @property
+    def success_badge(self):
+        if not self.is_success_broadcast_active:
+            return ""
+
+        if self.status == self.STATUS_SOLD:
+            return "Sold Through Pata Hao"
+
+        return "Rented Through Pata Hao"
+
+    def mark_transaction_completed(
+        self,
+        *,
+        completed_at=None,
+    ):
+        completed_at = completed_at or timezone.now()
+
+        if self.listing_type == self.LISTING_SALE:
+            completed_status = self.STATUS_SOLD
+            broadcast_days = (
+                self.SALE_SUCCESS_BROADCAST_DAYS
+            )
+
+        elif self.listing_type == self.LISTING_RENT:
+            completed_status = self.STATUS_RENTED
+            broadcast_days = (
+                self.RENT_SUCCESS_BROADCAST_DAYS
+            )
+
+        else:
+            raise ValueError(
+                "Unsupported property listing type."
+            )
+
+        self.status = completed_status
+        self.transaction_completed_at = completed_at
+        self.success_broadcast_until = (
+            completed_at
+            + timedelta(
+                days=broadcast_days,
+            )
+        )
+
+        self.save(
+            update_fields=[
+                "status",
+                "transaction_completed_at",
+                "success_broadcast_until",
+                "updated_at",
+            ]
+        )
+
+        return broadcast_days
+
 
 class PropertyFavorite(models.Model):
     customer = models.ForeignKey(

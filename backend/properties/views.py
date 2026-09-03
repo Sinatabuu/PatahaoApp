@@ -7,6 +7,7 @@ from math import asin, cos, radians, sin, sqrt
 from core.models import ActivityLog
 from partners.models import Partner
 from django.db.models import Q
+from django.utils import timezone
 from .models import (
     Property,
     PropertyPartner,
@@ -175,8 +176,8 @@ class PropertyViewSet(viewsets.ModelViewSet):
     """
     Public/customer-facing property endpoint.
 
-    Public users and ordinary authenticated customers may only see
-    published properties.
+    Public users and ordinary authenticated customers may see
+    published properties plus active sold/rented success broadcasts.
 
     Staff users may see all properties and optionally filter by status.
     """
@@ -225,10 +226,21 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
                 return queryset
 
-        # Public users and normal customers may only see
-        # properties that are currently published.
+        # Public users and normal customers see available listings
+        # plus recent Pata Hao successes for their controlled period.
+        now = timezone.now()
+
         return queryset.filter(
-            status=Property.STATUS_PUBLISHED,
+            Q(
+                status=Property.STATUS_PUBLISHED,
+            )
+            | Q(
+                status__in=[
+                    Property.STATUS_SOLD,
+                    Property.STATUS_RENTED,
+                ],
+                success_broadcast_until__gt=now,
+            )
         )
 
     def perform_create(self, serializer):

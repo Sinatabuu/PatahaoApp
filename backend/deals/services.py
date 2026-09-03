@@ -2293,6 +2293,14 @@ def complete_agreed_deal_and_raise_commission(
         ]
     )
 
+    previous_property_status = deal.property.status
+
+    broadcast_days = (
+        deal.property.mark_transaction_completed(
+            completed_at=deal.completed_at,
+        )
+    )
+
     DealEvent.objects.get_or_create(
         deal=deal,
         action="deal_completed",
@@ -2312,6 +2320,35 @@ def complete_agreed_deal_and_raise_commission(
                 "previous_status": "agreed",
                 "new_status": "commission_due",
             },
+        },
+    )
+
+    DealEvent.objects.create(
+        deal=deal,
+        action="property_success_broadcast_started",
+        actor=actor,
+        notes=(
+            f"{deal.property.success_badge} broadcast started "
+            "after Pata Hao verified the transaction."
+        ),
+        metadata={
+            "property_id": deal.property_id,
+            "listing_type": deal.property.listing_type,
+            "previous_property_status": (
+                previous_property_status
+            ),
+            "new_property_status": deal.property.status,
+            "transaction_completed_at": (
+                deal.property
+                .transaction_completed_at
+                .isoformat()
+            ),
+            "success_broadcast_until": (
+                deal.property
+                .success_broadcast_until
+                .isoformat()
+            ),
+            "broadcast_days": broadcast_days,
         },
     )
 

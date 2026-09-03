@@ -481,6 +481,8 @@ class PropertyAdmin(admin.ModelAdmin):
     )
     readonly_fields = (
         "status",
+        "transaction_completed_at",
+        "success_broadcast_until",
     )
     search_fields = (
         "title",
@@ -544,6 +546,8 @@ class PropertyAdmin(admin.ModelAdmin):
                 "fields": (
                     "status",
                     "trust_badge",
+                    "transaction_completed_at",
+                    "success_broadcast_until",
                 )
             },
         ),

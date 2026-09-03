@@ -170,6 +170,28 @@ class PropertySerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    is_success_broadcast_active = (
+        serializers.BooleanField(
+            read_only=True,
+        )
+    )
+
+    success_badge = serializers.CharField(
+        read_only=True,
+    )
+
+    transaction_completed_at = (
+        serializers.DateTimeField(
+            read_only=True,
+        )
+    )
+
+    success_broadcast_until = (
+        serializers.DateTimeField(
+            read_only=True,
+        )
+    )
+
     is_favorite = serializers.SerializerMethodField()
     favorite_id = serializers.SerializerMethodField()
 
@@ -193,6 +215,10 @@ class PropertySerializer(serializers.ModelSerializer):
             "description",
             "status",
             "is_available",
+            "is_success_broadcast_active",
+            "success_badge",
+            "transaction_completed_at",
+            "success_broadcast_until",
             "is_favorite",
             "favorite_id",
             "trust_badge",

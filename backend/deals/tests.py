@@ -1386,6 +1386,40 @@ class DealCompletionCommissionTests(
 
         completed_deal.refresh_from_db()
         commission_settlement.refresh_from_db()
+        self.rental_property.refresh_from_db()
+
+        self.assertEqual(
+            self.rental_property.status,
+            Property.STATUS_RENTED,
+        )
+        self.assertEqual(
+            self.rental_property.transaction_completed_at,
+            completed_deal.completed_at,
+        )
+        self.assertEqual(
+            self.rental_property.success_broadcast_until,
+            completed_deal.completed_at
+            + timedelta(
+                days=Property.RENT_SUCCESS_BROADCAST_DAYS,
+            ),
+        )
+        self.assertTrue(
+            self.rental_property.is_success_broadcast_active,
+        )
+
+        broadcast_event = DealEvent.objects.get(
+            deal=completed_deal,
+            action="property_success_broadcast_started",
+        )
+
+        self.assertEqual(
+            broadcast_event.metadata["new_property_status"],
+            Property.STATUS_RENTED,
+        )
+        self.assertEqual(
+            broadcast_event.metadata["broadcast_days"],
+            Property.RENT_SUCCESS_BROADCAST_DAYS,
+        )
 
         self.assertTrue(
             settlement_created,
