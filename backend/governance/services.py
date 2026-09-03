@@ -209,6 +209,7 @@ def get_successful_three_party_deal_count(partner):
     successful_statuses = {
         Deal.Status.AGREED,
         Deal.Status.COMPLETED,
+        Deal.Status.COMMISSION_DUE,
     }
 
     commission_paid_status = getattr(
@@ -317,6 +318,7 @@ def calculate_dispute_rate(partner):
         Deal.Status.DISPUTED,
         Deal.Status.NEGOTIATING,
         Deal.Status.COMPLETED,
+        Deal.Status.COMMISSION_DUE,
     }
 
     commission_paid_status = getattr(

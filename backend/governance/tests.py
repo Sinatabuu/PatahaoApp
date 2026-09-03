@@ -934,7 +934,12 @@ class PartnerPropertyLimitTests(TestCase):
 
         self.assertEqual(
             result["tier"],
-            self.bronze,
+            {
+                "id": self.bronze.id,
+                "code": self.bronze.code,
+                "name": self.bronze.name,
+                "rank": self.bronze.rank,
+            },
         )
 
         self.assertEqual(

@@ -37,6 +37,16 @@ class PartnerTier(models.Model):
         decimal_places=2,
         default=0,
     )
+    commission_share_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Percentage of an eligible Pata Hao commission "
+            "allocated to a partner in this tier."
+        ),
+    )
 
     active = models.BooleanField(
         default=True,

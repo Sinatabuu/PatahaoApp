@@ -22,6 +22,7 @@ class Command(BaseCommand):
             "property_limit": 20,
             "minimum_completed_deals": 0,
             "minimum_trust_score": Decimal("0.00"),
+            "commission_share_rate": Decimal("20.00"),
         },
         {
             "code": "silver",
@@ -33,6 +34,7 @@ class Command(BaseCommand):
             "property_limit": 50,
             "minimum_completed_deals": 50,
             "minimum_trust_score": Decimal("90.00"),
+            "commission_share_rate": Decimal("30.00"),
         },
         {
             "code": "gold",
@@ -44,6 +46,7 @@ class Command(BaseCommand):
             "property_limit": 100,
             "minimum_completed_deals": 150,
             "minimum_trust_score": Decimal("93.00"),
+            "commission_share_rate": Decimal("40.00"),
         },
         {
             "code": "platinum",
@@ -55,6 +58,7 @@ class Command(BaseCommand):
             "property_limit": 250,
             "minimum_completed_deals": 400,
             "minimum_trust_score": Decimal("96.00"),
+            "commission_share_rate": Decimal("50.00"),
         },
         {
             "code": "diamond",
@@ -66,6 +70,7 @@ class Command(BaseCommand):
             "property_limit": 999999,
             "minimum_completed_deals": 1000,
             "minimum_trust_score": Decimal("98.00"),
+            "commission_share_rate": None,
         },
     ]
 
