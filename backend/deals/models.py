@@ -172,6 +172,11 @@ class Deal(models.Model):
         blank=True,
     )
 
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     cancelled_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -634,41 +639,491 @@ class OwnerConfirmationToken(models.Model):
         )
 
 class CommissionInvoice(models.Model):
+    """
+    Accounts-receivable evidence for commission owed to Pata Hao.
+
+    The locked CommissionAgreement establishes the obligation.
+    The CommissionSettlement records how the gross commission is
+    economically allocated.
+
+    This invoice records who owes Pata Hao, how much is owed, and
+    the historical owner/agreement identity that applied when the
+    receivable was issued.
+    """
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
+        PARTIALLY_PAID = "partially_paid", "Partially paid"
         PAID = "paid", "Paid"
         CANCELLED = "cancelled", "Cancelled"
         REFUNDED = "refunded", "Refunded"
 
     deal = models.OneToOneField(
         Deal,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="commission_invoice",
     )
 
+    settlement = models.OneToOneField(
+        "commissions.CommissionSettlement",
+        on_delete=models.PROTECT,
+        related_name="commission_invoice",
+        null=True,
+        blank=True,
+    )
+
+    agreement = models.ForeignKey(
+        "commissions.CommissionAgreement",
+        on_delete=models.PROTECT,
+        related_name="commission_invoices",
+        null=True,
+        blank=True,
+    )
+
+    owner = models.ForeignKey(
+        "mandates.PropertyOwner",
+        on_delete=models.PROTECT,
+        related_name="commission_invoices",
+        null=True,
+        blank=True,
+    )
+
     invoice_number = models.CharField(
-        max_length=30,
+        max_length=50,
         unique=True,
+        blank=True,
+        editable=False,
+    )
+
+    owner_number_snapshot = models.CharField(
+        max_length=40,
+        blank=True,
+        editable=False,
+    )
+
+    owner_legal_name_snapshot = models.CharField(
+        max_length=255,
+        blank=True,
+        editable=False,
+    )
+
+    owner_phone_number_snapshot = models.CharField(
+        max_length=30,
+        blank=True,
+        editable=False,
+    )
+
+    owner_email_snapshot = models.EmailField(
+        blank=True,
+        editable=False,
+    )
+
+    agreement_number_snapshot = models.CharField(
+        max_length=50,
+        blank=True,
+        editable=False,
     )
 
     amount = models.DecimalField(
-        max_digits=12,
+        max_digits=14,
         decimal_places=2,
+    )
+
+    currency = models.CharField(
+        max_length=3,
+        default="KES",
     )
 
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING,
+        db_index=True,
     )
 
-    created_at = models.DateTimeField(auto_now_add=True)
+    issued_at = models.DateTimeField(
+        default=timezone.now,
+    )
 
     paid_at = models.DateTimeField(
         null=True,
         blank=True,
     )
 
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_commission_invoices",
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-issued_at",
+            "-id",
+        ]
+
+    def clean(self):
+        errors = {}
+
+        if self.settlement_id is None:
+            errors["settlement"] = (
+                "A commission settlement is required."
+            )
+
+        if self.agreement_id is None:
+            errors["agreement"] = (
+                "A locked commission agreement is required."
+            )
+
+        if self.owner_id is None:
+            errors["owner"] = (
+                "The liable property owner is required."
+            )
+
+        if self.created_by_id is None:
+            errors["created_by"] = (
+                "The administrator issuing the invoice is required."
+            )
+
+        if self.amount is None or self.amount <= Decimal("0.00"):
+            errors["amount"] = (
+                "The commission invoice amount must be greater than zero."
+            )
+
+        if self.agreement_id:
+            if self.agreement.property_id != self.deal.property_id:
+                errors["agreement"] = (
+                    "The invoice agreement must belong to the "
+                    "same property as the deal."
+                )
+
+            if not self.agreement.is_locked:
+                errors["agreement"] = (
+                    "The commission agreement must be locked "
+                    "before an invoice can be issued."
+                )
+
+        if self.settlement_id:
+            if self.settlement.deal_id != self.deal_id:
+                errors["settlement"] = (
+                    "The commission settlement must belong to "
+                    "the same deal as the invoice."
+                )
+
+            if (
+                self.agreement_id
+                and self.settlement.agreement_id != self.agreement_id
+            ):
+                errors["settlement"] = (
+                    "The settlement and invoice must use the "
+                    "same commission agreement."
+                )
+
+            if (
+                self.amount is not None
+                and self.settlement.gross_commission_amount != self.amount
+            ):
+                errors["amount"] = (
+                    "The invoice amount must equal the gross "
+                    "commission settlement amount."
+                )
+
+            if (
+                self.currency
+                and self.settlement.currency
+                and self.currency.strip().upper()
+                != self.settlement.currency.strip().upper()
+            ):
+                errors["currency"] = (
+                    "The invoice currency must match the "
+                    "commission settlement currency."
+                )
+
+        if self.status == self.Status.PAID:
+            if self.paid_at is None:
+                errors["paid_at"] = (
+                    "A paid commission invoice requires a payment time."
+                )
+
+        elif self.paid_at is not None:
+            errors["paid_at"] = (
+                "A payment time cannot exist unless the invoice is paid."
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_immutable_receivable(self):
+        if not self.pk:
+            return
+
+        original = CommissionInvoice.objects.get(
+            pk=self.pk,
+        )
+
+        protected_fields = [
+            "deal_id",
+            "settlement_id",
+            "agreement_id",
+            "owner_id",
+            "invoice_number",
+            "owner_number_snapshot",
+            "owner_legal_name_snapshot",
+            "owner_phone_number_snapshot",
+            "owner_email_snapshot",
+            "agreement_number_snapshot",
+            "amount",
+            "currency",
+            "issued_at",
+            "created_by_id",
+        ]
+
+        changed_fields = [
+            field
+            for field in protected_fields
+            if getattr(original, field) != getattr(self, field)
+        ]
+
+        if changed_fields:
+            raise ValidationError(
+                {
+                    "commission_invoice": (
+                        "Issued commission receivable evidence "
+                        "cannot be changed. Attempted fields: "
+                        + ", ".join(changed_fields)
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        self._validate_immutable_receivable()
+
+        if not self.invoice_number:
+            self.invoice_number = (
+                f"PH-COM-{timezone.now().year}-"
+                f"{uuid4().hex[:12].upper()}"
+            )
+
+        if self.owner_id and not self.pk:
+            self.owner_number_snapshot = self.owner.owner_number
+            self.owner_legal_name_snapshot = self.owner.legal_name
+            self.owner_phone_number_snapshot = self.owner.phone_number
+            self.owner_email_snapshot = self.owner.email or ""
+
+        if self.agreement_id and not self.pk:
+            self.agreement_number_snapshot = (
+                self.agreement.agreement_number
+            )
+
+        if self.amount is not None:
+            self.amount = self.amount.quantize(
+                Decimal("0.01")
+            )
+
+        self.currency = self.currency.strip().upper()
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.invoice_number
+
+
+
+class CommissionReceipt(models.Model):
+    """
+    Immutable evidence of commission money received by Pata Hao
+    against a CommissionInvoice.
+
+    Multiple receipts may exist for one invoice so partial payments
+    remain preserved as individual financial events.
+    """
+
+    class PaymentMethod(models.TextChoices):
+        MPESA = "mpesa", "M-Pesa"
+        AIRTEL_MONEY = "airtel_money", "Airtel Money"
+        BANK_TRANSFER = "bank_transfer", "Bank transfer"
+        CASH = "cash", "Cash"
+        OTHER = "other", "Other"
+
+    invoice = models.ForeignKey(
+        CommissionInvoice,
+        on_delete=models.PROTECT,
+        related_name="receipts",
+    )
+
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+    )
+
+    currency = models.CharField(
+        max_length=3,
+        default="KES",
+    )
+
+    payment_method = models.CharField(
+        max_length=30,
+        choices=PaymentMethod.choices,
+    )
+
+    payment_reference = models.CharField(
+        max_length=150,
+        db_index=True,
+    )
+
+    received_at = models.DateTimeField()
+
+    notes = models.TextField(
+        blank=True,
+    )
+
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="recorded_commission_receipts",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = [
+            "invoice",
+            "received_at",
+            "id",
+        ]
+
+    def clean(self):
+        errors = {}
+
+        if self.amount is None or self.amount <= Decimal("0.00"):
+            errors["amount"] = (
+                "The received amount must be greater than zero."
+            )
+
+        if not self.payment_reference.strip():
+            errors["payment_reference"] = (
+                "A payment reference is required."
+            )
+
+        if self.invoice_id:
+            if self.invoice.status in {
+                CommissionInvoice.Status.CANCELLED,
+                CommissionInvoice.Status.REFUNDED,
+            }:
+                errors["invoice"] = (
+                    "Commission cannot be received against a "
+                    "cancelled or refunded invoice."
+                )
+
+            existing_received = (
+                self.invoice.receipts
+                .exclude(pk=self.pk)
+                .aggregate(
+                    total=models.Sum("amount")
+                )["total"]
+                or Decimal("0.00")
+            )
+
+            if self.amount is not None:
+                proposed_received = existing_received + self.amount
+
+                if proposed_received > self.invoice.amount:
+                    errors["amount"] = (
+                        "This receipt would exceed the commission "
+                        "invoice amount."
+                    )
+
+            if (
+                self.currency
+                and self.invoice.currency
+                and self.currency.strip().upper()
+                != self.invoice.currency.strip().upper()
+            ):
+                errors["currency"] = (
+                    "The receipt currency must match the "
+                    "commission invoice currency."
+                )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_immutable(self):
+        if not self.pk:
+            return
+
+        original = CommissionReceipt.objects.get(
+            pk=self.pk,
+        )
+
+        protected_fields = [
+            "invoice_id",
+            "amount",
+            "currency",
+            "payment_method",
+            "payment_reference",
+            "received_at",
+            "notes",
+            "recorded_by_id",
+        ]
+
+        changed_fields = [
+            field
+            for field in protected_fields
+            if getattr(original, field) != getattr(self, field)
+        ]
+
+        if changed_fields:
+            raise ValidationError(
+                {
+                    "commission_receipt": (
+                        "Commission receipt evidence is immutable. "
+                        "Attempted fields: "
+                        + ", ".join(changed_fields)
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        self._validate_immutable()
+
+        if self.amount is not None:
+            self.amount = self.amount.quantize(
+                Decimal("0.01")
+            )
+
+        self.currency = self.currency.strip().upper()
+        self.payment_reference = self.payment_reference.strip()
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError(
+                {
+                    "commission_receipt": (
+                        "Commission receipt evidence cannot be deleted."
+                    )
+                }
+            )
+
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"Commission receipt #{self.pk or 'new'} — "
+            f"{self.currency} {self.amount}"
+        )

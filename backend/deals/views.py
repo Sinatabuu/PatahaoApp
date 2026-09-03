@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -10,18 +12,27 @@ from rest_framework.views import APIView
 
 from partners.models import Partner
 
-from .models import Deal, DealOutcome
+from .models import (
+    CommissionInvoice,
+    CommissionReceipt,
+    Deal,
+    DealOutcome,
+)
 from .serializers import (
     DealOutcomeSubmissionSerializer,
     DealSerializer,
     DealTimelineSerializer,
     OwnerOutcomeSubmissionSerializer,
+    CustomerCompletedDealSerializer,
 )
 from .services import (
     build_deal_timeline,
+    close_commission_paid_deal,
+    complete_agreed_deal_and_raise_commission,
     evaluate_deal_outcomes,
     evaluate_owner_confirmation_governance,
     issue_owner_confirmation_token,
+    record_commission_receipt,
     submit_owner_outcome,
 )
 from governance.services import (
@@ -125,6 +136,46 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset.filter(
             customer=user,
         )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="my-completed",
+    )
+    def my_completed(self, request):
+        """
+        Return only the authenticated customer's
+        administratively closed transactions.
+        """
+
+        user = request.user
+
+        if user.is_staff:
+            raise PermissionDenied(
+                "Staff accounts cannot use customer transaction history."
+            )
+
+        if getattr(user, "role", None) != "customer":
+            raise PermissionDenied(
+                "Only customers may access customer transaction history."
+            )
+
+        queryset = (
+            self._base_queryset()
+            .filter(
+                customer=user,
+                status=Deal.Status.COMPLETED,
+                closed_at__isnull=False,
+            )
+        )
+
+        serializer = CustomerCompletedDealSerializer(
+            queryset,
+            many=True,
+            context=self.get_serializer_context(),
+        )
+
+        return Response(serializer.data)
 
     def _get_customer_deal(self, pk):
         """
@@ -440,6 +491,512 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
                 },
             },
             status=status.HTTP_201_CREATED,
+        )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="complete",
+    )
+    @transaction.atomic
+    def complete_deal(self, request, pk=None):
+        """
+        Staff-only final transaction verification.
+
+        This closes an AGREED property transaction and activates
+        the locked commission obligation.
+        """
+
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "complete a deal."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        notes = str(
+            request.data.get(
+                "notes",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if len(notes) > 2000:
+            return Response(
+                {
+                    "notes": [
+                        "Completion notes cannot exceed "
+                        "2,000 characters."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            deal, settlement, settlement_created = (
+                complete_agreed_deal_and_raise_commission(
+                    deal_id=pk,
+                    actor=request.user,
+                    notes=notes,
+                )
+            )
+
+        except Deal.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Deal not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                detail = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+
+            if detail is None:
+                detail = str(exc)
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deal = (
+            self._base_queryset()
+            .get(pk=deal.pk)
+        )
+
+        return Response(
+            {
+                "message": (
+                    "Deal completed and commission "
+                    "obligation raised successfully."
+                ),
+                "deal": self.get_serializer(
+                    deal
+                ).data,
+                "commission_settlement": {
+                    "id": settlement.id,
+                    "created": settlement_created,
+                    "status": settlement.status,
+                    "gross_commission_amount": (
+                        settlement.gross_commission_amount
+                    ),
+                    "currency": settlement.currency,
+                    "agreement_id": settlement.agreement_id,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="record-commission-receipt",
+    )
+    @transaction.atomic
+    def record_commission_receipt_action(
+        self,
+        request,
+        pk=None,
+    ):
+        """
+        Staff-only recording of immutable commission
+        receipt evidence.
+        """
+
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "record commission receipts."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            deal = (
+                self._base_queryset()
+                .select_related(
+                    "commission_invoice",
+                )
+                .get(pk=pk)
+            )
+
+        except Deal.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Deal not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            invoice = deal.commission_invoice
+
+        except CommissionInvoice.DoesNotExist:
+            return Response(
+                {
+                    "detail": (
+                        "This deal does not have a "
+                        "commission invoice."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_amount = request.data.get("amount")
+
+        try:
+            amount = Decimal(
+                str(raw_amount)
+            ).quantize(
+                Decimal("0.01")
+            )
+
+        except (
+            TypeError,
+            ValueError,
+            ArithmeticError,
+        ):
+            return Response(
+                {
+                    "amount": [
+                        "Enter a valid receipt amount."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payment_method = str(
+            request.data.get(
+                "payment_method",
+                "",
+            )
+            or ""
+        ).strip()
+
+        payment_reference = str(
+            request.data.get(
+                "payment_reference",
+                "",
+            )
+            or ""
+        ).strip()
+
+        received_at = request.data.get(
+            "received_at"
+        )
+
+        notes = str(
+            request.data.get(
+                "notes",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if amount in (None, ""):
+            return Response(
+                {
+                    "amount": [
+                        "Receipt amount is required."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not payment_method:
+            return Response(
+                {
+                    "payment_method": [
+                        "Payment method is required."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        valid_payment_methods = {
+            choice[0]
+            for choice in (
+                CommissionReceipt
+                .PaymentMethod
+                .choices
+            )
+        }
+
+        if payment_method not in valid_payment_methods:
+            return Response(
+                {
+                    "payment_method": [
+                        "Invalid commission payment method."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not payment_reference:
+            return Response(
+                {
+                    "payment_reference": [
+                        "Payment reference is required."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(payment_reference) > 150:
+            return Response(
+                {
+                    "payment_reference": [
+                        "Payment reference cannot exceed "
+                        "150 characters."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(notes) > 2000:
+            return Response(
+                {
+                    "notes": [
+                        "Receipt notes cannot exceed "
+                        "2,000 characters."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        parsed_received_at = None
+
+        if received_at not in (None, ""):
+            from django.utils.dateparse import (
+                parse_datetime,
+            )
+
+            parsed_received_at = parse_datetime(
+                str(received_at)
+            )
+
+            if parsed_received_at is None:
+                return Response(
+                    {
+                        "received_at": [
+                            "Enter a valid ISO-8601 "
+                            "date and time."
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            receipt, invoice = record_commission_receipt(
+                invoice_id=invoice.id,
+                actor=request.user,
+                amount=amount,
+                payment_method=payment_method,
+                payment_reference=payment_reference,
+                received_at=parsed_received_at,
+                notes=notes,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                detail = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+
+            if detail is None:
+                detail = str(exc)
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        invoice.refresh_from_db()
+        deal.refresh_from_db()
+
+        total_received = sum(
+            (
+                item.amount
+                for item in invoice.receipts.all()
+            ),
+            0,
+        )
+
+        outstanding = (
+            invoice.amount
+            - total_received
+        )
+
+        return Response(
+            {
+                "message": (
+                    "Commission receipt recorded "
+                    "successfully."
+                ),
+                "receipt": {
+                    "id": receipt.id,
+                    "amount": receipt.amount,
+                    "currency": receipt.currency,
+                    "payment_method": (
+                        receipt.payment_method
+                    ),
+                    "payment_reference": (
+                        receipt.payment_reference
+                    ),
+                    "received_at": (
+                        receipt.received_at
+                    ),
+                    "notes": receipt.notes,
+                },
+                "invoice": {
+                    "id": invoice.id,
+                    "invoice_number": (
+                        invoice.invoice_number
+                    ),
+                    "amount": invoice.amount,
+                    "currency": invoice.currency,
+                    "status": invoice.status,
+                    "paid_at": invoice.paid_at,
+                    "total_received": total_received,
+                    "outstanding_amount": outstanding,
+                },
+                "deal": {
+                    "id": deal.id,
+                    "status": deal.status,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="close",
+    )
+    @transaction.atomic
+    def close_deal(self, request, pk=None):
+        """
+        Staff-only final administrative closure.
+
+        The deal must already have reached COMMISSION_PAID and
+        its commission invoice must be fully paid.
+        """
+
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "close a deal."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        notes = str(
+            request.data.get(
+                "notes",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if len(notes) > 2000:
+            return Response(
+                {
+                    "notes": [
+                        "Closure notes cannot exceed "
+                        "2,000 characters."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            deal = close_commission_paid_deal(
+                deal_id=pk,
+                actor=request.user,
+                notes=notes,
+            )
+
+        except Deal.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Deal not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                detail = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+
+            if detail is None:
+                detail = str(exc)
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deal = (
+            self._base_queryset()
+            .get(pk=deal.pk)
+        )
+
+        return Response(
+            {
+                "message": "Deal closed successfully.",
+                "deal": self.get_serializer(
+                    deal
+                ).data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

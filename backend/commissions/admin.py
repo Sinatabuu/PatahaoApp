@@ -6,6 +6,7 @@ from .models import (
     CommissionPlan,
     CommissionSettlement,
     CommissionSettlementParticipant,
+    CommissionSettlementPayment,
 )
 
 
@@ -418,3 +419,69 @@ class CommissionSettlementParticipantAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
+
+@admin.register(CommissionSettlementPayment)
+class CommissionSettlementPaymentAdmin(admin.ModelAdmin):
+    """
+    Read-only administrative view of immutable commission
+    payout evidence.
+    """
+
+    list_display = [
+        "id",
+        "participant",
+        "amount",
+        "currency",
+        "payment_method",
+        "payment_reference",
+        "paid_at",
+        "recorded_by",
+    ]
+
+    list_filter = [
+        "payment_method",
+        "currency",
+        "paid_at",
+        "created_at",
+    ]
+
+    search_fields = [
+        "payment_reference",
+        "participant__participant_name",
+        "participant__partner__display_name",
+        "participant__settlement__agreement__agreement_number",
+        "participant__settlement__deal__property__title",
+    ]
+
+    readonly_fields = [
+        "participant",
+        "amount",
+        "currency",
+        "payment_method",
+        "payment_reference",
+        "paid_at",
+        "notes",
+        "recorded_by",
+        "created_at",
+    ]
+
+    raw_id_fields = [
+        "participant",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return True
+
+    def has_delete_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False

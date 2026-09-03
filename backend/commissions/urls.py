@@ -5,6 +5,11 @@ from .views import (
     PartnerCommissionAgreementViewSet,
     PartnerCommissionSettlementViewSet,
     PartnerCommissionSummaryView,
+    StaffCommissionParticipantPayoutView,
+    StaffCommissionSettlementDetailView,
+    StaffCommissionSettlementApprovalView,
+    StaffCommissionReportView,
+    PartnerTransactionHistoryView,
 )
 
 
@@ -24,6 +29,31 @@ router.register(
 
 
 urlpatterns = [
+    path(
+        "partner/transaction-history/",
+        PartnerTransactionHistoryView.as_view(),
+        name="partner-transaction-history",
+    ),
+    path(
+        "admin/commission-report/",
+        StaffCommissionReportView.as_view(),
+        name="staff-commission-report",
+    ),
+    path(
+        "admin/commission-settlements/<int:settlement_id>/approve/",
+        StaffCommissionSettlementApprovalView.as_view(),
+        name="staff-commission-settlement-approve",
+    ),
+    path(
+        "admin/deals/<int:deal_id>/commission-settlement/",
+        StaffCommissionSettlementDetailView.as_view(),
+        name="staff-commission-settlement-detail",
+    ),
+    path(
+        "admin/commission-participants/<int:participant_id>/payout/",
+        StaffCommissionParticipantPayoutView.as_view(),
+        name="staff-commission-participant-payout",
+    ),
     path(
         "partner/commission-summary/",
         PartnerCommissionSummaryView.as_view(),

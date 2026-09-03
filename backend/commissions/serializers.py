@@ -6,6 +6,7 @@ from .models import (
     CommissionAgreement,
     CommissionSettlement,
     CommissionSettlementParticipant,
+    CommissionSettlementPayment,
 )
 
 
@@ -243,6 +244,29 @@ class PartnerCommissionParticipantSerializer(serializers.ModelSerializer):
         )
 
 
+class PartnerCommissionPaymentSerializer(serializers.ModelSerializer):
+    payment_method_label = serializers.CharField(
+        source="get_payment_method_display",
+        read_only=True,
+    )
+
+    class Meta:
+        model = CommissionSettlementPayment
+        fields = [
+            "id",
+            "amount",
+            "currency",
+            "payment_method",
+            "payment_method_label",
+            "payment_reference",
+            "paid_at",
+            "notes",
+            "created_at",
+        ]
+
+        read_only_fields = fields
+
+
 class PartnerCommissionSettlementSerializer(serializers.ModelSerializer):
     deal_status = serializers.CharField(
         source="deal.status",
@@ -269,13 +293,12 @@ class PartnerCommissionSettlementSerializer(serializers.ModelSerializer):
     my_share = serializers.SerializerMethodField()
     my_percentage = serializers.SerializerMethodField()
     my_participant_type = serializers.SerializerMethodField()
+    my_paid_amount = serializers.SerializerMethodField()
+    my_outstanding_amount = serializers.SerializerMethodField()
+    my_payment_status = serializers.SerializerMethodField()
+    my_payments = serializers.SerializerMethodField()
 
     agreement = PartnerCommissionAgreementSerializer(
-        read_only=True,
-    )
-
-    participants = PartnerCommissionParticipantSerializer(
-        many=True,
         read_only=True,
     )
 
@@ -295,9 +318,12 @@ class PartnerCommissionSettlementSerializer(serializers.ModelSerializer):
             "my_share",
             "my_percentage",
             "my_participant_type",
+            "my_paid_amount",
+            "my_outstanding_amount",
+            "my_payment_status",
+            "my_payments",
             "status",
             "status_label",
-            "participants",
             "approved_at",
             "created_at",
             "updated_at",
@@ -361,3 +387,260 @@ class PartnerCommissionSettlementSerializer(serializers.ModelSerializer):
             return None
 
         return participant.participant_type
+
+    def _get_my_payments(self, settlement):
+        participant = self._get_partner_participation(settlement)
+
+        if participant is None:
+            return []
+
+        return list(
+            participant.payments.all()
+        )
+
+    def get_my_paid_amount(self, settlement):
+        payments = self._get_my_payments(settlement)
+
+        return sum(
+            (
+                payment.amount
+                for payment in payments
+            ),
+            Decimal("0.00"),
+        )
+
+    def get_my_outstanding_amount(self, settlement):
+        participant = self._get_partner_participation(settlement)
+
+        if participant is None:
+            return Decimal("0.00")
+
+        paid = self.get_my_paid_amount(settlement)
+
+        return (
+            participant.amount - paid
+        ).quantize(
+            Decimal("0.01")
+        )
+
+    def get_my_payment_status(self, settlement):
+        participant = self._get_partner_participation(settlement)
+
+        if participant is None:
+            return None
+
+        paid = self.get_my_paid_amount(settlement)
+
+        if paid <= Decimal("0.00"):
+            return "unpaid"
+
+        if paid < participant.amount:
+            return "partially_paid"
+
+        return "paid"
+
+    def get_my_payments(self, settlement):
+        payments = self._get_my_payments(settlement)
+
+        return PartnerCommissionPaymentSerializer(
+            payments,
+            many=True,
+            context=self.context,
+        ).data
+
+
+class StaffCommissionPayoutSerializer(serializers.Serializer):
+    """
+    Evidence supplied by staff when authorizing a participant payout.
+
+    The payout amount is deliberately absent. It is calculated by the
+    backend from the participant's approved allocation minus immutable
+    payment evidence already recorded.
+    """
+
+    payment_method = serializers.ChoiceField(
+        choices=CommissionSettlementPayment.PaymentMethod.choices,
+    )
+
+    payment_reference = serializers.CharField(
+        max_length=150,
+        trim_whitespace=True,
+    )
+
+    paid_at = serializers.DateTimeField(
+        required=False,
+        allow_null=True,
+    )
+
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=2000,
+        trim_whitespace=True,
+    )
+
+    def validate(self, attrs):
+        if "amount" in self.initial_data:
+            raise serializers.ValidationError(
+                {
+                    "amount": (
+                        "Payout amount is calculated by Pata Hao "
+                        "and cannot be supplied by the client."
+                    )
+                }
+            )
+
+        return attrs
+
+    def validate_payment_reference(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Payment reference is required."
+            )
+
+        return value
+
+
+class StaffCommissionSettlementParticipantSerializer(
+    serializers.ModelSerializer
+):
+    participant_type_label = serializers.CharField(
+        source="get_participant_type_display",
+        read_only=True,
+    )
+    recipient_name = serializers.SerializerMethodField()
+    paid_amount = serializers.SerializerMethodField()
+    outstanding_amount = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    payments = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CommissionSettlementParticipant
+        fields = [
+            "id",
+            "participant_type",
+            "participant_type_label",
+            "recipient_name",
+            "is_platform_share",
+            "amount",
+            "percentage_of_total",
+            "paid_amount",
+            "outstanding_amount",
+            "payment_status",
+            "payments",
+        ]
+
+        read_only_fields = fields
+
+    def get_recipient_name(self, participant):
+        if participant.is_platform_share:
+            return "Pata Hao"
+
+        if participant.partner_id:
+            partner = participant.partner
+
+            return (
+                partner.display_name
+                or partner.business_name
+                or partner.user.get_full_name()
+                or partner.user.email
+            )
+
+        return (
+            participant.participant_name
+            or participant.get_participant_type_display()
+        )
+
+    def _payments(self, participant):
+        return list(participant.payments.all())
+
+    def get_paid_amount(self, participant):
+        return sum(
+            (
+                payment.amount
+                for payment in self._payments(participant)
+            ),
+            Decimal("0.00"),
+        )
+
+    def get_outstanding_amount(self, participant):
+        paid = self.get_paid_amount(participant)
+
+        outstanding = participant.amount - paid
+
+        return max(
+            outstanding,
+            Decimal("0.00"),
+        )
+
+    def get_payment_status(self, participant):
+        paid = self.get_paid_amount(participant)
+
+        if paid <= Decimal("0.00"):
+            return "unpaid"
+
+        if paid < participant.amount:
+            return "partially_paid"
+
+        return "paid"
+
+    def get_payments(self, participant):
+        return [
+            {
+                "id": payment.id,
+                "amount": payment.amount,
+                "currency": payment.currency,
+                "payment_method": payment.payment_method,
+                "payment_reference": payment.payment_reference,
+                "paid_at": payment.paid_at,
+                "notes": payment.notes,
+                "created_at": payment.created_at,
+            }
+            for payment in self._payments(participant)
+        ]
+
+
+class StaffCommissionSettlementSerializer(
+    serializers.ModelSerializer
+):
+    deal_number = serializers.CharField(
+        source="deal.deal_number",
+        read_only=True,
+    )
+    property_title = serializers.CharField(
+        source="deal.property.title",
+        read_only=True,
+    )
+    status_label = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+    participants = (
+        StaffCommissionSettlementParticipantSerializer(
+            many=True,
+            read_only=True,
+        )
+    )
+
+    class Meta:
+        model = CommissionSettlement
+        fields = [
+            "id",
+            "deal",
+            "deal_number",
+            "property_title",
+            "gross_commission_amount",
+            "allocated_amount",
+            "unallocated_amount",
+            "currency",
+            "status",
+            "status_label",
+            "approved_at",
+            "participants",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = fields

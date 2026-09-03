@@ -25,10 +25,14 @@ from viewings.models import Viewing, ViewingEvent
 from deals.models import Deal
 from introductions.models import ProtectedIntroduction
 from commissions.models import (
-    CommissionPlan,
     CommissionSettlementParticipant,
 )
 from notifications.models import Notification
+from governance.services import (
+    get_current_tier,
+    get_next_tier,
+    get_successful_three_party_deal_count,
+)
 
 
 
@@ -847,53 +851,51 @@ class PartnerDashboardView(APIView):
             trust_record = None
 
         successful_transactions = (
-            trust_record.successful_deals
-            if trust_record
-            else 0
+            get_successful_three_party_deal_count(
+                partner,
+            )
         )
 
-        current_plan = partner.commission_plan
-
-        next_plan = (
-            CommissionPlan.objects
-            .filter(
-                is_active=True,
-                minimum_completed_transactions__gt=successful_transactions,
-            )
-            .order_by(
-                "minimum_completed_transactions",
-                "partner_share_rate",
-            )
-            .first()
+        current_tier = get_current_tier(
+            partner,
         )
 
-        if next_plan:
+        next_tier = get_next_tier(
+            current_tier,
+        )
+
+        if next_tier:
             transactions_needed = max(
-                next_plan.minimum_completed_transactions
+                next_tier.minimum_completed_deals
                 - successful_transactions,
                 0,
             )
 
-            if current_plan:
+            if current_tier:
                 current_threshold = (
-                    current_plan.minimum_completed_transactions
+                    current_tier.minimum_completed_deals
                 )
             else:
                 current_threshold = 0
 
             tier_span = max(
-                next_plan.minimum_completed_transactions
+                next_tier.minimum_completed_deals
                 - current_threshold,
                 1,
             )
 
             progress_in_tier = max(
-                successful_transactions - current_threshold,
+                successful_transactions
+                - current_threshold,
                 0,
             )
 
             tier_progress_percent = min(
-                (progress_in_tier / tier_span) * 100,
+                (
+                    progress_in_tier
+                    / tier_span
+                )
+                * 100,
                 100,
             )
         else:
@@ -1071,40 +1073,56 @@ class PartnerDashboardView(APIView):
                 ),
 
                 "tier_progress": {
-                    "successful_transactions": successful_transactions,
+                    "successful_transactions": (
+                        successful_transactions
+                    ),
 
                     "current_plan": (
                         {
-                            "id": current_plan.id,
-                            "name": current_plan.name,
-                            "partner_share_rate": (
-                                f"{current_plan.partner_share_rate:.2f}"
+                            "id": current_tier.id,
+                            "code": current_tier.code,
+                            "name": current_tier.name,
+                            "rank": current_tier.rank,
+                            "property_limit": (
+                                current_tier.property_limit
                             ),
                             "minimum_completed_transactions": (
-                                current_plan.minimum_completed_transactions
+                                current_tier.minimum_completed_deals
+                            ),
+                            "minimum_trust_score": (
+                                f"{current_tier.minimum_trust_score:.2f}"
                             ),
                         }
-                        if current_plan
+                        if current_tier
                         else None
                     ),
 
                     "next_plan": (
                         {
-                            "id": next_plan.id,
-                            "name": next_plan.name,
-                            "partner_share_rate": (
-                                f"{next_plan.partner_share_rate:.2f}"
+                            "id": next_tier.id,
+                            "code": next_tier.code,
+                            "name": next_tier.name,
+                            "rank": next_tier.rank,
+                            "property_limit": (
+                                next_tier.property_limit
                             ),
                             "minimum_completed_transactions": (
-                                next_plan.minimum_completed_transactions
+                                next_tier.minimum_completed_deals
+                            ),
+                            "minimum_trust_score": (
+                                f"{next_tier.minimum_trust_score:.2f}"
                             ),
                         }
-                        if next_plan
+                        if next_tier
                         else None
                     ),
 
-                    "transactions_needed": transactions_needed,
-                    "progress_percent": f"{tier_progress_percent:.2f}",
+                    "transactions_needed": (
+                        transactions_needed
+                    ),
+                    "progress_percent": (
+                        f"{tier_progress_percent:.2f}"
+                    ),
                 },
 
                 "notifications": [

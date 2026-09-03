@@ -1,13 +1,16 @@
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from payments.models import Payment
 from introductions.models import ProtectedIntroduction
 from mandates.models import PropertyMandate
 from governance.services import (
     enforce_partner_operational_access,
+)
+from commissions.services import (
+    allocate_commission_settlement,
 )
 from .models import (
     CommissionInvoice,
@@ -16,13 +19,12 @@ from .models import (
     DealOutcome,
     OwnerConfirmationToken,
 )
-
+from decimal import Decimal
 
 SUCCESS_OUTCOMES = {
     DealOutcome.Outcome.RENTED,
     DealOutcome.Outcome.PURCHASED,
 }
-
 
 @transaction.atomic
 def evaluate_deal_outcomes(deal_id):
@@ -1912,14 +1914,15 @@ def build_deal_timeline(deal):
     add_item(
         timestamp=deal.completed_at,
         event_type="deal_completed",
-        title="Deal completed",
+        title="Property transaction completed",
         description=(
-            "The property transaction was completed."
+            "The property transaction was completed and "
+            "the commission obligation became due."
         ),
         source="deal",
         source_id=deal.id,
         metadata={
-            "status": Deal.Status.COMPLETED,
+            "status": Deal.Status.COMMISSION_DUE,
         },
     )
 
@@ -1981,6 +1984,8 @@ def complete_agreed_deal_and_raise_commission(
             "partner__user",
             "introduction",
             "introduction__commission_agreement",
+            "introduction__mandate",
+            "introduction__mandate__owner",
         )
         .prefetch_related(
             "outcomes",
@@ -2122,13 +2127,36 @@ def complete_agreed_deal_and_raise_commission(
                 )
             }
         )
+    mandate = introduction.mandate
+
+    if mandate.property_id != deal.property_id:
+        raise ValidationError(
+            {
+                "mandate": (
+                    "The protected introduction mandate does "
+                    "not belong to this deal's property."
+                )
+            }
+        )
+
+    if mandate.commission_agreement_id != agreement.id:
+        raise ValidationError(
+            {
+                "mandate": (
+                    "The protected introduction mandate does "
+                    "not match the deal commission agreement."
+                )
+            }
+        )
+
+    owner = mandate.owner
 
     #
     # One-to-one deal relationship prevents duplicate settlements.
     # get_or_create also makes the service safe against a legitimate
     # pre-existing settlement.
     #
-    settlement, created = (
+    commission_settlement, settlement_created = (
         CommissionSettlement.objects
         .get_or_create(
             deal=deal,
@@ -2156,10 +2184,10 @@ def complete_agreed_deal_and_raise_commission(
     # Never silently accept a settlement attached to a different
     # agreement or carrying a different financial amount.
     #
-    if settlement.agreement_id != agreement.id:
+    if commission_settlement.agreement_id != agreement.id:
         raise ValidationError(
             {
-                "settlement": (
+                "commission_settlement": (
                     "The existing commission settlement is "
                     "linked to a different commission agreement."
                 )
@@ -2167,20 +2195,91 @@ def complete_agreed_deal_and_raise_commission(
         )
 
     if (
-        settlement.gross_commission_amount
+        commission_settlement.gross_commission_amount
         != gross_commission
     ):
         raise ValidationError(
             {
-                "settlement": (
-                    "The existing settlement amount does not "
-                    "match the locked commission agreement."
+                "commission_settlement": (
+                    "The existing commission settlement amount "
+                    "does not match the locked commission agreement."
+                )
+            }
+        )
+
+    commission_settlement = allocate_commission_settlement(
+        commission_settlement.id,
+    )
+
+    commission_invoice, invoice_created = (
+        CommissionInvoice.objects.get_or_create(
+            deal=deal,
+            defaults={
+                "settlement": commission_settlement,
+                "agreement": agreement,
+                "owner": owner,
+                "amount": gross_commission,
+                "currency": agreement.currency,
+                "status": CommissionInvoice.Status.PENDING,
+                "created_by": actor,
+            },
+        )
+    )
+
+    if commission_invoice.settlement_id != commission_settlement.id:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing commission invoice is linked "
+                    "to a different settlement."
+                )
+            }
+        )
+
+    if commission_invoice.agreement_id != agreement.id:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing commission invoice is linked "
+                    "to a different commission agreement."
+                )
+            }
+        )
+
+    if commission_invoice.owner_id != owner.id:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing commission invoice identifies "
+                    "a different property owner."
+                )
+            }
+        )
+
+    if commission_invoice.amount != gross_commission:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing commission invoice amount "
+                    "does not match the locked commission obligation."
+                )
+            }
+        )
+
+    if (
+        commission_invoice.currency.strip().upper()
+        != agreement.currency.strip().upper()
+    ):
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing commission invoice currency "
+                    "does not match the locked agreement."
                 )
             }
         )
 
     now = timezone.now()
-
     deal.completed_at = deal.completed_at or now
     deal.commission_amount = gross_commission
     deal.status = Deal.Status.COMMISSION_DUE
@@ -2226,8 +2325,10 @@ def complete_agreed_deal_and_raise_commission(
                 "locked commission obligation."
             ),
             "metadata": {
-                "settlement_id": settlement.id,
-                "settlement_created": created,
+                "commission_settlement_id": (
+                    commission_settlement.id
+                ),
+                "settlement_created": settlement_created,
                 "agreement_id": agreement.id,
                 "agreement_number": (
                     agreement.agreement_number
@@ -2235,9 +2336,649 @@ def complete_agreed_deal_and_raise_commission(
                 "gross_commission_amount": str(
                     gross_commission
                 ),
+                "allocated_amount": str(
+                    commission_settlement.allocated_amount
+                ),
+                "unallocated_amount": str(
+                    commission_settlement.unallocated_amount
+                ),
                 "currency": agreement.currency,
             },
         },
     )
 
-    return deal, settlement, created
+    DealEvent.objects.get_or_create(
+        deal=deal,
+        action="commission_invoice_issued",
+        defaults={
+            "actor": actor,
+            "notes": (
+                "A commission receivable was issued for the "
+                "completed property transaction."
+            ),
+            "metadata": {
+                "commission_invoice_id": commission_invoice.id,
+                "invoice_number": commission_invoice.invoice_number,
+                "invoice_created": invoice_created,
+                "owner_id": owner.id,
+                "owner_number": owner.owner_number,
+                "agreement_id": agreement.id,
+                "agreement_number": agreement.agreement_number,
+                "amount": str(commission_invoice.amount),
+                "currency": commission_invoice.currency,
+                "status": commission_invoice.status,
+            },
+        },
+    )
+    return (
+        deal,
+        commission_settlement,
+        settlement_created,
+    )
+
+@transaction.atomic
+def ensure_commission_invoice_for_due_deal(
+    *,
+    deal_id,
+    actor,
+):
+    """
+    Restore a missing commission invoice for an already completed
+    COMMISSION_DUE deal.
+
+    This is a controlled legacy-data repair. It does not repeat deal
+    completion and does not alter completed_at or the commission
+    settlement.
+
+    Rules:
+    - Only authenticated Pata Hao staff may perform the repair.
+    - The deal must already be COMMISSION_DUE.
+    - A valid completed_at timestamp must exist.
+    - The protected introduction, locked agreement, mandate and owner
+      must still match the completed deal.
+    - A CommissionSettlement must already exist.
+    - Existing invoice evidence is returned unchanged.
+    - Missing invoice evidence is created once and audited.
+    """
+
+    from commissions.models import CommissionSettlement
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated Pata Hao administrator is required."
+        )
+
+    if not actor.is_staff:
+        raise ValidationError(
+            "Only Pata Hao staff may repair commission invoices."
+        )
+
+    deal = (
+        Deal.objects
+        .select_for_update()
+        .select_related(
+            "introduction",
+            "introduction__commission_agreement",
+            "introduction__mandate",
+            "introduction__mandate__owner",
+        )
+        .get(pk=deal_id)
+    )
+
+    if deal.status != Deal.Status.COMMISSION_DUE:
+        raise ValidationError(
+            {
+                "status": (
+                    "Only a deal with commission due may receive "
+                    "a missing commission invoice repair."
+                )
+            }
+        )
+
+    if deal.completed_at is None:
+        raise ValidationError(
+            {
+                "completed_at": (
+                    "The transaction must already be completed."
+                )
+            }
+        )
+
+    introduction = deal.introduction
+
+    if introduction is None:
+        raise ValidationError(
+            {
+                "introduction": (
+                    "The deal is not linked to a protected introduction."
+                )
+            }
+        )
+
+    agreement = getattr(
+        introduction,
+        "commission_agreement",
+        None,
+    )
+
+    if agreement is None:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The protected introduction has no commission agreement."
+                )
+            }
+        )
+
+    if not agreement.is_verified or not agreement.is_locked:
+        raise ValidationError(
+            {
+                "commission_agreement": (
+                    "The commission agreement must be verified and locked."
+                )
+            }
+        )
+
+    mandate = getattr(
+        introduction,
+        "mandate",
+        None,
+    )
+
+    if mandate is None or mandate.owner_id is None:
+        raise ValidationError(
+            {
+                "mandate": (
+                    "The protected introduction has no valid owner mandate."
+                )
+            }
+        )
+
+    owner = mandate.owner
+
+    try:
+        settlement = (
+            CommissionSettlement.objects
+            .select_for_update()
+            .get(deal=deal)
+        )
+    except CommissionSettlement.DoesNotExist:
+        raise ValidationError(
+            {
+                "commission_settlement": (
+                    "A commission settlement must already exist "
+                    "before repairing the invoice."
+                )
+            }
+        )
+
+    if settlement.agreement_id != agreement.id:
+        raise ValidationError(
+            {
+                "commission_settlement": (
+                    "The settlement does not match the locked "
+                    "commission agreement."
+                )
+            }
+        )
+
+    if settlement.gross_commission_amount != deal.commission_amount:
+        raise ValidationError(
+            {
+                "commission_settlement": (
+                    "The settlement amount does not match the "
+                    "deal commission amount."
+                )
+            }
+        )
+
+    invoice, created = (
+        CommissionInvoice.objects.get_or_create(
+            deal=deal,
+            defaults={
+                "settlement": settlement,
+                "agreement": agreement,
+                "owner": owner,
+                "amount": settlement.gross_commission_amount,
+                "currency": agreement.currency,
+                "status": CommissionInvoice.Status.PENDING,
+                "created_by": actor,
+            },
+        )
+    )
+
+    if invoice.settlement_id != settlement.id:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing invoice belongs to a different settlement."
+                )
+            }
+        )
+
+    if invoice.agreement_id != agreement.id:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing invoice belongs to a different agreement."
+                )
+            }
+        )
+
+    if invoice.owner_id != owner.id:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The existing invoice identifies a different owner."
+                )
+            }
+        )
+
+    if invoice.amount != settlement.gross_commission_amount:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The invoice amount does not match the "
+                    "commission settlement."
+                )
+            }
+        )
+
+    if (
+        invoice.currency.strip().upper()
+        != agreement.currency.strip().upper()
+    ):
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The invoice currency does not match the agreement."
+                )
+            }
+        )
+
+    DealEvent.objects.get_or_create(
+        deal=deal,
+        action="commission_invoice_issued",
+        defaults={
+            "actor": actor,
+            "notes": (
+                "Pata Hao restored missing commission invoice "
+                "evidence for an existing commission-due deal."
+            ),
+            "metadata": {
+                "commission_invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "invoice_created": created,
+                "legacy_repair": True,
+                "owner_id": owner.id,
+                "owner_number": owner.owner_number,
+                "agreement_id": agreement.id,
+                "agreement_number": agreement.agreement_number,
+                "amount": str(invoice.amount),
+                "currency": invoice.currency,
+                "status": invoice.status,
+            },
+        },
+    )
+
+    return invoice, created
+
+
+@transaction.atomic
+def record_commission_receipt(
+    *,
+    invoice_id,
+    actor,
+    amount,
+    payment_method,
+    payment_reference,
+    received_at=None,
+    notes="",
+):
+    """
+    Record immutable commission money received by Pata Hao.
+
+    Rules:
+    - Only authenticated Pata Hao staff may record receipts.
+    - The invoice must still be collectible.
+    - Receipt evidence is immutable.
+    - Total receipts may never exceed the invoice amount.
+    - Invoice status is derived from total receipt evidence.
+    - A fully paid invoice moves the linked deal to COMMISSION_PAID.
+    """
+
+    from .models import CommissionReceipt
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated Pata Hao administrator is required."
+        )
+
+    if not actor.is_staff:
+        raise ValidationError(
+            "Only Pata Hao staff may record commission receipts."
+        )
+
+    invoice = (
+        CommissionInvoice.objects
+        .select_for_update()
+        .select_related(
+            "deal",
+            "settlement",
+            "agreement",
+            "owner",
+        )
+        .get(pk=invoice_id)
+    )
+
+    if invoice.status in {
+        CommissionInvoice.Status.CANCELLED,
+        CommissionInvoice.Status.REFUNDED,
+    }:
+        raise ValidationError(
+            {
+                "invoice": (
+                    "Commission cannot be received against a "
+                    "cancelled or refunded invoice."
+                )
+            }
+        )
+
+    if invoice.status == CommissionInvoice.Status.PAID:
+        raise ValidationError(
+            {
+                "invoice": (
+                    "This commission invoice has already been paid in full."
+                )
+            }
+        )
+
+    receipt = CommissionReceipt.objects.create(
+        invoice=invoice,
+        amount=amount,
+        currency=invoice.currency,
+        payment_method=payment_method,
+        payment_reference=payment_reference,
+        received_at=(
+            received_at
+            or timezone.now()
+        ),
+        notes=notes,
+        recorded_by=actor,
+    )
+
+    total_received = (
+        invoice.receipts.aggregate(
+            total=models.Sum("amount")
+        )["total"]
+        or Decimal("0.00")
+    ).quantize(
+        Decimal("0.01")
+    )
+
+    previous_invoice_status = invoice.status
+    previous_deal_status = invoice.deal.status
+
+    if total_received < invoice.amount:
+        invoice.status = (
+            CommissionInvoice.Status.PARTIALLY_PAID
+        )
+        invoice.paid_at = None
+
+    elif total_received == invoice.amount:
+        invoice.status = (
+            CommissionInvoice.Status.PAID
+        )
+        invoice.paid_at = receipt.received_at
+
+    else:
+        raise ValidationError(
+            {
+                "amount": (
+                    "Commission receipts cannot exceed the "
+                    "invoice amount."
+                )
+            }
+        )
+
+    invoice.save(
+        update_fields=[
+            "status",
+            "paid_at",
+            "updated_at",
+        ]
+    )
+
+    if invoice.status == CommissionInvoice.Status.PAID:
+        deal = invoice.deal
+
+        if deal.status != Deal.Status.COMMISSION_DUE:
+            raise ValidationError(
+                {
+                    "deal": (
+                        "Only a deal with commission due may "
+                        "be marked commission paid."
+                    )
+                }
+            )
+
+        deal.status = Deal.Status.COMMISSION_PAID
+
+        deal.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        DealEvent.objects.create(
+            deal=deal,
+            action="commission_paid",
+            actor=actor,
+            notes=(
+                "The commission invoice was paid in full."
+            ),
+            metadata={
+                "commission_invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "receipt_id": receipt.id,
+                "total_received": str(total_received),
+                "currency": invoice.currency,
+                "previous_invoice_status": (
+                    previous_invoice_status
+                ),
+                "new_invoice_status": (
+                    invoice.status
+                ),
+                "previous_deal_status": (
+                    previous_deal_status
+                ),
+                "new_deal_status": (
+                    deal.status
+                ),
+            },
+        )
+
+    else:
+        DealEvent.objects.create(
+            deal=invoice.deal,
+            action="commission_partially_received",
+            actor=actor,
+            notes=(
+                "A partial commission payment was received."
+            ),
+            metadata={
+                "commission_invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "receipt_id": receipt.id,
+                "receipt_amount": str(receipt.amount),
+                "total_received": str(total_received),
+                "invoice_amount": str(invoice.amount),
+                "currency": invoice.currency,
+                "previous_invoice_status": (
+                    previous_invoice_status
+                ),
+                "new_invoice_status": (
+                    invoice.status
+                ),
+            },
+        )
+
+    return receipt, invoice
+
+
+@transaction.atomic
+def close_commission_paid_deal(
+    *,
+    deal_id,
+    actor,
+    notes="",
+):
+    """
+    Final administrative closure of a financially satisfied deal.
+
+    Rules:
+    - Only authenticated Pata Hao staff may close a deal.
+    - The deal must already be COMMISSION_PAID.
+    - The commission invoice must exist and be PAID.
+    - The property transaction completion timestamp is preserved.
+    - Final workflow closure is recorded separately in closed_at.
+    - Closure creates immutable DealEvent evidence.
+    """
+
+    if actor is None or not actor.is_authenticated:
+        raise ValidationError(
+            "An authenticated Pata Hao administrator is required."
+        )
+
+    if not actor.is_staff:
+        raise ValidationError(
+            "Only Pata Hao staff may close a completed deal."
+        )
+
+    deal = (
+        Deal.objects
+        .select_for_update()
+        .select_related(
+            "commission_invoice",
+            "commission_settlement",
+        )
+        .get(pk=deal_id)
+    )
+
+    if deal.status != Deal.Status.COMMISSION_PAID:
+        raise ValidationError(
+            {
+                "status": (
+                    "Only a commission-paid deal may be "
+                    "finally closed."
+                )
+            }
+        )
+
+    try:
+        invoice = deal.commission_invoice
+    except CommissionInvoice.DoesNotExist:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "A paid commission invoice is required "
+                    "before final deal closure."
+                )
+            }
+        )
+
+    if invoice.status != CommissionInvoice.Status.PAID:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "The commission invoice must be paid "
+                    "before final deal closure."
+                )
+            }
+        )
+
+    if invoice.paid_at is None:
+        raise ValidationError(
+            {
+                "commission_invoice": (
+                    "Paid commission evidence is incomplete."
+                )
+            }
+        )
+
+    from commissions.models import CommissionSettlement
+
+    try:
+        settlement = deal.commission_settlement
+
+    except CommissionSettlement.DoesNotExist:
+        raise ValidationError(
+            {
+                "commission_settlement": (
+                    "A completed commission settlement is required "
+                    "before final deal closure."
+                )
+            }
+        )
+
+    if settlement.status != CommissionSettlement.Status.PAID:
+        raise ValidationError(
+            {
+                "commission_settlement": (
+                    "All required commission participant payouts "
+                    "must be completed before final deal closure."
+                )
+            }
+        )
+
+    if deal.completed_at is None:
+        raise ValidationError(
+            {
+                "completed_at": (
+                    "The property transaction must already "
+                    "be completed before final deal closure."
+                )
+            }
+        )
+
+    now = timezone.now()
+
+    previous_status = deal.status
+
+    deal.status = Deal.Status.COMPLETED
+    deal.closed_at = now
+
+    deal.save(
+        update_fields=[
+            "status",
+            "closed_at",
+            "updated_at",
+        ]
+    )
+
+    DealEvent.objects.create(
+        deal=deal,
+        action="deal_closed",
+        actor=actor,
+        notes=(
+            notes
+            or (
+                "Pata Hao closed the deal after the "
+                "commission obligation was fully satisfied."
+            )
+        ),
+        metadata={
+            "previous_status": previous_status,
+            "new_status": deal.status,
+            "closed_at": deal.closed_at.isoformat(),
+            "commission_invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_status": invoice.status,
+            "invoice_paid_at": invoice.paid_at.isoformat(),
+            "commission_settlement_id": settlement.id,
+            "commission_settlement_status": settlement.status,
+        },
+    )
+
+    return deal

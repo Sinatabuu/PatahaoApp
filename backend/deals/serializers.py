@@ -1,6 +1,10 @@
 from rest_framework import serializers
 
-from .models import Deal, DealOutcome
+from .models import (
+    CommissionInvoice,
+    Deal,
+    DealOutcome,
+)
 
 
 class DealOutcomeSerializer(serializers.ModelSerializer):
@@ -59,6 +63,7 @@ class DealSerializer(serializers.ModelSerializer):
     customer_name = serializers.SerializerMethodField()
     customer_outcome_submitted = serializers.SerializerMethodField()
     partner_name = serializers.SerializerMethodField()
+    commission_invoice = serializers.SerializerMethodField()
 
     property_title = serializers.CharField(
         source="property.title",
@@ -114,6 +119,7 @@ class DealSerializer(serializers.ModelSerializer):
             "monthly_rent",
             "sale_price",
             "commission_amount",
+            "commission_invoice",
 
             "status",
             "customer_confirmed",
@@ -125,6 +131,7 @@ class DealSerializer(serializers.ModelSerializer):
             "owner_confirmed_at",
             "agreed_at",
             "completed_at",
+            "closed_at",
             "cancelled_at",
             "cancellation_reason",
 
@@ -151,6 +158,73 @@ class DealSerializer(serializers.ModelSerializer):
             or deal.customer.username
         )
 
+    def get_commission_invoice(self, deal):
+        request = self.context.get("request")
+
+        if request is None or not request.user.is_staff:
+            return None
+
+        try:
+            invoice = deal.commission_invoice
+        except CommissionInvoice.DoesNotExist:
+            return None
+
+        receipts = list(
+            invoice.receipts.all()
+        )
+
+        total_received = sum(
+            (
+                receipt.amount
+                for receipt in receipts
+            ),
+            0,
+        )
+
+        outstanding_amount = (
+            invoice.amount
+            - total_received
+        )
+
+        return {
+            "id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "amount": invoice.amount,
+            "currency": invoice.currency,
+            "status": invoice.status,
+            "issued_at": invoice.issued_at,
+            "paid_at": invoice.paid_at,
+            "total_received": total_received,
+            "outstanding_amount": outstanding_amount,
+            "owner_number": (
+                invoice.owner_number_snapshot
+            ),
+            "owner_name": (
+                invoice.owner_legal_name_snapshot
+            ),
+            "agreement_number": (
+                invoice.agreement_number_snapshot
+            ),
+            "receipts": [
+                {
+                    "id": receipt.id,
+                    "amount": receipt.amount,
+                    "currency": receipt.currency,
+                    "payment_method": (
+                        receipt.payment_method
+                    ),
+                    "payment_reference": (
+                        receipt.payment_reference
+                    ),
+                    "received_at": (
+                        receipt.received_at
+                    ),
+                    "notes": receipt.notes,
+                }
+                for receipt in receipts
+            ],
+        }
+
     def get_partner_name(self, deal):
         if deal.partner.display_name:
             return deal.partner.display_name
@@ -164,6 +238,52 @@ class DealSerializer(serializers.ModelSerializer):
             full_name
             or getattr(deal.partner.user, "full_name", "")
             or deal.partner.user.email
+        )
+
+class CustomerCompletedDealSerializer(serializers.ModelSerializer):
+    """
+    Minimal customer-facing record of a completed transaction.
+
+    Deliberately excludes commission, invoice, settlement,
+    payout, and internal governance information.
+    """
+
+    property_title = serializers.CharField(
+        source="property.title",
+        read_only=True,
+    )
+
+    partner_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Deal
+
+        fields = [
+            "id",
+            "deal_number",
+            "property",
+            "property_title",
+            "deal_type",
+            "partner_name",
+            "status",
+            "completed_at",
+            "closed_at",
+        ]
+
+        read_only_fields = fields
+
+    def get_partner_name(self, deal):
+        user = getattr(deal.partner, "user", None)
+
+        if user is None:
+            return ""
+
+        full_name = user.get_full_name().strip()
+
+        return (
+            full_name
+            or getattr(user, "full_name", "")
+            or user.username
         )
 
 class OwnerOutcomeSubmissionSerializer(serializers.Serializer):

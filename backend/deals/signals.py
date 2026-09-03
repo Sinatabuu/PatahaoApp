@@ -1,23 +1,16 @@
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+"""
+Deal signal hooks.
 
-from viewings.models import Viewing
+Deal creation is intentionally NOT triggered from Viewing.post_save.
 
+The controlled transaction flow is:
 
-@receiver(post_save, sender=Viewing)
-def create_deal_when_viewing_completed(
-    sender,
-    instance,
-    created,
-    **kwargs,
-):
-    """
-    Automatically create a deal when a viewing is completed.
-    """
+    confirmed viewing
+    -> complete_viewing()
+    -> viewing completed
+    -> Property Introduction Certificate
+    -> Deal
 
-    if instance.status != Viewing.Status.COMPLETED:
-        return
-
-    from .services import create_deal_from_viewing
-
-    create_deal_from_viewing(instance)
+Keeping Deal creation inside the explicit viewing completion service avoids
+creating a Deal before the Property Introduction Certificate exists.
+"""

@@ -879,7 +879,67 @@ class CommissionSettlement(models.Model):
         self.approved_at = timezone.now()
         self.status = self.Status.APPROVED
 
+    def _validate_approved_snapshot(self):
+        """
+        Freeze the settlement's financial evidence after approval.
+
+        Lifecycle status may continue to change as payment progresses,
+        but the approved economics and approval evidence must remain
+        immutable.
+        """
+
+        if not self.pk:
+            return
+
+        original = (
+            CommissionSettlement.objects
+            .get(pk=self.pk)
+        )
+
+        financially_frozen_statuses = {
+            self.Status.APPROVED,
+            self.Status.PARTIALLY_PAID,
+            self.Status.PAID,
+            self.Status.DISPUTED,
+            self.Status.CANCELLED,
+        }
+
+        if original.status not in financially_frozen_statuses:
+            return
+
+        protected_fields = [
+            "deal_id",
+            "agreement_id",
+            "gross_commission_amount",
+            "allocated_amount",
+            "unallocated_amount",
+            "currency",
+            "notes",
+            "created_by_id",
+            "approved_by_id",
+            "approved_at",
+        ]
+
+        changed_fields = [
+            field
+            for field in protected_fields
+            if getattr(original, field) != getattr(self, field)
+        ]
+
+        if changed_fields:
+            raise ValidationError(
+                {
+                    "commission_settlement": (
+                        "Approved commission settlement financial "
+                        "evidence cannot be changed. Attempted fields: "
+                        + ", ".join(changed_fields)
+                    )
+                }
+            )
+
     def save(self, *args, **kwargs):
+        self._validate_approved_snapshot()
+
         self.currency = self.currency.strip().upper()
 
         if self.gross_commission_amount is not None:
@@ -1050,7 +1110,42 @@ class CommissionSettlementParticipant(models.Model):
         if errors:
             raise ValidationError(errors)
 
+    def _validate_allocation_mutable(self):
+        """
+        Participant allocations are financial evidence.
+
+        They may only be constructed or adjusted before the
+        settlement has been approved. Once approval occurs,
+        the allocation snapshot is frozen.
+        """
+
+        if not self.settlement_id:
+            return
+
+        settlement = CommissionSettlement.objects.get(
+            pk=self.settlement_id
+        )
+
+        mutable_statuses = {
+            CommissionSettlement.Status.DRAFT,
+            CommissionSettlement.Status.ALLOCATION_PENDING,
+            CommissionSettlement.Status.ALLOCATED,
+        }
+
+        if settlement.status not in mutable_statuses:
+            raise ValidationError(
+                {
+                    "settlement": (
+                        "Commission allocations cannot be changed "
+                        "after the settlement has been approved "
+                        "or otherwise financially closed."
+                    )
+                }
+            )
+
     def save(self, *args, **kwargs):
+        self._validate_allocation_mutable()
+
         self.amount = self.amount.quantize(Decimal("0.01"))
 
         if (
@@ -1082,6 +1177,8 @@ class CommissionSettlementParticipant(models.Model):
         )
 
     def delete(self, *args, **kwargs):
+        self._validate_allocation_mutable()
+
         settlement_id = self.settlement_id
 
         result = super().delete(*args, **kwargs)
@@ -1116,4 +1213,198 @@ class CommissionSettlementParticipant(models.Model):
         return (
             f"{name} — "
             f"{self.settlement.currency} {self.amount}"
+        )
+
+class CommissionSettlementPayment(models.Model):
+    """
+    Immutable evidence of money paid against one commission
+    settlement participant allocation.
+
+    The participant records what the recipient is entitled to.
+    This record proves what was actually paid.
+
+    Multiple payment records may exist for one participant so
+    partial payments are preserved as individual financial events.
+    """
+
+    class PaymentMethod(models.TextChoices):
+        MPESA = "mpesa", "M-Pesa"
+        AIRTEL_MONEY = "airtel_money", "Airtel Money"
+        BANK_TRANSFER = "bank_transfer", "Bank transfer"
+        CASH = "cash", "Cash"
+        OTHER = "other", "Other"
+
+    participant = models.ForeignKey(
+        CommissionSettlementParticipant,
+        on_delete=models.PROTECT,
+        related_name="payments",
+    )
+
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+    )
+
+    currency = models.CharField(
+        max_length=3,
+        default="KES",
+    )
+
+    payment_method = models.CharField(
+        max_length=30,
+        choices=PaymentMethod.choices,
+    )
+
+    payment_reference = models.CharField(
+        max_length=150,
+        db_index=True,
+    )
+
+    paid_at = models.DateTimeField()
+
+    notes = models.TextField(
+        blank=True,
+    )
+
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="recorded_commission_settlement_payments",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = [
+            "participant",
+            "paid_at",
+            "id",
+        ]
+
+    def clean(self):
+        errors = {}
+
+        if self.amount is None or self.amount <= Decimal("0.00"):
+            errors["amount"] = (
+                "The payment amount must be greater than zero."
+            )
+
+        if not self.payment_reference.strip():
+            errors["payment_reference"] = (
+                "A payment reference is required."
+            )
+
+        if self.participant_id:
+            settlement = self.participant.settlement
+
+            if settlement.status not in {
+                CommissionSettlement.Status.APPROVED,
+                CommissionSettlement.Status.PARTIALLY_PAID,
+            }:
+                errors["participant"] = (
+                    "Commission payments may only be recorded "
+                    "against an approved settlement."
+                )
+
+            existing_paid = (
+                self.participant.payments
+                .exclude(pk=self.pk)
+                .aggregate(
+                    total=models.Sum("amount")
+                )["total"]
+                or Decimal("0.00")
+            )
+
+            if self.amount is not None:
+                proposed_paid = existing_paid + self.amount
+
+                if proposed_paid > self.participant.amount:
+                    errors["amount"] = (
+                        "This payment would exceed the participant's "
+                        "approved commission allocation."
+                    )
+
+            if (
+                self.currency
+                and settlement.currency
+                and self.currency.strip().upper()
+                != settlement.currency.strip().upper()
+            ):
+                errors["currency"] = (
+                    "The payment currency must match the "
+                    "commission settlement currency."
+                )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_immutable(self):
+        if not self.pk:
+            return
+
+        original = (
+            CommissionSettlementPayment.objects
+            .get(pk=self.pk)
+        )
+
+        protected_fields = [
+            "participant_id",
+            "amount",
+            "currency",
+            "payment_method",
+            "payment_reference",
+            "paid_at",
+            "notes",
+            "recorded_by_id",
+        ]
+
+        changed_fields = [
+            field
+            for field in protected_fields
+            if getattr(original, field) != getattr(self, field)
+        ]
+
+        if changed_fields:
+            raise ValidationError(
+                {
+                    "commission_payment": (
+                        "Commission payment evidence is immutable. "
+                        "Attempted fields: "
+                        + ", ".join(changed_fields)
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        self._validate_immutable()
+
+        if self.amount is not None:
+            self.amount = self.amount.quantize(
+                Decimal("0.01")
+            )
+
+        self.currency = self.currency.strip().upper()
+        self.payment_reference = self.payment_reference.strip()
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError(
+                {
+                    "commission_payment": (
+                        "Commission payment evidence cannot be deleted."
+                    )
+                }
+            )
+
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"Commission payment #{self.pk or 'new'} — "
+            f"{self.currency} {self.amount}"
         )
