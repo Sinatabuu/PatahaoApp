@@ -19,15 +19,29 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   bool _isIssuingOwnerConfirmation = false;
+  int? _payingCommissionParticipantId;
+  bool _isApprovingCommissionSettlement = false;
+  bool _isClosingDeal = false;
   Map<String, dynamic>? _ownerConfirmationResult;
   Map<String, dynamic>? _deal;
   List<Map<String, dynamic>> _timeline = [];
   Map<String, dynamic>? _ownerGovernance;
+  Map<String, dynamic>? _commissionSettlement;
 
   @override
   void initState() {
     super.initState();
     _loadDeal();
+  }
+
+  Future<Map<String, dynamic>?> _loadCommissionSettlement() async {
+    try {
+      return await StaffDealAdminService.instance.fetchCommissionSettlement(
+        widget.dealId,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _loadDeal() async {
@@ -53,6 +67,8 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
       final timelineResponse = results[1];
       final ownerGovernance = results[2];
 
+      final commissionSettlement = await _loadCommissionSettlement();
+
       final rawTimeline = timelineResponse['timeline'];
 
       final timeline = <Map<String, dynamic>>[];
@@ -73,6 +89,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
         _deal = deal;
         _timeline = timeline;
         _ownerGovernance = ownerGovernance;
+        _commissionSettlement = commissionSettlement;
         _isLoading = false;
       });
     } catch (error) {
@@ -392,6 +409,897 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
     }
 
     return 'Not set';
+  }
+
+  Widget _buildCommissionReceivable(Map<String, dynamic> deal) {
+    final rawInvoice = deal['commission_invoice'];
+
+    if (rawInvoice is! Map) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(18),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.receipt_long_outlined, color: Colors.black54),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'No commission invoice has been issued for this deal yet.',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final invoice = Map<String, dynamic>.from(rawInvoice);
+
+    final invoiceStatus = _text(invoice, 'status');
+
+    final dealStatus = _text(deal, 'status');
+
+    final receipts = <Map<String, dynamic>>[];
+
+    final rawReceipts = invoice['receipts'];
+
+    if (rawReceipts is List) {
+      for (final item in rawReceipts) {
+        if (item is Map) {
+          receipts.add(Map<String, dynamic>.from(item));
+        }
+      }
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: Color(0xFF14532D),
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Commission Collection',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            _DealRow(
+              label: 'Invoice',
+              value: _displayText(_text(invoice, 'invoice_number')),
+            ),
+
+            _DealRow(
+              label: 'Invoice status',
+              value: _statusLabel(invoiceStatus),
+            ),
+
+            _DealRow(
+              label: 'Commission due',
+              value: _formatMoney(invoice['amount']),
+            ),
+
+            _DealRow(
+              label: 'Verified received',
+              value: _formatMoney(invoice['total_received']),
+            ),
+
+            _DealRow(
+              label: 'Outstanding',
+              value: _formatMoney(invoice['outstanding_amount']),
+            ),
+
+            if (_text(invoice, 'agreement_number').isNotEmpty)
+              _DealRow(
+                label: 'Agreement',
+                value: _text(invoice, 'agreement_number'),
+              ),
+
+            if (_text(invoice, 'owner_name').isNotEmpty)
+              _DealRow(
+                label: 'Liable owner',
+                value: _text(invoice, 'owner_name'),
+              ),
+
+            if (receipts.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Divider(),
+              const SizedBox(height: 8),
+
+              const Text(
+                'Payment Evidence',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 10),
+
+              ...receipts.map(
+                (receipt) => Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAF8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.black12),
+                  ),
+                  child: Column(
+                    children: [
+                      _DealRow(
+                        label: 'Amount',
+                        value: _formatMoney(receipt['amount']),
+                      ),
+
+                      _DealRow(
+                        label: 'Method',
+                        value: _statusLabel(_text(receipt, 'payment_method')),
+                      ),
+
+                      _DealRow(
+                        label: 'Reference',
+                        value: _displayText(
+                          _text(receipt, 'payment_reference'),
+                        ),
+                      ),
+
+                      _DealRow(
+                        label: 'Verified received',
+                        value: _formatDateTime(_text(receipt, 'received_at')),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+
+            if (dealStatus == 'commission_paid') ...[
+              const SizedBox(height: 14),
+
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.verified_outlined, color: Color(0xFF15803D)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Commission collection is complete. '
+                        'The full commission due has been verified as received.',
+                        style: TextStyle(color: Color(0xFF14532D)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _closeDeal() async {
+    final deal = _deal;
+    final settlement = _commissionSettlement;
+
+    if (deal == null || settlement == null) {
+      return;
+    }
+
+    final dealStatus = _text(deal, 'status');
+
+    final settlementStatus = _text(settlement, 'status');
+
+    if (dealStatus != 'commission_paid' || settlementStatus != 'paid') {
+      return;
+    }
+
+    final notesController = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Final Administrative Closure'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'This will finally close the deal after '
+                  'commission collection and participant '
+                  'settlement have been completed.',
+                ),
+
+                const SizedBox(height: 12),
+
+                const Text(
+                  'The original transaction completion time '
+                  'will be preserved. A separate closure time '
+                  'will be recorded by Pata Hao.',
+                  style: TextStyle(color: Colors.black54, fontSize: 13),
+                ),
+
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: notesController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Closure notes (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Close Deal'),
+            ),
+          ],
+        );
+      },
+    );
+
+    final notes = notesController.text.trim();
+
+    notesController.dispose();
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isClosingDeal = true;
+    });
+
+    try {
+      await StaffDealAdminService.instance.closeDeal(
+        dealId: widget.dealId,
+        notes: notes,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Deal closed successfully.')),
+      );
+
+      await _loadDeal();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isClosingDeal = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _approveCommissionSettlement() async {
+    final settlement = _commissionSettlement;
+
+    if (settlement == null) {
+      return;
+    }
+
+    final rawId = settlement['id'];
+
+    final settlementId = rawId is int
+        ? rawId
+        : int.tryParse(rawId?.toString() ?? '');
+
+    if (settlementId == null || settlementId <= 0) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Approve Commission Distribution'),
+          content: const Text(
+            'Approve the backend-calculated commission distribution? '
+            'The recipients, percentages and amounts cannot be changed '
+            'through this approval.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Approve'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isApprovingCommissionSettlement = true;
+    });
+
+    try {
+      await StaffDealAdminService.instance.approveCommissionSettlement(
+        settlementId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Commission distribution approved.')),
+      );
+
+      await _loadDeal();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isApprovingCommissionSettlement = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _authorizeCommissionPayout(
+    Map<String, dynamic> participant,
+  ) async {
+    final rawId = participant['id'];
+
+    final participantId = rawId is int
+        ? rawId
+        : int.tryParse(rawId?.toString() ?? '');
+
+    if (participantId == null || participantId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This commission participant has no valid identifier.'),
+        ),
+      );
+      return;
+    }
+
+    if (participant['is_platform_share'] == true) {
+      return;
+    }
+
+    final outstanding = participant['outstanding_amount'];
+
+    final recipientName = _displayText(
+      _text(participant, 'recipient_name'),
+      fallback: 'Commission participant',
+    );
+
+    final paymentMethodController = TextEditingController();
+
+    final paymentReferenceController = TextEditingController();
+
+    final notesController = TextEditingController();
+
+    final confirmed = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Authorize Commission Payout'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  recipientName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+
+                const SizedBox(height: 6),
+
+                Text(
+                  'Backend-calculated outstanding: '
+                  '${_formatMoney(outstanding)}',
+                ),
+
+                const SizedBox(height: 10),
+
+                const Text(
+                  'The payout amount is controlled by '
+                  'Pata Hao accounting and cannot be '
+                  'edited here.',
+                  style: TextStyle(color: Colors.black54, fontSize: 13),
+                ),
+
+                const SizedBox(height: 18),
+
+                TextField(
+                  controller: paymentMethodController,
+                  decoration: const InputDecoration(
+                    labelText: 'Payment method',
+                    hintText: 'e.g. mpesa or bank_transfer',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: paymentReferenceController,
+                  decoration: const InputDecoration(
+                    labelText: 'Payment reference',
+                    hintText: 'Transaction/reference number',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: notesController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final method = paymentMethodController.text.trim();
+
+                final reference = paymentReferenceController.text.trim();
+
+                if (method.isEmpty || reference.isEmpty) {
+                  return;
+                }
+
+                Navigator.of(dialogContext).pop({
+                  'payment_method': method,
+                  'payment_reference': reference,
+                  'notes': notesController.text.trim(),
+                });
+              },
+              child: const Text('Authorize Payout'),
+            ),
+          ],
+        );
+      },
+    );
+
+    paymentMethodController.dispose();
+    paymentReferenceController.dispose();
+    notesController.dispose();
+
+    if (confirmed == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _payingCommissionParticipantId = participantId;
+    });
+
+    try {
+      final result = await StaffDealAdminService.instance
+          .authorizeCommissionPayout(
+            participantId: participantId,
+            paymentMethod: confirmed['payment_method']!,
+            paymentReference: confirmed['payment_reference']!,
+            notes: confirmed['notes'] ?? '',
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      final paymentRaw = result['payment'];
+
+      final payment = paymentRaw is Map
+          ? Map<String, dynamic>.from(paymentRaw)
+          : <String, dynamic>{};
+
+      final paidAmount = payment['amount'];
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Commission payout recorded for '
+            '$recipientName: '
+            '${_formatMoney(paidAmount)}.',
+          ),
+        ),
+      );
+
+      await _loadDeal();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _payingCommissionParticipantId = null;
+        });
+      }
+    }
+  }
+
+  Widget _buildCommissionDistribution() {
+    final settlement = _commissionSettlement;
+
+    if (settlement == null) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(18),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.account_tree_outlined, color: Colors.black54),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'No commission distribution is available for this deal.',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final settlementStatus = _text(settlement, 'status');
+
+    final payoutAuthorizedBySettlement =
+        settlementStatus == 'approved' || settlementStatus == 'partially_paid';
+
+    final participants = <Map<String, dynamic>>[];
+
+    final rawParticipants = settlement['participants'];
+
+    if (rawParticipants is List) {
+      for (final item in rawParticipants) {
+        if (item is Map) {
+          participants.add(Map<String, dynamic>.from(item));
+        }
+      }
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.account_tree_outlined, color: Color(0xFF14532D)),
+                SizedBox(width: 8),
+                Text(
+                  'Commission Distribution',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            _DealRow(
+              label: 'Gross commission',
+              value: _formatMoney(settlement['gross_commission_amount']),
+            ),
+
+            _DealRow(
+              label: 'Allocated',
+              value: _formatMoney(settlement['allocated_amount']),
+            ),
+
+            _DealRow(
+              label: 'Unallocated',
+              value: _formatMoney(settlement['unallocated_amount']),
+            ),
+
+            _DealRow(
+              label: 'Settlement status',
+              value: _statusLabel(_text(settlement, 'status')),
+            ),
+
+            if (settlementStatus == 'allocated') ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _isApprovingCommissionSettlement
+                      ? null
+                      : _approveCommissionSettlement,
+                  icon: _isApprovingCommissionSettlement
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.verified_outlined),
+                  label: Text(
+                    _isApprovingCommissionSettlement
+                        ? 'Approving...'
+                        : 'Approve Distribution',
+                  ),
+                ),
+              ),
+            ],
+
+            if (participants.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Divider(),
+              const SizedBox(height: 8),
+
+              const Text(
+                'Distribution',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 10),
+
+              ...participants.map((participant) {
+                final platformShare = participant['is_platform_share'] == true;
+
+                return Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAF8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.black12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _displayText(
+                          _text(participant, 'recipient_name'),
+                          fallback: platformShare ? 'Pata Hao' : 'Participant',
+                        ),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      _DealRow(
+                        label: platformShare
+                            ? 'Platform share'
+                            : 'Approved entitlement',
+                        value: _formatMoney(participant['amount']),
+                      ),
+
+                      if (!platformShare) ...[
+                        _DealRow(
+                          label: 'Paid',
+                          value: _formatMoney(participant['paid_amount']),
+                        ),
+
+                        _DealRow(
+                          label: 'Outstanding',
+                          value: _formatMoney(
+                            participant['outstanding_amount'],
+                          ),
+                        ),
+
+                        _DealRow(
+                          label: 'Payment status',
+                          value: _statusLabel(
+                            _text(participant, 'payment_status'),
+                          ),
+                        ),
+
+                        if (!payoutAuthorizedBySettlement &&
+                            _text(participant, 'payment_status') != 'paid') ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Payout is locked until the commission '
+                            'settlement has been approved.',
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+
+                        if (payoutAuthorizedBySettlement &&
+                            _text(participant, 'payment_status') != 'paid') ...[
+                          const SizedBox(height: 10),
+
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _payingCommissionParticipantId != null
+                                  ? null
+                                  : () =>
+                                        _authorizeCommissionPayout(participant),
+                              icon:
+                                  _payingCommissionParticipantId ==
+                                      participant['id']
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.payments_outlined),
+                              label: Text(
+                                _payingCommissionParticipantId ==
+                                        participant['id']
+                                    ? 'Processing...'
+                                    : 'Authorize Payout',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ] else
+                        const _DealRow(
+                          label: 'Treatment',
+                          value: 'Retained by Pata Hao',
+                        ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFinalClosure(Map<String, dynamic> deal) {
+    final settlement = _commissionSettlement;
+
+    final dealStatus = _text(deal, 'status');
+
+    final settlementStatus = settlement == null
+        ? ''
+        : _text(settlement, 'status');
+
+    final eligible =
+        dealStatus == 'commission_paid' && settlementStatus == 'paid';
+
+    final alreadyClosed = dealStatus == 'completed';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.task_alt_outlined, color: Color(0xFF14532D)),
+                SizedBox(width: 8),
+                Text(
+                  'Final Administrative Closure',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            if (alreadyClosed) ...[
+              const Text(
+                'This deal has been finally closed.',
+                style: TextStyle(
+                  color: Color(0xFF14532D),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              if (_text(deal, 'closed_at').isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _DealRow(
+                  label: 'Closed',
+                  value: _formatDateTime(_text(deal, 'closed_at')),
+                ),
+              ],
+            ] else if (eligible) ...[
+              const Text(
+                'Commission collection and participant '
+                'settlement are complete. This deal is '
+                'eligible for final administrative closure.',
+              ),
+
+              const SizedBox(height: 12),
+
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _isClosingDeal ? null : _closeDeal,
+                  icon: _isClosingDeal
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.lock_outline),
+                  label: Text(_isClosingDeal ? 'Closing...' : 'Close Deal'),
+                ),
+              ),
+            ] else ...[
+              const Text(
+                'Final closure remains locked until '
+                'commission collection and all required '
+                'participant payouts are complete.',
+                style: TextStyle(color: Colors.black54),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildOwnerConfirmationOperations(Map<String, dynamic> deal) {
@@ -805,6 +1713,18 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
               ),
             ],
           ),
+
+          const SizedBox(height: 12),
+
+          _buildCommissionReceivable(deal),
+
+          const SizedBox(height: 12),
+
+          _buildCommissionDistribution(),
+
+          const SizedBox(height: 12),
+
+          _buildFinalClosure(deal),
 
           const SizedBox(height: 12),
 

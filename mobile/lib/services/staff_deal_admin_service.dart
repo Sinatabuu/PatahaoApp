@@ -182,6 +182,215 @@ class StaffDealAdminService {
     return Map<String, dynamic>.from(decoded);
   }
 
+  Future<Map<String, dynamic>> fetchCommissionSettlement(int dealId) async {
+    if (dealId <= 0) {
+      throw ArgumentError.value(
+        dealId,
+        'dealId',
+        'Deal ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/admin/deals/$dealId/'
+      'commission-settlement/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .get(uri, headers: _authorizationHeaders(accessToken))
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to load commission settlement.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The commission settlement API returned invalid data.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> authorizeCommissionPayout({
+    required int participantId,
+    required String paymentMethod,
+    required String paymentReference,
+    String? paidAt,
+    String notes = '',
+  }) async {
+    if (participantId <= 0) {
+      throw ArgumentError.value(
+        participantId,
+        'participantId',
+        'Participant ID must be greater than zero.',
+      );
+    }
+
+    final cleanMethod = paymentMethod.trim();
+    final cleanReference = paymentReference.trim();
+    final cleanPaidAt = paidAt?.trim() ?? '';
+    final cleanNotes = notes.trim();
+
+    if (cleanMethod.isEmpty) {
+      throw ArgumentError('Payment method is required.');
+    }
+
+    if (cleanReference.isEmpty) {
+      throw ArgumentError('Payment reference is required.');
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/admin/commission-participants/'
+      '$participantId/payout/',
+    );
+
+    final body = <String, dynamic>{
+      'payment_method': cleanMethod,
+      'payment_reference': cleanReference,
+      'notes': cleanNotes,
+    };
+
+    if (cleanPaidAt.isNotEmpty) {
+      body['paid_at'] = cleanPaidAt;
+    }
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to authorize partner payout.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The commission payout API returned invalid data.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> approveCommissionSettlement(
+    int settlementId,
+  ) async {
+    if (settlementId <= 0) {
+      throw ArgumentError.value(
+        settlementId,
+        'settlementId',
+        'Settlement ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/admin/commission-settlements/'
+      '$settlementId/approve/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(const <String, dynamic>{}),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to approve commission distribution.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The commission approval API returned invalid data.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> closeDeal({
+    required int dealId,
+    String notes = '',
+  }) async {
+    if (dealId <= 0) {
+      throw ArgumentError('Deal ID must be greater than zero.');
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/deals/$dealId/close/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $accessToken',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'notes': notes.trim()}),
+          )
+          .timeout(_timeout);
+    });
+
+    final decoded = _decodeResponse(response);
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        _extractErrorMessage(decoded, fallback: 'Unable to close this deal.'),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw Exception('The deal closure API returned invalid data.');
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
   Future<http.Response> _sendAuthorizedRequest(
     Future<http.Response> Function(String accessToken) request,
   ) async {
