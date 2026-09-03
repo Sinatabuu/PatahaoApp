@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/screens/customer_completed_transactions_screen.dart';
 
 import '../services/auth_service.dart';
 
@@ -73,8 +74,14 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
       return;
     }
 
-    Navigator.of(context).popUntil(
-      (route) => route.isFirst,
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  void _openCompletedTransactions() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const CustomerCompletedTransactionsScreen(),
+      ),
     );
   }
 
@@ -270,6 +277,39 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       icon: Icons.account_circle_outlined,
                       label: 'Account type',
                       value: _roleLabel(user.role),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                const Text(
+                  'Activity',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _ProfileSection(
+                  children: [
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      leading: const Icon(
+                        Icons.receipt_long_outlined,
+                        color: Color(0xFF14532D),
+                      ),
+                      title: const Text(
+                        'Completed Transactions',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: const Text(
+                        'Your completed rentals and property purchases',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _openCompletedTransactions,
                     ),
                   ],
                 ),
