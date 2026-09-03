@@ -123,11 +123,12 @@ class _PartnerPropertyWorkspaceScreenState
     try {
       final imageBytes = await selectedImage.readAsBytes();
 
-      await PartnerPropertyService.instance.uploadPropertyPhoto(
-        propertyId: property.id,
-        imageBytes: imageBytes,
-        fileName: selectedImage.name,
-      );
+      final uploadedPhoto = await PartnerPropertyService.instance
+          .uploadPropertyPhoto(
+            propertyId: property.id,
+            imageBytes: imageBytes,
+            fileName: selectedImage.name,
+          );
 
       await _loadPhotos();
 
@@ -135,14 +136,9 @@ class _PartnerPropertyWorkspaceScreenState
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            source == ImageSource.camera
-                ? 'Camera photo uploaded successfully.'
-                : 'Photo uploaded successfully.',
-          ),
-        ),
+      await _showPhotoQualityDetails(
+        uploadedPhoto,
+        justUploaded: true,
       );
     } catch (error) {
       if (!mounted) {
@@ -159,6 +155,147 @@ class _PartnerPropertyWorkspaceScreenState
         });
       }
     }
+  }
+
+  Future<void> _showPhotoQualityDetails(
+    PartnerPropertyPhoto photo, {
+    bool justUploaded = false,
+  }) async {
+    final hasAnalysis = photo.hasQualityAnalysis;
+    final needsReview = photo.needsQualityReview;
+
+    final color = !hasAnalysis
+        ? const Color(0xFF4B5563)
+        : needsReview
+        ? const Color(0xFFB45309)
+        : const Color(0xFF166534);
+
+    final icon = !hasAnalysis
+        ? Icons.info_outline
+        : needsReview
+        ? Icons.tips_and_updates_outlined
+        : Icons.verified_outlined;
+
+    final title = !hasAnalysis
+        ? 'Quality check unavailable'
+        : needsReview
+        ? (justUploaded
+              ? 'Photo uploaded — improvements suggested'
+              : 'Improve this photo')
+        : (justUploaded ? 'Photo uploaded and accepted' : 'Photo quality passed');
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(icon, color: color),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(sheetContext).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  !hasAnalysis
+                      ? 'This older photo has no stored quality analysis. '
+                            'Upload it again if you want it checked.'
+                      : needsReview
+                      ? 'The photo remains in the workspace, but improve or '
+                            'replace it before submitting the property for '
+                            'verification.'
+                      : 'This photo passed the automatic size, format, '
+                            'resolution, lighting, and detail checks.',
+                ),
+                if (hasAnalysis) ...[
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (photo.dimensionsLabel.isNotEmpty)
+                        Chip(
+                          avatar: const Icon(Icons.aspect_ratio, size: 18),
+                          label: Text(photo.dimensionsLabel),
+                        ),
+                      if (photo.fileSizeLabel.isNotEmpty)
+                        Chip(
+                          avatar: const Icon(
+                            Icons.data_usage_outlined,
+                            size: 18,
+                          ),
+                          label: Text(photo.fileSizeLabel),
+                        ),
+                      Chip(
+                        avatar: const Icon(Icons.speed_outlined, size: 18),
+                        label: Text('Score ${photo.qualityScore}/100'),
+                      ),
+                    ],
+                  ),
+                ],
+                if (photo.qualityWarnings.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Suggested improvements',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final warning in photo.qualityWarnings)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            size: 20,
+                            color: color,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(warning)),
+                        ],
+                      ),
+                    ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.of(sheetContext).pop();
+                    },
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _setCoverPhoto(PartnerPropertyPhoto photo) async {
@@ -272,6 +409,29 @@ class _PartnerPropertyWorkspaceScreenState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ListTile(
+                leading: Icon(
+                  photo.needsQualityReview
+                      ? Icons.tips_and_updates_outlined
+                      : photo.hasQualityAnalysis
+                      ? Icons.verified_outlined
+                      : Icons.info_outline,
+                ),
+                title: Text(photo.qualityLabel),
+                subtitle: Text(
+                  photo.hasQualityAnalysis
+                      ? [
+                          photo.dimensionsLabel,
+                          photo.fileSizeLabel,
+                          'Score ${photo.qualityScore}/100',
+                        ].where((value) => value.isNotEmpty).join(' · ')
+                      : 'Upload this older photo again to analyze it.',
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _showPhotoQualityDetails(photo);
+                },
+              ),
               if (!photo.isCover)
                 ListTile(
                   leading: const Icon(Icons.star_outline),
@@ -555,6 +715,11 @@ class _PartnerPropertyWorkspaceScreenState
               'kitchen, and bathroom.',
             ),
 
+            if (!_isLoading && _photos.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _PhotoQualitySummary(photos: _photos),
+            ],
+
             const SizedBox(height: 18),
 
             _buildPhotoContent(),
@@ -688,6 +853,134 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+class _PhotoQualitySummary extends StatelessWidget {
+  const _PhotoQualitySummary({required this.photos});
+
+  final List<PartnerPropertyPhoto> photos;
+
+  @override
+  Widget build(BuildContext context) {
+    final checkedCount = photos
+        .where((photo) => photo.hasQualityAnalysis)
+        .length;
+    final reviewCount = photos
+        .where((photo) => photo.needsQualityReview)
+        .length;
+    final uncheckedCount = photos.length - checkedCount;
+
+    final color = reviewCount > 0
+        ? const Color(0xFFB45309)
+        : uncheckedCount > 0
+        ? const Color(0xFF4B5563)
+        : const Color(0xFF166534);
+
+    final icon = reviewCount > 0
+        ? Icons.tips_and_updates_outlined
+        : uncheckedCount > 0
+        ? Icons.info_outline
+        : Icons.verified_outlined;
+
+    final title = reviewCount > 0
+        ? '$reviewCount photo${reviewCount == 1 ? '' : 's'} need improvement'
+        : uncheckedCount > 0
+        ? 'Quality checks are active'
+        : 'All photos passed quality checks';
+
+    final message = reviewCount > 0
+        ? 'Open photos marked Review to see the suggested improvements.'
+        : uncheckedCount > 0
+        ? '$checkedCount checked · $uncheckedCount older photo'
+              '${uncheckedCount == 1 ? '' : 's'} not yet analyzed.'
+        : '$checkedCount photo${checkedCount == 1 ? '' : 's'} checked and ready '
+              'for staff review.';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(message),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoQualityBadge extends StatelessWidget {
+  const _PhotoQualityBadge({required this.photo});
+
+  final PartnerPropertyPhoto photo;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = photo.needsQualityReview
+        ? const Color(0xFFF59E0B)
+        : photo.hasQualityAnalysis
+        ? const Color(0xFF15803D)
+        : const Color(0xFF4B5563);
+
+    final icon = photo.needsQualityReview
+        ? Icons.tips_and_updates_outlined
+        : photo.hasQualityAnalysis
+        ? Icons.verified_outlined
+        : Icons.info_outline;
+
+    final label = photo.needsQualityReview
+        ? 'Review'
+        : photo.hasQualityAnalysis
+        ? 'Checked'
+        : 'Not checked';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 5,
+      ),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PhotoCard extends StatelessWidget {
   const _PhotoCard({
     required this.photo,
@@ -730,6 +1023,11 @@ class _PhotoCard extends StatelessWidget {
                   child: Center(child: CircularProgressIndicator()),
                 );
               },
+            ),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: _PhotoQualityBadge(photo: photo),
             ),
             Positioned(
               top: 8,
