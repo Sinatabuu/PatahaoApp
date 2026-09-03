@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from partners.models import Partner
@@ -9,6 +10,8 @@ from .models import (
     PropertyPhoto,
     PropertyVideo,
 )
+
+from .media_quality import analyze_property_photo
 
 class PublicPartnerSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
@@ -79,6 +82,21 @@ class PropertyPhotoSerializer(serializers.ModelSerializer):
         return obj.image.url
 
 
+class PartnerPropertyPhotoSerializer(
+    PropertyPhotoSerializer,
+):
+    class Meta(PropertyPhotoSerializer.Meta):
+        fields = [
+            *PropertyPhotoSerializer.Meta.fields,
+            "image_width",
+            "image_height",
+            "file_size",
+            "quality_status",
+            "quality_score",
+            "quality_warnings",
+        ]
+
+
 class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyPhoto
@@ -88,9 +106,95 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
             "image",
             "caption",
             "is_cover",
+            "image_width",
+            "image_height",
+            "file_size",
+            "quality_status",
+            "quality_score",
+            "quality_warnings",
+        )
+        read_only_fields = (
+            "image_width",
+            "image_height",
+            "file_size",
+            "quality_status",
+            "quality_score",
+            "quality_warnings",
+        )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        image = attrs.get("image")
+
+        if image is None:
+            return attrs
+
+        property_obj = attrs.get("property")
+
+        if property_obj is None and self.instance is not None:
+            property_obj = self.instance.property
+
+        try:
+            analysis = analyze_property_photo(image)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {
+                    "image": exc.messages,
+                }
+            ) from exc
+
+        duplicates = PropertyPhoto.objects.filter(
+            property=property_obj,
+            content_sha256=analysis.content_sha256,
+        )
+
+        if self.instance is not None:
+            duplicates = duplicates.exclude(
+                pk=self.instance.pk,
+            )
+
+        if duplicates.exists():
+            raise serializers.ValidationError(
+                {
+                    "image": (
+                        "This exact photo has already been uploaded "
+                        "for the property."
+                    )
+                }
+            )
+
+        self._photo_quality_analysis = analysis
+
+        return attrs
+
+    def _add_quality_metadata(self, validated_data):
+        analysis = getattr(
+            self,
+            "_photo_quality_analysis",
+            None,
+        )
+
+        if analysis is None:
+            return
+
+        validated_data.update(
+            {
+                "image_width": analysis.width,
+                "image_height": analysis.height,
+                "file_size": analysis.file_size,
+                "content_sha256": analysis.content_sha256,
+                "quality_status": analysis.quality_status,
+                "quality_score": analysis.quality_score,
+                "quality_warnings": list(
+                    analysis.quality_warnings,
+                ),
+            }
         )
 
     def create(self, validated_data):
+        self._add_quality_metadata(validated_data)
+
         property_obj = validated_data["property"]
 
         if not PropertyPhoto.objects.filter(
@@ -114,6 +218,11 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
         return photo
 
     def update(self, instance, validated_data):
+        replacing_image = "image" in validated_data
+
+        if replacing_image:
+            self._add_quality_metadata(validated_data)
+
         instance.caption = validated_data.get(
             "caption",
             instance.caption,
@@ -124,8 +233,29 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
             instance.is_cover,
         )
 
-        if "image" in validated_data:
+        if replacing_image:
             instance.image = validated_data["image"]
+            instance.image_width = validated_data[
+                "image_width"
+            ]
+            instance.image_height = validated_data[
+                "image_height"
+            ]
+            instance.file_size = validated_data[
+                "file_size"
+            ]
+            instance.content_sha256 = validated_data[
+                "content_sha256"
+            ]
+            instance.quality_status = validated_data[
+                "quality_status"
+            ]
+            instance.quality_score = validated_data[
+                "quality_score"
+            ]
+            instance.quality_warnings = validated_data[
+                "quality_warnings"
+            ]
 
         instance.save()
 
@@ -139,6 +269,7 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
             )
 
         return instance
+
 
 class PropertyVideoSerializer(serializers.ModelSerializer):
     class Meta:

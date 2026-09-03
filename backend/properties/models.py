@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -299,6 +300,10 @@ class PropertyFavorite(models.Model):
 
 
 class PropertyPhoto(models.Model):
+    class QualityStatus(models.TextChoices):
+        ACCEPTED = "accepted", "Accepted"
+        NEEDS_REVIEW = "needs_review", "Needs review"
+
     property = models.ForeignKey(
         Property,
         on_delete=models.CASCADE,
@@ -316,13 +321,127 @@ class PropertyPhoto(models.Model):
 
     is_cover = models.BooleanField(default=False)
 
+    image_width = models.PositiveIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    image_height = models.PositiveIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    file_size = models.PositiveIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    content_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        editable=False,
+        db_index=True,
+    )
+
+    quality_status = models.CharField(
+        max_length=20,
+        choices=QualityStatus.choices,
+        default=QualityStatus.ACCEPTED,
+        editable=False,
+        db_index=True,
+    )
+
+    quality_score = models.PositiveSmallIntegerField(
+        default=100,
+        editable=False,
+    )
+
+    quality_warnings = models.JSONField(
+        default=list,
+        blank=True,
+        editable=False,
+    )
+
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-is_cover", "uploaded_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "property",
+                    "content_sha256",
+                ],
+                condition=models.Q(
+                    content_sha256__gt="",
+                ),
+                name="unique_property_photo_content",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+
+        if not self.property_id or not self.content_sha256:
+            return
+
+        duplicates = type(self).objects.filter(
+            property_id=self.property_id,
+            content_sha256=self.content_sha256,
+        )
+
+        if self.pk:
+            duplicates = duplicates.exclude(pk=self.pk)
+
+        if duplicates.exists():
+            raise ValidationError(
+                {
+                    "image": (
+                        "This exact photo has already been uploaded "
+                        "for the property."
+                    )
+                }
+            )
+
+    def apply_quality_analysis(self, analysis):
+        self.image_width = analysis.width
+        self.image_height = analysis.height
+        self.file_size = analysis.file_size
+        self.content_sha256 = analysis.content_sha256
+        self.quality_status = analysis.quality_status
+        self.quality_score = analysis.quality_score
+        self.quality_warnings = list(
+            analysis.quality_warnings,
+        )
+
+    def save(self, *args, **kwargs):
+        should_analyze = (
+            bool(self.image)
+            and (
+                self._state.adding
+                or not getattr(
+                    self.image,
+                    "_committed",
+                    True,
+                )
+            )
+        )
+
+        if should_analyze:
+            from .media_quality import (
+                analyze_property_photo,
+            )
+
+            self.apply_quality_analysis(
+                analyze_property_photo(self.image),
+            )
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Photo for {self.property.title}"
+
 
 class PropertyPartner(models.Model):
     class Status(models.TextChoices):

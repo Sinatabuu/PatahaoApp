@@ -15,6 +15,14 @@ from django.core.exceptions import ValidationError
 class PropertyPhotoInline(admin.TabularInline):
     model = PropertyPhoto
     extra = 1
+    readonly_fields = (
+        "image_width",
+        "image_height",
+        "file_size",
+        "quality_status",
+        "quality_score",
+        "quality_warnings",
+    )
 
 
 class PropertyVideoInline(admin.TabularInline):
@@ -611,11 +619,26 @@ class PropertyPhotoAdmin(admin.ModelAdmin):
         "property",
         "caption",
         "is_cover",
+        "quality_status",
+        "quality_score",
+        "image_width",
+        "image_height",
         "uploaded_at",
     )
 
     list_filter = (
         "is_cover",
+        "quality_status",
+    )
+
+    readonly_fields = (
+        "image_width",
+        "image_height",
+        "file_size",
+        "content_sha256",
+        "quality_status",
+        "quality_score",
+        "quality_warnings",
     )
 
 

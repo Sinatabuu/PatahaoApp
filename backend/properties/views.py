@@ -16,6 +16,7 @@ from .models import (
 )
 from .serializers import (
     PartnerPropertySerializer,
+    PartnerPropertyPhotoSerializer,
     PropertyPhotoSerializer,
     PropertyPhotoUploadSerializer,
     PropertySerializer,
@@ -990,7 +991,7 @@ class PropertyPhotoViewSet(viewsets.ModelViewSet):
         ):
             return PropertyPhotoUploadSerializer
 
-        return PropertyPhotoSerializer
+        return PartnerPropertyPhotoSerializer
 
     def perform_create(self, serializer):
         partner = self._get_partner()
