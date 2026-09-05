@@ -12,6 +12,7 @@ from .models import (
 )
 
 from .media_quality import analyze_property_photo
+from .photo_coverage import evaluate_photo_coverage
 
 class PublicPartnerSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
@@ -88,6 +89,7 @@ class PartnerPropertyPhotoSerializer(
     class Meta(PropertyPhotoSerializer.Meta):
         fields = [
             *PropertyPhotoSerializer.Meta.fields,
+            "photo_type",
             "image_width",
             "image_height",
             "file_size",
@@ -105,6 +107,7 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
             "property",
             "image",
             "caption",
+            "photo_type",
             "is_cover",
             "image_width",
             "image_height",
@@ -392,14 +395,26 @@ class PropertySerializer(serializers.ModelSerializer):
         return favorite.id
 
 class PartnerPropertySerializer(PropertySerializer):
+    photos = PartnerPropertyPhotoSerializer(
+        many=True,
+        read_only=True,
+    )
     partner_role = serializers.SerializerMethodField()
     participation_status = serializers.SerializerMethodField()
+    photo_coverage = serializers.SerializerMethodField()
 
     class Meta(PropertySerializer.Meta):
         fields = PropertySerializer.Meta.fields + (
             "partner_role",
             "participation_status",
+            "photo_coverage",
 
+        )
+
+    def get_photo_coverage(self, obj):
+        return evaluate_photo_coverage(
+            obj,
+            obj.photos.all(),
         )
 
     def _get_partner(self):

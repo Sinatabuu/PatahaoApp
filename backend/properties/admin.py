@@ -618,6 +618,7 @@ class PropertyPhotoAdmin(admin.ModelAdmin):
     list_display = (
         "property",
         "caption",
+        "photo_type",
         "is_cover",
         "quality_status",
         "quality_score",
@@ -627,6 +628,7 @@ class PropertyPhotoAdmin(admin.ModelAdmin):
     )
 
     list_filter = (
+        "photo_type",
         "is_cover",
         "quality_status",
     )

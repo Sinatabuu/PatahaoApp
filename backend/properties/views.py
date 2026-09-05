@@ -14,6 +14,7 @@ from .models import (
     PropertyPhoto,
     PropertyFavorite
 )
+from .photo_coverage import evaluate_photo_coverage
 from .serializers import (
     PartnerPropertySerializer,
     PartnerPropertyPhotoSerializer,
@@ -716,27 +717,51 @@ class PartnerPropertyViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        photos = PropertyPhoto.objects.filter(
-            property=property_obj,
+        photos = list(
+            PropertyPhoto.objects.filter(
+                property=property_obj,
+            )
         )
 
-        photo_count = photos.count()
+        coverage = evaluate_photo_coverage(
+            property_obj,
+            photos,
+        )
 
-        if photo_count == 0:
+        photo_count = coverage["photo_count"]
+
+        if photo_count < coverage["minimum_photo_count"]:
             return Response(
                 {
                     "detail": (
-                        "Add at least one property photo before "
-                        "submitting for verification."
+                        "Add at least five useful property photos "
+                        "before submitting for verification."
                     ),
-                    "photo_count": 0,
+                    **coverage,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cover_photo = photos.filter(
-            is_cover=True,
-        ).first()
+        if coverage["missing_photo_types"]:
+            return Response(
+                {
+                    "detail": (
+                        "Complete the required property photo "
+                        "coverage before submitting for verification."
+                    ),
+                    **coverage,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cover_photo = next(
+            (
+                photo
+                for photo in photos
+                if photo.is_cover
+            ),
+            None,
+        )
 
         if cover_photo is None:
             return Response(
@@ -745,7 +770,7 @@ class PartnerPropertyViewSet(
                         "Select a cover photo before submitting "
                         "for verification."
                     ),
-                    "photo_count": photo_count,
+                    **coverage,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -782,6 +807,7 @@ class PartnerPropertyViewSet(
                 "status": property_obj.status,
                 "photo_count": photo_count,
                 "cover_photo_id": cover_photo.id,
+                "photo_coverage": coverage,
             },
             status=status.HTTP_200_OK,
         )

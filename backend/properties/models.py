@@ -5,6 +5,11 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from .photo_coverage import (
+    PHOTO_TYPE_CHOICES,
+    PHOTO_TYPE_OTHER,
+)
+
 
 class Property(models.Model):
     TYPE_APARTMENT = "apartment"
@@ -317,6 +322,13 @@ class PropertyPhoto(models.Model):
     caption = models.CharField(
         max_length=255,
         blank=True,
+    )
+
+    photo_type = models.CharField(
+        max_length=30,
+        choices=PHOTO_TYPE_CHOICES,
+        default=PHOTO_TYPE_OTHER,
+        db_index=True,
     )
 
     is_cover = models.BooleanField(default=False)
