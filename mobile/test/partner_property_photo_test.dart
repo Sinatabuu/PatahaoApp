@@ -9,6 +9,7 @@ void main() {
         'image_url': 'https://example.com/property.jpg',
         'caption': 'Front view',
         'is_cover': true,
+        'photo_type': 'exterior',
         'image_width': 1600,
         'image_height': 900,
         'file_size': 2097152,
@@ -17,6 +18,8 @@ void main() {
         'quality_warnings': <dynamic>[],
       });
 
+      expect(photo.photoType, PartnerPropertyPhotoType.exterior);
+      expect(photo.photoTypeLabel, 'Exterior');
       expect(photo.hasQualityAnalysis, isTrue);
       expect(photo.qualityAccepted, isTrue);
       expect(photo.needsQualityReview, isFalse);
@@ -62,6 +65,8 @@ void main() {
         'is_cover': false,
       });
 
+      expect(photo.photoType, PartnerPropertyPhotoType.other);
+      expect(photo.photoTypeLabel, 'Other');
       expect(photo.hasQualityAnalysis, isFalse);
       expect(photo.qualityAccepted, isFalse);
       expect(photo.needsQualityReview, isFalse);

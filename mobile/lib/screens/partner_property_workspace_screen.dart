@@ -2,9 +2,37 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:mobile/models/partner_property_photo.dart';
+import 'package:mobile/models/partner_property_photo_coverage.dart';
 import 'package:mobile/models/property.dart';
 import 'package:mobile/services/partner_property_service.dart';
 import 'package:mobile/screens/partner_property_mandate_screen.dart';
+
+IconData _photoTypeIcon(String photoType) {
+  switch (photoType) {
+    case PartnerPropertyPhotoType.exterior:
+      return Icons.home_outlined;
+    case PartnerPropertyPhotoType.livingArea:
+      return Icons.weekend_outlined;
+    case PartnerPropertyPhotoType.bedroom:
+      return Icons.bed_outlined;
+    case PartnerPropertyPhotoType.kitchen:
+      return Icons.kitchen_outlined;
+    case PartnerPropertyPhotoType.bathroom:
+      return Icons.bathtub_outlined;
+    case PartnerPropertyPhotoType.siteOverview:
+      return Icons.landscape_outlined;
+    case PartnerPropertyPhotoType.boundary:
+      return Icons.border_outer;
+    case PartnerPropertyPhotoType.access:
+      return Icons.directions_car_outlined;
+    case PartnerPropertyPhotoType.mainSpace:
+      return Icons.storefront_outlined;
+    case PartnerPropertyPhotoType.amenity:
+      return Icons.local_offer_outlined;
+    default:
+      return Icons.photo_outlined;
+  }
+}
 
 class PartnerPropertyWorkspaceScreen extends StatefulWidget {
   const PartnerPropertyWorkspaceScreen({super.key, required this.property});
@@ -29,6 +57,15 @@ class _PartnerPropertyWorkspaceScreenState
   bool _isSubmittingForVerification = false;
 
   Property get property => widget.property;
+
+  PartnerPropertyPhotoCoverage get _photoCoverage {
+    return PartnerPropertyPhotoCoverage.evaluate(
+      propertyType: property.propertyType,
+      bedrooms: property.bedrooms,
+      bathrooms: property.bathrooms,
+      photos: _photos,
+    );
+  }
 
   @override
   void initState() {
@@ -65,6 +102,97 @@ class _PartnerPropertyWorkspaceScreenState
         _errorMessage = _cleanError(error);
       });
     }
+  }
+
+  Future<String?> _selectPhotoType({String? currentType}) async {
+    final requiredTypes = _photoCoverage.requiredPhotoTypes.toSet();
+    final requiredOptions = PartnerPropertyPhotoType.options
+        .where((option) => requiredTypes.contains(option.value));
+    final optionalOptions = PartnerPropertyPhotoType.options
+        .where((option) => !requiredTypes.contains(option.value));
+    final orderedOptions = [
+      ...requiredOptions,
+      ...optionalOptions,
+    ];
+
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.78,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        currentType == null
+                            ? 'What does this photo show?'
+                            : 'Change photo category',
+                        style: Theme.of(sheetContext).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Correct categories help confirm that customers can '
+                        'see every important part of the property.',
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: orderedOptions.length,
+                    itemBuilder: (context, index) {
+                      final option = orderedOptions[index];
+                      final isRequired = requiredTypes.contains(option.value);
+                      final alreadyCovered = _photos.any(
+                        (photo) => photo.photoType == option.value,
+                      );
+                      final isSelected = currentType == option.value;
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          child: Icon(_photoTypeIcon(option.value)),
+                        ),
+                        title: Text(option.label),
+                        subtitle: Text(
+                          isRequired
+                              ? (alreadyCovered
+                                    ? 'Required view · already covered'
+                                    : 'Required view · still needed')
+                              : 'Additional property view',
+                        ),
+                        trailing: isSelected
+                            ? const Icon(
+                                Icons.check_circle,
+                                color: Color(0xFF15803D),
+                              )
+                            : null,
+                        onTap: () {
+                          Navigator.of(sheetContext).pop(option.value);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _pickAndUploadPhoto() async {
@@ -112,7 +240,13 @@ class _PartnerPropertyWorkspaceScreenState
       maxWidth: 2000,
     );
 
-    if (selectedImage == null) {
+    if (selectedImage == null || !mounted) {
+      return;
+    }
+
+    final photoType = await _selectPhotoType();
+
+    if (photoType == null || !mounted) {
       return;
     }
 
@@ -128,6 +262,7 @@ class _PartnerPropertyWorkspaceScreenState
             propertyId: property.id,
             imageBytes: imageBytes,
             fileName: selectedImage.name,
+            photoType: photoType,
           );
 
       await _loadPhotos();
@@ -223,9 +358,8 @@ class _PartnerPropertyWorkspaceScreenState
                       ? 'This older photo has no stored quality analysis. '
                             'Upload it again if you want it checked.'
                       : needsReview
-                      ? 'The photo remains in the workspace, but improve or '
-                            'replace it before submitting the property for '
-                            'verification.'
+                      ? 'The photo remains in the workspace. Consider '
+                            'improving or replacing it before staff review.'
                       : 'This photo passed the automatic size, format, '
                             'resolution, lighting, and detail checks.',
                 ),
@@ -235,6 +369,13 @@ class _PartnerPropertyWorkspaceScreenState
                     spacing: 8,
                     runSpacing: 8,
                     children: [
+                      Chip(
+                        avatar: Icon(
+                          _photoTypeIcon(photo.photoType),
+                          size: 18,
+                        ),
+                        label: Text(photo.photoTypeLabel),
+                      ),
                       if (photo.dimensionsLabel.isNotEmpty)
                         Chip(
                           avatar: const Icon(Icons.aspect_ratio, size: 18),
@@ -295,6 +436,46 @@ class _PartnerPropertyWorkspaceScreenState
         );
       },
     );
+  }
+
+  Future<void> _changePhotoType(PartnerPropertyPhoto photo) async {
+    final photoType = await _selectPhotoType(
+      currentType: photo.photoType,
+    );
+
+    if (photoType == null || photoType == photo.photoType || !mounted) {
+      return;
+    }
+
+    try {
+      await PartnerPropertyService.instance.updatePhotoType(
+        photoId: photo.id,
+        photoType: photoType,
+      );
+
+      await _loadPhotos();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Photo category changed to '
+            '${PartnerPropertyPhotoType.labelFor(photoType)}.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+    }
   }
 
   Future<void> _setCoverPhoto(PartnerPropertyPhoto photo) async {
@@ -409,6 +590,15 @@ class _PartnerPropertyWorkspaceScreenState
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
+                leading: Icon(_photoTypeIcon(photo.photoType)),
+                title: const Text('Change photo category'),
+                subtitle: Text(photo.photoTypeLabel),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _changePhotoType(photo);
+                },
+              ),
+              ListTile(
                 leading: Icon(
                   photo.needsQualityReview
                       ? Icons.tips_and_updates_outlined
@@ -473,8 +663,68 @@ class _PartnerPropertyWorkspaceScreenState
     );
   }
 
+  Future<void> _showCoverageRequirements(
+    PartnerPropertyPhotoCoverage coverage,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Complete photo requirements'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!coverage.hasMinimumPhotos)
+                Text(
+                  'Add at least ${coverage.minimumPhotoCount} photos. '
+                  'You currently have ${coverage.photoCount}.',
+                ),
+              if (!coverage.hasMinimumPhotos &&
+                  coverage.missingPhotoTypes.isNotEmpty)
+                const SizedBox(height: 12),
+              if (coverage.missingPhotoTypes.isNotEmpty) ...[
+                const Text(
+                  'Still needed:',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                for (final label in coverage.missingPhotoLabels)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text('• $label'),
+                  ),
+              ],
+              if ((!coverage.hasMinimumPhotos ||
+                      coverage.missingPhotoTypes.isNotEmpty) &&
+                  !coverage.hasCover)
+                const SizedBox(height: 12),
+              if (!coverage.hasCover)
+                const Text('Select one photo as the cover photo.'),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Continue Adding Photos'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _submitForVerification() async {
     if (_isSubmittingForVerification) {
+      return;
+    }
+
+    final coverage = _photoCoverage;
+
+    if (!coverage.complete) {
+      await _showCoverageRequirements(coverage);
       return;
     }
 
@@ -556,6 +806,8 @@ class _PartnerPropertyWorkspaceScreenState
 
   @override
   Widget build(BuildContext context) {
+    final coverage = _photoCoverage;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('PROPERTY WORKSPACE V2'),
@@ -683,11 +935,17 @@ class _PartnerPropertyWorkspaceScreenState
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.verified_outlined),
+                      : Icon(
+                          coverage.complete
+                              ? Icons.verified_outlined
+                              : Icons.photo_library_outlined,
+                        ),
                   label: Text(
                     _isSubmittingForVerification
                         ? 'Submitting...'
-                        : 'Submit for Verification',
+                        : coverage.complete
+                        ? 'Submit for Verification'
+                        : 'Complete Photo Requirements',
                   ),
                 ),
               ),
@@ -709,10 +967,15 @@ class _PartnerPropertyWorkspaceScreenState
 
             const SizedBox(height: 6),
 
-            const Text(
-              'Add clear photos of the exterior, rooms, '
-              'kitchen, and bathroom.',
+            Text(
+              'Add at least five clear photos. Required views are based on '
+              'this ${property.propertyType.replaceAll('_', ' ')}.',
             ),
+
+            if (!_isLoading) ...[
+              const SizedBox(height: 16),
+              _PhotoCoverageSummary(coverage: coverage),
+            ],
 
             if (!_isLoading && _photos.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -852,6 +1115,129 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+class _PhotoCoverageSummary extends StatelessWidget {
+  const _PhotoCoverageSummary({required this.coverage});
+
+  final PartnerPropertyPhotoCoverage coverage;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = coverage.complete
+        ? const Color(0xFF166534)
+        : const Color(0xFFB45309);
+    final progress = (
+      coverage.photoCount / coverage.minimumPhotoCount
+    ).clamp(0.0, 1.0).toDouble();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                coverage.complete
+                    ? Icons.task_alt
+                    : Icons.checklist_outlined,
+                color: color,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  coverage.complete
+                      ? 'Photo coverage complete'
+                      : 'Complete the required property views',
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '${coverage.photoCount}/${coverage.minimumPhotoCount}',
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: progress,
+            color: color,
+            backgroundColor: color.withValues(alpha: 0.16),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final photoType in coverage.requiredPhotoTypes)
+                _CoverageTypeChip(
+                  label: PartnerPropertyPhotoType.labelFor(photoType),
+                  complete: !coverage.missingPhotoTypes.contains(photoType),
+                ),
+            ],
+          ),
+          if (!coverage.hasCover) ...[
+            const SizedBox(height: 12),
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.star_outline, size: 20),
+                SizedBox(width: 8),
+                Expanded(child: Text('A cover photo is still required.')),
+              ],
+            ),
+          ],
+          if (!coverage.hasMinimumPhotos) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Add ${coverage.minimumPhotoCount - coverage.photoCount} more '
+              'photo${coverage.minimumPhotoCount - coverage.photoCount == 1 ? '' : 's'}.',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CoverageTypeChip extends StatelessWidget {
+  const _CoverageTypeChip({
+    required this.label,
+    required this.complete,
+  });
+
+  final String label;
+  final bool complete;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = complete
+        ? const Color(0xFF166534)
+        : const Color(0xFF92400E);
+
+    return Chip(
+      avatar: Icon(
+        complete ? Icons.check_circle : Icons.radio_button_unchecked,
+        size: 18,
+        color: color,
+      ),
+      label: Text(label),
+      side: BorderSide(color: color.withValues(alpha: 0.35)),
+      backgroundColor: color.withValues(alpha: 0.06),
+    );
+  }
+}
+
 class _PhotoQualitySummary extends StatelessWidget {
   const _PhotoQualitySummary({required this.photos});
 
@@ -974,6 +1360,47 @@ class _PhotoQualityBadge extends StatelessWidget {
   }
 }
 
+class _PhotoTypeBadge extends StatelessWidget {
+  const _PhotoTypeBadge({required this.photo});
+
+  final PartnerPropertyPhoto photo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 132),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _photoTypeIcon(photo.photoType),
+            size: 15,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              photo.photoTypeLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PhotoCard extends StatelessWidget {
   const _PhotoCard({
     required this.photo,
@@ -1034,6 +1461,11 @@ class _PhotoCard extends StatelessWidget {
                   tooltip: 'Photo actions',
                 ),
               ),
+            ),
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: _PhotoTypeBadge(photo: photo),
             ),
             if (photo.isCover)
               Positioned(
@@ -1150,7 +1582,7 @@ class _FullScreenPropertyPhoto extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text(photo.isCover ? 'Cover Photo' : 'Property Photo'),
+        title: Text(photo.photoTypeLabel),
       ),
       body: Center(
         child: InteractiveViewer(

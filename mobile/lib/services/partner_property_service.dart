@@ -193,6 +193,7 @@ class PartnerPropertyService {
     required int propertyId,
     required Uint8List imageBytes,
     required String fileName,
+    required String photoType,
     String caption = '',
     bool isCover = false,
   }) async {
@@ -229,6 +230,7 @@ class PartnerPropertyService {
 
         request.fields['property'] = propertyId.toString();
         request.fields['caption'] = caption.trim();
+        request.fields['photo_type'] = photoType.trim();
         request.fields['is_cover'] = isCover.toString();
 
         request.files.add(
@@ -314,6 +316,64 @@ class PartnerPropertyService {
     if (decoded is! Map) {
       throw const FormatException(
         'The cover photo API returned invalid data.',
+      );
+    }
+
+    return PartnerPropertyPhoto.fromJson(
+      Map<String, dynamic>.from(decoded),
+    );
+  }
+
+  Future<PartnerPropertyPhoto> updatePhotoType({
+    required int photoId,
+    required String photoType,
+  }) async {
+    _validateId(
+      photoId,
+      name: 'photoId',
+      message: 'Photo ID must be greater than zero.',
+    );
+
+    if (photoType.trim().isEmpty) {
+      throw ArgumentError('A photo category is required.');
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/partner/photos/$photoId/',
+    );
+
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .patch(
+              uri,
+              headers: {
+                ..._authorizationHeaders(accessToken),
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'photo_type': photoType.trim(),
+              }),
+            )
+            .timeout(_timeout);
+      },
+    );
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to update the photo category.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The photo category API returned invalid data.',
       );
     }
 
