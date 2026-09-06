@@ -33,10 +33,7 @@ class _PartnerPropertyMandateScreenState
       TextEditingController();
 
   bool _isLoading = true;
-  bool _isSavingCommission = false;
-  bool _isAcceptingCommission = false;
-  bool _isCreatingMandate = false;
-  bool _isDeclaringMandate = false;
+  bool _isSavingAuthorization = false;
   bool _isSubmittingForReview = false;
   bool _isUploadingEvidence = false;
   String? _uploadingDocumentType;
@@ -51,9 +48,7 @@ class _PartnerPropertyMandateScreenState
   String _commissionBasis = 'first_month_rent';
   String _authorizationMethod = 'phone';
 
-  bool _authorityConfirmed = false;
-  bool _paymentPolicyAccepted = false;
-  bool _antiCircumventionAccepted = false;
+  bool _authorizationAccepted = false;
 
   Property get property => widget.property;
 
@@ -62,12 +57,6 @@ class _PartnerPropertyMandateScreenState
   bool get _hasAgreement => _agreement.isNotEmpty;
 
   bool get _agreementAccepted => _agreement['partner_accepted'] == true;
-
-  bool get _agreementVerified => _agreement['is_verified'] == true;
-
-  bool get _agreementLocked => _agreement['is_locked'] == true;
-
-  int? get _agreementId => int.tryParse(_agreement['id']?.toString() ?? '');
 
   bool get _hasMandate => _mandate.isNotEmpty;
 
@@ -82,11 +71,36 @@ class _PartnerPropertyMandateScreenState
   bool get _mandateApproved => _mandateStatus == 'approved';
 
   bool get _commercialTermsFrozen =>
-      _agreementAccepted || _agreementVerified || _agreementLocked;
+      _agreementAccepted ||
+      _agreement['is_verified'] == true ||
+      _agreement['is_locked'] == true;
+
+  bool get _authorizationComplete =>
+      _agreementAccepted && _mandateDeclared;
+
+  bool get _saleDocumentsAdded {
+    if (!_isSaleProperty) {
+      return true;
+    }
+
+    final steps = _salePackSteps();
+
+    return steps.isNotEmpty &&
+        steps.every((step) {
+          final document = _documentForStep(step);
+
+          return document != null &&
+              document['status']?.toString() != 'rejected';
+        });
+  }
 
   @override
   void initState() {
     super.initState();
+
+    if (_isSaleProperty) {
+      _commissionBasis = 'sale_price';
+    }
 
     _commissionRateController.addListener(_rebuildCommissionPreview);
 
@@ -209,11 +223,9 @@ class _PartnerPropertyMandateScreenState
       _authorizationNotesController.text =
           _mandate['authorization_notes']?.toString() ?? '';
 
-      _authorityConfirmed = _mandate['owner_authority_confirmed'] == true;
-
-      _paymentPolicyAccepted = _mandate['no_cash_acknowledged'] == true;
-
-      _antiCircumventionAccepted =
+      _authorizationAccepted =
+          _mandate['owner_authority_confirmed'] == true &&
+          _mandate['no_cash_acknowledged'] == true &&
           _mandate['anti_circumvention_acknowledged'] == true;
 
       final ownerDetail = _mandate['owner_detail'];
@@ -233,342 +245,214 @@ class _PartnerPropertyMandateScreenState
     }
   }
 
-  Future<void> _saveCommission() async {
-    if (_isSavingCommission || _commercialTermsFrozen) {
+  Future<void> _saveAuthorization() async {
+    if (_isSavingAuthorization || _authorizationComplete) {
       return;
     }
 
-    if (!_formKey.currentState!.validate()) {
+    final formState = _formKey.currentState;
+
+    if (formState == null || !formState.validate()) {
       return;
     }
 
-    setState(() {
-      _isSavingCommission = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final transactionValue = property.price.trim();
-
-      Map<String, dynamic> result;
-
-      if (_hasAgreement) {
-        final agreementId = _agreementId;
-
-        if (agreementId == null) {
-          throw Exception('The commission agreement ID is invalid.');
-        }
-
-        result = await PartnerMandateService.instance.updateCommissionAgreement(
-          agreementId: agreementId,
-          ownerName: _ownerNameController.text,
-          ownerPhoneNumber: _ownerPhoneController.text,
-          commissionMethod: _commissionMethod,
-          commissionBasis: _commissionBasis,
-          transactionValue: transactionValue,
-          commissionRate: _commissionMethod == 'percentage'
-              ? _commissionRateController.text
-              : null,
-          fixedCommissionAmount: _commissionMethod == 'fixed'
-              ? _fixedCommissionController.text
-              : null,
-        );
-      } else {
-        result = await PartnerMandateService.instance.createCommissionAgreement(
-          propertyId: property.id,
-          ownerName: _ownerNameController.text,
-          ownerPhoneNumber: _ownerPhoneController.text,
-          commissionMethod: _commissionMethod,
-          commissionBasis: _commissionBasis,
-          transactionValue: transactionValue,
-          commissionRate: _commissionMethod == 'percentage'
-              ? _commissionRateController.text
-              : null,
-          fixedCommissionAmount: _commissionMethod == 'fixed'
-              ? _fixedCommissionController.text
-              : null,
-        );
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _agreement = result;
-        _hydrateFormFromServer();
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Commission terms saved.')));
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = _cleanError(error);
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSavingCommission = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _acceptCommission() async {
-    if (_isAcceptingCommission || _agreementAccepted) {
-      return;
-    }
-
-    final agreementId = _agreementId;
-
-    if (agreementId == null) {
-      return;
-    }
-
-    final shouldAccept = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Accept Commission Terms?'),
-          content: Text(
-            'You are confirming that the commission shown '
-            'for "${property.title}" is the commission agreed '
-            'for a successful Pata Hao transaction.\n\n'
-            'Commission: ${_serverCommissionLabel()}',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false);
-              },
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true);
-              },
-              child: const Text('Accept'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldAccept != true || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _isAcceptingCommission = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final result = await PartnerMandateService.instance
-          .acceptCommissionAgreement(agreementId);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _agreement = result;
-        _hydrateFormFromServer();
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Commission terms accepted.')),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = _cleanError(error);
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAcceptingCommission = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _createMandate() async {
-    if (_isCreatingMandate || _hasMandate || !_agreementAccepted) {
-      return;
-    }
-
-    final agreementId = _agreementId;
-
-    if (agreementId == null) {
-      return;
-    }
-
-    setState(() {
-      _isCreatingMandate = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final result = await PartnerMandateService.instance.createMandate(
-        propertyId: property.id,
-        ownerName: _ownerNameController.text,
-        ownerPhoneNumber: _ownerPhoneController.text,
-        commissionAgreementId: agreementId,
-        authorizationMethod: _authorizationMethod,
-        authorizationNotes: _authorizationNotesController.text,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _mandate = result;
-        _hydrateFormFromServer();
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Digital mandate created.')));
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = _cleanError(error);
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCreatingMandate = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _declareMandate() async {
-    if (_isDeclaringMandate || !_hasMandate || _mandateDeclared) {
-      return;
-    }
-
-    if (!_authorityConfirmed ||
-        !_paymentPolicyAccepted ||
-        !_antiCircumventionAccepted) {
+    if (!_authorizationAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please accept all three declarations first.'),
+          content: Text('Confirm the authorization declaration to continue.'),
         ),
       );
 
       return;
     }
 
-    final mandateId = _mandateId;
-
-    if (mandateId == null) {
-      return;
-    }
-
-    final shouldAccept = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Accept Digital Mandate?'),
-          content: const Text(
-            'By continuing, you confirm that the information '
-            'you provided is accurate and that you have authority '
-            'to market this property under the terms shown.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false);
-              },
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true);
-              },
-              child: const Text('Accept Mandate'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldAccept != true || !mounted) {
-      return;
-    }
-
     setState(() {
-      _isDeclaringMandate = true;
+      _isSavingAuthorization = true;
       _errorMessage = null;
     });
 
     try {
-      final result = await PartnerMandateService.instance.declareMandate(
-        mandateId: mandateId,
-        authorizationMethod: _authorizationMethod,
-        authorizationNotes: _authorizationNotesController.text,
+      Map<String, dynamic> agreement = _agreement;
+
+      if (agreement['partner_accepted'] != true) {
+        if (agreement.isEmpty) {
+          agreement = await PartnerMandateService.instance
+              .createCommissionAgreement(
+                propertyId: property.id,
+                ownerName: _ownerNameController.text,
+                ownerPhoneNumber: _ownerPhoneController.text,
+                commissionMethod: _commissionMethod,
+                commissionBasis: _commissionBasis,
+                transactionValue: property.price.trim(),
+                commissionRate: _commissionMethod == 'percentage'
+                    ? _commissionRateController.text
+                    : null,
+                fixedCommissionAmount: _commissionMethod == 'fixed'
+                    ? _fixedCommissionController.text
+                    : null,
+              );
+        } else {
+          final agreementId = int.tryParse(
+            agreement['id']?.toString() ?? '',
+          );
+
+          if (agreementId == null) {
+            throw Exception('The commission agreement ID is invalid.');
+          }
+
+          agreement = await PartnerMandateService.instance
+              .updateCommissionAgreement(
+                agreementId: agreementId,
+                ownerName: _ownerNameController.text,
+                ownerPhoneNumber: _ownerPhoneController.text,
+                commissionMethod: _commissionMethod,
+                commissionBasis: _commissionBasis,
+                transactionValue: property.price.trim(),
+                commissionRate: _commissionMethod == 'percentage'
+                    ? _commissionRateController.text
+                    : null,
+                fixedCommissionAmount: _commissionMethod == 'fixed'
+                    ? _fixedCommissionController.text
+                    : null,
+              );
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _agreement = agreement;
+        });
+
+        final agreementId = int.tryParse(
+          agreement['id']?.toString() ?? '',
+        );
+
+        if (agreementId == null) {
+          throw Exception('The commission agreement ID is invalid.');
+        }
+
+        agreement = await PartnerMandateService.instance
+            .acceptCommissionAgreement(agreementId);
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _agreement = agreement;
+          _hydrateFormFromServer();
+        });
+      }
+
+      final agreementId = int.tryParse(
+        agreement['id']?.toString() ?? '',
       );
+
+      if (agreementId == null) {
+        throw Exception('The commission agreement ID is invalid.');
+      }
+
+      Map<String, dynamic> mandate = _mandate;
+
+      if (mandate.isEmpty) {
+        mandate = await PartnerMandateService.instance.createMandate(
+          propertyId: property.id,
+          ownerName: _ownerNameController.text,
+          ownerPhoneNumber: _ownerPhoneController.text,
+          commissionAgreementId: agreementId,
+          authorizationMethod: _authorizationMethod,
+          authorizationNotes: _authorizationNotesController.text,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _mandate = mandate;
+        });
+      }
+
+      if (mandate['partner_declared'] != true) {
+        final mandateId = int.tryParse(
+          mandate['id']?.toString() ?? '',
+        );
+
+        if (mandateId == null) {
+          throw Exception('The property mandate ID is invalid.');
+        }
+
+        mandate = await PartnerMandateService.instance.declareMandate(
+          mandateId: mandateId,
+          authorizationMethod: _authorizationMethod,
+          authorizationNotes: _authorizationNotesController.text,
+        );
+      }
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _mandate = result;
+        _agreement = agreement;
+        _mandate = mandate;
+        _authorizationAccepted = true;
         _hydrateFormFromServer();
       });
 
-      await _refreshSalePackFrom(result);
+      await _refreshSalePackFrom(mandate);
 
       if (!mounted) {
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Digital mandate accepted.')),
+        SnackBar(
+          content: Text(
+            _isSaleProperty
+                ? 'Authorization saved. Add the three sale documents next.'
+                : 'Authorization saved. Submit it for Pata Hao review.',
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
         return;
       }
 
-      setState(() {
-        _errorMessage = _cleanError(error);
-      });
+      final message = _cleanError(error);
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+      await _loadData();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (_authorizationComplete) {
+        setState(() {
+          _errorMessage = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Saved authorization recovered. You can continue.'),
+          ),
+        );
+      } else {
+        setState(() {
+          _errorMessage = message;
+        });
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
       if (mounted) {
         setState(() {
-          _isDeclaringMandate = false;
+          _isSavingAuthorization = false;
         });
       }
     }
@@ -622,13 +506,33 @@ class _PartnerPropertyMandateScreenState
         return;
       }
 
-      setState(() {
-        _errorMessage = _cleanError(error);
-      });
+      final message = _cleanError(error);
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+      await _loadData();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (_mandateUnderReview || _mandateApproved) {
+        setState(() {
+          _errorMessage = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Submission recovered. Pata Hao review has started.'),
+          ),
+        );
+      } else {
+        setState(() {
+          _errorMessage = message;
+        });
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -792,43 +696,6 @@ class _PartnerPropertyMandateScreenState
       return;
     }
 
-    final label = step['label']?.toString() ?? 'Sale Pack evidence';
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(
-            replacing ? 'Replace rejected evidence?' : 'Upload evidence?',
-          ),
-          content: Text(
-            'Step: $label\n'
-            'File: ${selectedFile!.name}\n\n'
-            '${replacing ? 'The rejected version will remain preserved. ' : ''}'
-            'The uploaded file will require fresh Pata Hao approval.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false);
-              },
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true);
-              },
-              child: Text(replacing ? 'Replace Evidence' : 'Upload Evidence'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true || !mounted) {
-      return;
-    }
-
     final mandateId = _mandateId;
 
     if (mandateId == null) {
@@ -901,60 +768,29 @@ class _PartnerPropertyMandateScreenState
     }
   }
 
-  String _salePackCheckLabel(String key) {
-    switch (key) {
-      case 'document_approved':
-        return 'Evidence approved by Pata Hao';
-      case 'owner_verified':
-        return 'Property owner verified';
-      case 'partner_declared':
-        return 'Partner accepted digital mandate';
-      case 'commission_agreement_ready':
-        return 'Commission agreement approved and locked';
-      default:
-        return key.replaceAll('_', ' ');
-    }
-  }
-
   Widget _buildSalePackCard() {
     final steps = _salePackSteps();
 
-    final completedSteps =
-        int.tryParse(_salePack['completed_steps']?.toString() ?? '') ?? 0;
+    final documentsAdded = steps.where((step) {
+      final document = _documentForStep(step);
 
-    final totalSteps =
-        int.tryParse(_salePack['total_steps']?.toString() ?? '') ??
-        steps.length;
+      return document != null &&
+          document['status']?.toString() != 'rejected';
+    }).length;
 
-    final progress = totalSteps > 0
-        ? (completedSteps / totalSteps).clamp(0.0, 1.0).toDouble()
+    final totalDocuments = steps.length;
+    final progress = totalDocuments > 0
+        ? documentsAdded / totalDocuments
         : 0.0;
 
-    final packComplete = _salePack['pack_complete'] == true;
-
-    final publicationAllowed = _salePack['publication_allowed'] == true;
-
-    final reasons = <String>[];
-    final rawReasons = _salePack['blocking_reasons'];
-
-    if (rawReasons is List) {
-      for (final reason in rawReasons) {
-        final text = reason.toString().trim();
-
-        if (text.isNotEmpty) {
-          reasons.add(text);
-        }
-      }
-    }
-
     return _SectionCard(
-      title: 'Sale Mandate Pack',
+      title: 'Sale documents',
       icon: Icons.folder_copy_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '$completedSteps of $totalSteps steps complete',
+            '$documentsAdded of $totalDocuments documents added',
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
@@ -963,34 +799,17 @@ class _PartnerPropertyMandateScreenState
             minHeight: 8,
             borderRadius: BorderRadius.circular(8),
           ),
-          const SizedBox(height: 9),
+          const SizedBox(height: 10),
           const Text(
-            'PDF, JPG, JPEG or PNG • Maximum 10 MB',
-            style: TextStyle(color: Colors.black54),
+            'Add owner ID, ownership proof, and signed sale authority. '
+            'PDF, JPG, JPEG or PNG; maximum 10 MB each.',
+            style: TextStyle(color: Colors.black54, height: 1.4),
           ),
-          const SizedBox(height: 14),
-          if (packComplete && publicationAllowed)
-            const _SuccessBanner(
-              text:
-                  'The Sale Mandate Pack is complete and the publication gate is satisfied.',
-            )
-          else if (packComplete)
-            const _InfoBanner(
-              icon: Icons.admin_panel_settings_outlined,
-              text:
-                  'All three evidence steps are complete. Other administrative checks are still pending.',
-            )
-          else
-            const _InfoBanner(
-              icon: Icons.fact_check_outlined,
-              text:
-                  'Upload missing evidence. Every uploaded file requires Pata Hao approval.',
-            ),
           const SizedBox(height: 14),
           if (steps.isEmpty)
             const _InfoBanner(
               icon: Icons.sync,
-              text: 'Sale Pack status is loading. Pull down to refresh.',
+              text: 'Document checklist is loading. Pull down to refresh.',
             )
           else
             ...steps.map(
@@ -999,13 +818,6 @@ class _PartnerPropertyMandateScreenState
                 child: _buildSalePackStep(step),
               ),
             ),
-          if (reasons.isNotEmpty)
-            _InfoBanner(
-              icon: Icons.lock_outline,
-              text:
-                  'Still blocking publication:\n'
-                  '${reasons.map((reason) => '• $reason').join('\n')}',
-            ),
         ],
       ),
     );
@@ -1013,66 +825,49 @@ class _PartnerPropertyMandateScreenState
 
   Widget _buildSalePackStep(Map<String, dynamic> step) {
     final document = _documentForStep(step);
-
     final documentType = _documentTypeForStep(step);
-
     final status = document?['status']?.toString() ?? '';
-
-    final statusDisplay = document?['status_display']?.toString() ?? '';
-
     final filename = document?['original_filename']?.toString() ?? '';
-
     final rejectionReason =
         document?['rejection_reason']?.toString().trim() ?? '';
 
-    final completed = step['completed'] == true;
-
     final rejected = status == 'rejected';
-
+    final approved = status == 'approved';
     final missing = document == null;
-
     final uploadingThis =
         _isUploadingEvidence && _uploadingDocumentType == documentType;
 
-    final rawChecks = step['checks'];
-
-    final checks = rawChecks is Map
-        ? Map<String, dynamic>.from(rawChecks)
-        : <String, dynamic>{};
-
-    final icon = completed
+    final icon = approved
         ? Icons.check_circle
         : rejected
-        ? Icons.cancel
+        ? Icons.error_outline
         : missing
-        ? Icons.upload_file
-        : Icons.hourglass_top;
+        ? Icons.upload_file_outlined
+        : Icons.schedule;
 
-    final iconColor = completed
+    final iconColor = approved
         ? const Color(0xFF15803D)
         : rejected
         ? const Color(0xFFB91C1C)
-        : const Color(0xFFD97706);
+        : missing
+        ? const Color(0xFFD97706)
+        : const Color(0xFF1D4ED8);
 
-    final borderColor = completed
-        ? const Color(0xFFBBF7D0)
+    final statusText = approved
+        ? 'Approved'
         : rejected
-        ? const Color(0xFFFECACA)
-        : const Color(0xFFFDE68A);
-
-    final backgroundColor = completed
-        ? const Color(0xFFF0FDF4)
-        : rejected
-        ? const Color(0xFFFEF2F2)
-        : const Color(0xFFFFFBEB);
+        ? 'Needs replacement'
+        : missing
+        ? 'Required'
+        : 'Added';
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: const Color(0xFFFFFFFF),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: iconColor.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1087,7 +882,7 @@ class _PartnerPropertyMandateScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      step['label']?.toString() ?? 'Sale Pack step',
+                      step['label']?.toString() ?? 'Sale document',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -1095,11 +890,7 @@ class _PartnerPropertyMandateScreenState
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      missing
-                          ? 'Evidence not uploaded'
-                          : statusDisplay.isNotEmpty
-                          ? statusDisplay
-                          : status,
+                      statusText,
                       style: TextStyle(
                         color: iconColor,
                         fontWeight: FontWeight.w600,
@@ -1111,21 +902,17 @@ class _PartnerPropertyMandateScreenState
             ],
           ),
           if (filename.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text('File: $filename'),
-          ],
-          if (checks.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ...checks.entries.map(
-              (entry) => _StatusRow(
-                label: _salePackCheckLabel(entry.key),
-                complete: entry.value == true,
-              ),
+            Text(
+              filename,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.black54),
             ),
           ],
           if (rejectionReason.isNotEmpty) ...[
             const SizedBox(height: 10),
-            _ErrorCard(message: 'Rejection reason: $rejectionReason'),
+            _ErrorCard(message: rejectionReason),
           ],
           if (missing || rejected) ...[
             const SizedBox(height: 12),
@@ -1143,25 +930,79 @@ class _PartnerPropertyMandateScreenState
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Icon(
-                        rejected ? Icons.refresh : Icons.upload_file_outlined,
-                      ),
+                    : Icon(rejected ? Icons.refresh : Icons.upload_file),
                 label: Text(
                   uploadingThis
                       ? 'Uploading...'
                       : rejected
-                      ? 'Replace Rejected Evidence'
-                      : 'Upload Evidence',
+                      ? 'Replace document'
+                      : 'Add document',
                 ),
               ),
             ),
-          ] else if (status == 'uploaded' || status == 'under_review') ...[
-            const SizedBox(height: 10),
-            const _InfoBanner(
-              icon: Icons.hourglass_top_rounded,
-              text: 'Waiting for Pata Hao administrator review.',
-            ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewCard() {
+    if (_mandateApproved) {
+      return const _SectionCard(
+        title: 'Pata Hao review',
+        icon: Icons.verified_outlined,
+        child: _SuccessBanner(
+          text: 'Authorization approved. This protection step is complete.',
+        ),
+      );
+    }
+
+    if (_mandateUnderReview) {
+      return const _SectionCard(
+        title: 'Pata Hao review',
+        icon: Icons.hourglass_top_rounded,
+        child: _InfoBanner(
+          icon: Icons.hourglass_top_rounded,
+          text: 'Submitted. Pata Hao will review the authorization and documents.',
+        ),
+      );
+    }
+
+    final ready = _mandateDeclared && _saleDocumentsAdded;
+
+    return _SectionCard(
+      title: 'Final check',
+      icon: Icons.fact_check_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            ready
+                ? 'Everything required from you is ready.'
+                : 'Add all required sale documents before submitting.',
+            style: const TextStyle(height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: ready && !_isSubmittingForReview
+                  ? _submitForReview
+                  : null,
+              icon: _isSubmittingForReview
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send_outlined),
+              label: Text(
+                _isSubmittingForReview
+                    ? 'Submitting...'
+                    : 'Submit for Verification',
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1232,10 +1073,13 @@ class _PartnerPropertyMandateScreenState
 
   @override
   Widget build(BuildContext context) {
+    final authorizationLocked =
+        _mandateDeclared || _mandateUnderReview || _mandateApproved;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
       appBar: AppBar(
-        title: const Text('Property Mandate'),
+        title: Text(_isSaleProperty ? 'Sale setup' : 'Rental setup'),
         backgroundColor: const Color(0xFF14532D),
         foregroundColor: Colors.white,
       ),
@@ -1248,479 +1092,285 @@ class _PartnerPropertyMandateScreenState
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 36),
                 children: [
                   _PropertySummaryCard(property: property),
-                  const SizedBox(height: 16),
-
-                  if (_errorMessage != null)
+                  const SizedBox(height: 14),
+                  _InfoBanner(
+                    icon: Icons.shield_outlined,
+                    text: _isSaleProperty
+                        ? 'Confirm the owner and commission once, add three '
+                              'sale documents, then submit for verification.'
+                        : 'Confirm the landlord and commission once, then '
+                              'submit for verification.',
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 14),
                     _ErrorCard(message: _errorMessage!),
-
-                  if (_errorMessage != null) const SizedBox(height: 16),
-
-                  _WorkflowStatusCard(
-                    hasAgreement: _hasAgreement,
-                    agreementAccepted: _agreementAccepted,
-                    agreementVerified: _agreementVerified,
-                    agreementLocked: _agreementLocked,
-                    hasMandate: _hasMandate,
-                    mandateDeclared: _mandateDeclared,
-                    mandateStatus: _mandateStatus,
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  if (_isSaleProperty && _hasMandate) ...[
-                    _buildSalePackCard(),
-                    const SizedBox(height: 18),
                   ],
-
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _SectionCard(
-                          title: 'Owner / Landlord',
-                          icon: Icons.person_outline,
-                          child: Column(
-                            children: [
-                              TextFormField(
-                                controller: _ownerNameController,
-                                enabled: !_commercialTermsFrozen,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: 'Owner / landlord name',
-                                  border: OutlineInputBorder(),
-                                ),
-                                validator: (value) => _validateRequiredText(
-                                  value,
-                                  'Enter the owner or landlord name.',
-                                ),
+                  const SizedBox(height: 16),
+                  if (!_authorizationComplete)
+                    Form(
+                      key: _formKey,
+                      child: _SectionCard(
+                        title: _isSaleProperty
+                            ? 'Sale authorization'
+                            : 'Rental authorization',
+                        icon: Icons.verified_user_outlined,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _ownerNameController,
+                              enabled: !authorizationLocked,
+                              textInputAction: TextInputAction.next,
+                              decoration: InputDecoration(
+                                labelText: _isSaleProperty
+                                    ? 'Owner name'
+                                    : 'Landlord name',
+                                border: const OutlineInputBorder(),
                               ),
-                              const SizedBox(height: 12),
-                              TextFormField(
-                                controller: _ownerPhoneController,
-                                enabled: !_commercialTermsFrozen,
-                                keyboardType: TextInputType.phone,
-                                decoration: const InputDecoration(
-                                  labelText: 'Owner / landlord phone',
-                                  border: OutlineInputBorder(),
-                                ),
-                                validator: (value) => _validateRequiredText(
-                                  value,
-                                  'Enter the owner or landlord phone number.',
-                                ),
+                              validator: (value) => _validateRequiredText(
+                                value,
+                                _isSaleProperty
+                                    ? 'Enter the owner name.'
+                                    : 'Enter the landlord name.',
                               ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        _SectionCard(
-                          title: 'Commission Agreement',
-                          icon: Icons.handshake_outlined,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                property.formattedPrice,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                property.listingType.toLowerCase() == 'rent'
-                                    ? 'Property rent used for commission calculation.'
-                                    : 'Property value used for commission calculation.',
-                                style: const TextStyle(color: Colors.black54),
-                              ),
-                              const SizedBox(height: 18),
-
-                              SegmentedButton<String>(
-                                segments: const [
-                                  ButtonSegment<String>(
-                                    value: 'percentage',
-                                    label: Text('Percentage'),
-                                    icon: Icon(Icons.percent),
-                                  ),
-                                  ButtonSegment<String>(
-                                    value: 'fixed',
-                                    label: Text('Fixed'),
-                                    icon: Icon(Icons.payments_outlined),
-                                  ),
-                                ],
-                                selected: {_commissionMethod},
-                                onSelectionChanged: _commercialTermsFrozen
-                                    ? null
-                                    : (selection) {
-                                        setState(() {
-                                          _commissionMethod = selection.first;
-                                        });
-                                      },
-                              ),
-
-                              const SizedBox(height: 16),
-
-                              if (_commissionMethod == 'percentage')
-                                TextFormField(
-                                  controller: _commissionRateController,
-                                  enabled: !_commercialTermsFrozen,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Commission rate (%)',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  validator: (value) =>
-                                      _commissionMethod == 'percentage'
-                                      ? _validatePositiveNumber(
-                                          value,
-                                          'Enter a commission percentage greater than zero.',
-                                        )
-                                      : null,
-                                )
-                              else
-                                TextFormField(
-                                  controller: _fixedCommissionController,
-                                  enabled: !_commercialTermsFrozen,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Fixed commission (KES)',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  validator: (value) =>
-                                      _commissionMethod == 'fixed'
-                                      ? _validatePositiveNumber(
-                                          value,
-                                          'Enter a fixed commission greater than zero.',
-                                        )
-                                      : null,
-                                ),
-
-                              const SizedBox(height: 16),
-
-                              _CommissionPreview(
-                                propertyValue: _formatKes(_propertyValue()),
-                                commissionMethod: _commissionMethod,
-                                rate: _commissionRateController.text.trim(),
-                                commission: _hasAgreement
-                                    ? _serverCommissionLabel()
-                                    : _formatKes(_previewCommission()),
-                              ),
-
-                              if (!_commercialTermsFrozen) ...[
-                                const SizedBox(height: 16),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: FilledButton.icon(
-                                    onPressed: _isSavingCommission
-                                        ? null
-                                        : _saveCommission,
-                                    icon: _isSavingCommission
-                                        ? const SizedBox(
-                                            width: 18,
-                                            height: 18,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(Icons.save_outlined),
-                                    label: Text(
-                                      _isSavingCommission
-                                          ? 'Saving...'
-                                          : _hasAgreement
-                                          ? 'Update Commission Terms'
-                                          : 'Save Commission Terms',
-                                    ),
-                                  ),
-                                ),
-                              ],
-
-                              if (_hasAgreement && !_agreementAccepted) ...[
-                                const SizedBox(height: 12),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: FilledButton.icon(
-                                    onPressed: _isAcceptingCommission
-                                        ? null
-                                        : _acceptCommission,
-                                    icon: _isAcceptingCommission
-                                        ? const SizedBox(
-                                            width: 18,
-                                            height: 18,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.check_circle_outline,
-                                          ),
-                                    label: Text(
-                                      _isAcceptingCommission
-                                          ? 'Accepting...'
-                                          : 'Accept Commission',
-                                    ),
-                                  ),
-                                ),
-                              ],
-
-                              if (_agreementAccepted)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 14),
-                                  child: _SuccessBanner(
-                                    text:
-                                        'Commission terms accepted. These commercial terms can no longer be edited.',
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-
-                        if (_agreementAccepted) ...[
-                          const SizedBox(height: 16),
-
-                          _SectionCard(
-                            title: 'Digital Property Mandate',
-                            icon: Icons.assignment_turned_in_outlined,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                DropdownButtonFormField<String>(
-                                  initialValue: _authorizationMethod,
-                                  decoration: const InputDecoration(
-                                    labelText:
-                                        'How did the owner authorize you?',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  items: const [
-                                    DropdownMenuItem(
-                                      value: 'verbal',
-                                      child: Text('Verbal authorization'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'phone',
-                                      child: Text('Phone authorization'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'whatsapp',
-                                      child: Text('WhatsApp / message'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'written',
-                                      child: Text('Written authorization'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'property_manager',
-                                      child: Text(
-                                        'Property management authority',
-                                      ),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'owner_self',
-                                      child: Text('I am the owner'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'other',
-                                      child: Text('Other'),
-                                    ),
-                                  ],
-                                  onChanged:
-                                      _mandateDeclared ||
-                                          _mandateUnderReview ||
-                                          _mandateApproved
-                                      ? null
-                                      : (value) {
-                                          if (value == null) {
-                                            return;
-                                          }
-
-                                          setState(() {
-                                            _authorizationMethod = value;
-                                          });
-                                        },
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                TextFormField(
-                                  controller: _authorizationNotesController,
-                                  enabled:
-                                      !_mandateDeclared &&
-                                      !_mandateUnderReview &&
-                                      !_mandateApproved,
-                                  maxLines: 3,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Authorization notes (optional)',
-                                    hintText:
-                                        'Example: Owner authorized me by phone.',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-
-                                if (!_hasMandate) ...[
-                                  const SizedBox(height: 16),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: FilledButton.icon(
-                                      onPressed: _isCreatingMandate
-                                          ? null
-                                          : _createMandate,
-                                      icon: _isCreatingMandate
-                                          ? const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Icon(Icons.note_add_outlined),
-                                      label: Text(
-                                        _isCreatingMandate
-                                            ? 'Creating...'
-                                            : 'Create Digital Mandate',
-                                      ),
-                                    ),
-                                  ),
-                                ],
-
-                                if (_hasMandate && !_mandateDeclared) ...[
-                                  const SizedBox(height: 18),
-
-                                  CheckboxListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    value: _authorityConfirmed,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _authorityConfirmed = value ?? false;
-                                      });
-                                    },
-                                    title: const Text(
-                                      'I confirm that I have authority to market this property.',
-                                    ),
-                                  ),
-
-                                  CheckboxListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    value: _paymentPolicyAccepted,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _paymentPolicyAccepted = value ?? false;
-                                      });
-                                    },
-                                    title: const Text(
-                                      'I agree to use Pata Hao\'s recorded payment and transaction workflow.',
-                                    ),
-                                  ),
-
-                                  CheckboxListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    value: _antiCircumventionAccepted,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _antiCircumventionAccepted =
-                                            value ?? false;
-                                      });
-                                    },
-                                    title: const Text(
-                                      'I will not knowingly bypass Pata Hao for customers introduced through the platform.',
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 10),
-
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: FilledButton.icon(
-                                      onPressed: _isDeclaringMandate
-                                          ? null
-                                          : _declareMandate,
-                                      icon: _isDeclaringMandate
-                                          ? const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Icon(
-                                              Icons.verified_user_outlined,
-                                            ),
-                                      label: Text(
-                                        _isDeclaringMandate
-                                            ? 'Accepting...'
-                                            : 'Accept Digital Mandate',
-                                      ),
-                                    ),
-                                  ),
-                                ],
-
-                                if (_mandateDeclared &&
-                                    !_mandateUnderReview &&
-                                    !_mandateApproved) ...[
-                                  const SizedBox(height: 16),
-                                  const _SuccessBanner(
-                                    text:
-                                        'Digital mandate accepted. Submit it to Pata Hao for review.',
-                                  ),
-                                  const SizedBox(height: 12),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: FilledButton.icon(
-                                      onPressed: _isSubmittingForReview
-                                          ? null
-                                          : _submitForReview,
-                                      icon: _isSubmittingForReview
-                                          ? const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Icon(Icons.send_outlined),
-                                      label: Text(
-                                        _isSubmittingForReview
-                                            ? 'Submitting...'
-                                            : 'Submit for Pata Hao Review',
-                                      ),
-                                    ),
-                                  ),
-                                ],
-
-                                if (_mandateUnderReview)
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 16),
-                                    child: _InfoBanner(
-                                      icon: Icons.hourglass_top_rounded,
-                                      text:
-                                          'Your digital mandate is under Pata Hao review.',
-                                    ),
-                                  ),
-
-                                if (_mandateApproved)
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 16),
-                                    child: _SuccessBanner(
-                                      text:
-                                          'Digital mandate approved. Commercial authorization is complete.',
-                                    ),
-                                  ),
-                              ],
                             ),
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              controller: _ownerPhoneController,
+                              enabled: !authorizationLocked,
+                              keyboardType: TextInputType.phone,
+                              textInputAction: TextInputAction.next,
+                              decoration: InputDecoration(
+                                labelText: _isSaleProperty
+                                    ? 'Owner phone'
+                                    : 'Landlord phone',
+                                border: const OutlineInputBorder(),
+                              ),
+                              validator: (value) => _validateRequiredText(
+                                value,
+                                _isSaleProperty
+                                    ? 'Enter the owner phone number.'
+                                    : 'Enter the landlord phone number.',
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<String>(
+                              initialValue: _authorizationMethod,
+                              decoration: const InputDecoration(
+                                labelText: 'How were you authorized?',
+                                border: OutlineInputBorder(),
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'phone',
+                                  child: Text('Phone'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'whatsapp',
+                                  child: Text('WhatsApp or message'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'written',
+                                  child: Text('Written authority'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'verbal',
+                                  child: Text('In person or verbal'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'property_manager',
+                                  child: Text('Property manager authority'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'owner_self',
+                                  child: Text('I am the owner'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'other',
+                                  child: Text('Other'),
+                                ),
+                              ],
+                              onChanged: authorizationLocked
+                                  ? null
+                                  : (value) {
+                                      if (value != null) {
+                                        setState(() {
+                                          _authorizationMethod = value;
+                                        });
+                                      }
+                                    },
+                            ),
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              controller: _authorizationNotesController,
+                              enabled: !authorizationLocked,
+                              maxLines: 2,
+                              decoration: const InputDecoration(
+                                labelText: 'Authorization note (optional)',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            const Text(
+                              'Agreed Pata Hao commission',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Based on ${property.formattedPrice}.',
+                              style: const TextStyle(color: Colors.black54),
+                            ),
+                            const SizedBox(height: 12),
+                            SegmentedButton<String>(
+                              segments: const [
+                                ButtonSegment<String>(
+                                  value: 'percentage',
+                                  label: Text('Percentage'),
+                                  icon: Icon(Icons.percent),
+                                ),
+                                ButtonSegment<String>(
+                                  value: 'fixed',
+                                  label: Text('Fixed amount'),
+                                  icon: Icon(Icons.payments_outlined),
+                                ),
+                              ],
+                              selected: {_commissionMethod},
+                              onSelectionChanged: _commercialTermsFrozen
+                                  ? null
+                                  : (selection) {
+                                      setState(() {
+                                        _commissionMethod = selection.first;
+                                      });
+                                    },
+                            ),
+                            const SizedBox(height: 12),
+                            if (_commissionMethod == 'percentage')
+                              TextFormField(
+                                controller: _commissionRateController,
+                                enabled: !_commercialTermsFrozen,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Commission rate (%)',
+                                  border: OutlineInputBorder(),
+                                ),
+                                validator: (value) => _validatePositiveNumber(
+                                  value,
+                                  'Enter the agreed commission percentage.',
+                                ),
+                              )
+                            else
+                              TextFormField(
+                                controller: _fixedCommissionController,
+                                enabled: !_commercialTermsFrozen,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Commission amount (KES)',
+                                  border: OutlineInputBorder(),
+                                ),
+                                validator: (value) => _validatePositiveNumber(
+                                  value,
+                                  'Enter the agreed commission amount.',
+                                ),
+                              ),
+                            const SizedBox(height: 12),
+                            _CommissionPreview(
+                              propertyValue: _formatKes(_propertyValue()),
+                              commissionMethod: _commissionMethod,
+                              rate: _commissionRateController.text.trim(),
+                              commission: _hasAgreement
+                                  ? _serverCommissionLabel()
+                                  : _formatKes(_previewCommission()),
+                            ),
+                            const SizedBox(height: 14),
+                            CheckboxListTile(
+                              contentPadding: EdgeInsets.zero,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              value: _authorizationAccepted,
+                              onChanged: authorizationLocked
+                                  ? null
+                                  : (value) {
+                                      setState(() {
+                                        _authorizationAccepted = value ?? false;
+                                      });
+                                    },
+                              title: const Text(
+                                'I confirm I am authorized to market this '
+                                'property, will use Pata Hao\'s recorded '
+                                'payment process, and will not bypass Pata Hao '
+                                'for customers introduced by the platform.',
+                                style: TextStyle(height: 1.35),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: _isSavingAuthorization
+                                    ? null
+                                    : _saveAuthorization,
+                                icon: _isSavingAuthorization
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.arrow_forward),
+                                label: Text(
+                                  _isSavingAuthorization
+                                      ? 'Saving...'
+                                      : 'Save Authorization & Continue',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    _SectionCard(
+                      title: 'Authorization complete',
+                      icon: Icons.check_circle_outline,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const _SuccessBanner(
+                            text:
+                                'Owner authority and commission terms are securely recorded.',
                           ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Owner: ${_ownerNameController.text.trim()}',
+                          ),
+                          const SizedBox(height: 4),
+                          Text('Commission: ${_serverCommissionLabel()}'),
                         ],
-                      ],
+                      ),
                     ),
-                  ),
+                  if (_isSaleProperty && _hasMandate) ...[
+                    const SizedBox(height: 16),
+                    _buildSalePackCard(),
+                  ],
+                  if (_mandateDeclared) ...[
+                    const SizedBox(height: 16),
+                    _buildReviewCard(),
+                  ],
                 ],
               ),
             ),
     );
   }
+
 }
 
 class _PropertySummaryCard extends StatelessWidget {
@@ -1760,91 +1410,6 @@ class _PropertySummaryCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _WorkflowStatusCard extends StatelessWidget {
-  const _WorkflowStatusCard({
-    required this.hasAgreement,
-    required this.agreementAccepted,
-    required this.agreementVerified,
-    required this.agreementLocked,
-    required this.hasMandate,
-    required this.mandateDeclared,
-    required this.mandateStatus,
-  });
-
-  final bool hasAgreement;
-  final bool agreementAccepted;
-  final bool agreementVerified;
-  final bool agreementLocked;
-  final bool hasMandate;
-  final bool mandateDeclared;
-  final String mandateStatus;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Commercial authorization',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 14),
-            _StatusRow(label: 'Commission terms', complete: hasAgreement),
-            _StatusRow(
-              label: 'Partner accepted commission',
-              complete: agreementAccepted,
-            ),
-            _StatusRow(
-              label: 'Pata Hao commission review',
-              complete: agreementVerified,
-            ),
-            _StatusRow(label: 'Commission locked', complete: agreementLocked),
-            _StatusRow(label: 'Digital mandate created', complete: hasMandate),
-            _StatusRow(
-              label: 'Partner accepted mandate',
-              complete: mandateDeclared,
-            ),
-            _StatusRow(
-              label: 'Mandate submitted / approved',
-              complete:
-                  mandateStatus == 'under_review' ||
-                  mandateStatus == 'approved',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusRow extends StatelessWidget {
-  const _StatusRow({required this.label, required this.complete});
-
-  final String label;
-  final bool complete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(
-            complete ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 20,
-            color: complete ? const Color(0xFF15803D) : Colors.black38,
-          ),
-          const SizedBox(width: 9),
-          Expanded(child: Text(label)),
-        ],
       ),
     );
   }
