@@ -106,14 +106,13 @@ class _PartnerPropertyWorkspaceScreenState
 
   Future<String?> _selectPhotoType({String? currentType}) async {
     final requiredTypes = _photoCoverage.requiredPhotoTypes.toSet();
-    final requiredOptions = PartnerPropertyPhotoType.options
-        .where((option) => requiredTypes.contains(option.value));
-    final optionalOptions = PartnerPropertyPhotoType.options
-        .where((option) => !requiredTypes.contains(option.value));
-    final orderedOptions = [
-      ...requiredOptions,
-      ...optionalOptions,
-    ];
+    final requiredOptions = PartnerPropertyPhotoType.options.where(
+      (option) => requiredTypes.contains(option.value),
+    );
+    final optionalOptions = PartnerPropertyPhotoType.options.where(
+      (option) => !requiredTypes.contains(option.value),
+    );
+    final orderedOptions = [...requiredOptions, ...optionalOptions];
 
     return showModalBottomSheet<String>(
       context: context,
@@ -370,10 +369,7 @@ class _PartnerPropertyWorkspaceScreenState
                     runSpacing: 8,
                     children: [
                       Chip(
-                        avatar: Icon(
-                          _photoTypeIcon(photo.photoType),
-                          size: 18,
-                        ),
+                        avatar: Icon(_photoTypeIcon(photo.photoType), size: 18),
                         label: Text(photo.photoTypeLabel),
                       ),
                       if (photo.dimensionsLabel.isNotEmpty)
@@ -439,9 +435,7 @@ class _PartnerPropertyWorkspaceScreenState
   }
 
   Future<void> _changePhotoType(PartnerPropertyPhoto photo) async {
-    final photoType = await _selectPhotoType(
-      currentType: photo.photoType,
-    );
+    final photoType = await _selectPhotoType(currentType: photo.photoType);
 
     if (photoType == null || photoType == photo.photoType || !mounted) {
       return;
@@ -1118,9 +1112,9 @@ class _PhotoCoverageSummary extends StatelessWidget {
     final color = coverage.complete
         ? const Color(0xFF166534)
         : const Color(0xFFB45309);
-    final progress = (
-      coverage.photoCount / coverage.minimumPhotoCount
-    ).clamp(0.0, 1.0).toDouble();
+    final progress = (coverage.photoCount / coverage.minimumPhotoCount)
+        .clamp(0.0, 1.0)
+        .toDouble();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1135,9 +1129,7 @@ class _PhotoCoverageSummary extends StatelessWidget {
           Row(
             children: [
               Icon(
-                coverage.complete
-                    ? Icons.task_alt
-                    : Icons.checklist_outlined,
+                coverage.complete ? Icons.task_alt : Icons.checklist_outlined,
                 color: color,
               ),
               const SizedBox(width: 8),
@@ -1146,18 +1138,12 @@ class _PhotoCoverageSummary extends StatelessWidget {
                   coverage.complete
                       ? 'Photo coverage complete'
                       : 'Complete the required property views',
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: TextStyle(color: color, fontWeight: FontWeight.w700),
                 ),
               ),
               Text(
                 '${coverage.photoCount}/${coverage.minimumPhotoCount}',
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                ),
+                style: TextStyle(color: color, fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -1204,19 +1190,14 @@ class _PhotoCoverageSummary extends StatelessWidget {
 }
 
 class _CoverageTypeChip extends StatelessWidget {
-  const _CoverageTypeChip({
-    required this.label,
-    required this.complete,
-  });
+  const _CoverageTypeChip({required this.label, required this.complete});
 
   final String label;
   final bool complete;
 
   @override
   Widget build(BuildContext context) {
-    final color = complete
-        ? const Color(0xFF166534)
-        : const Color(0xFF92400E);
+    final color = complete ? const Color(0xFF166534) : const Color(0xFF92400E);
 
     return Chip(
       avatar: Icon(
@@ -1370,11 +1351,7 @@ class _PhotoTypeBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            _photoTypeIcon(photo.photoType),
-            size: 15,
-            color: Colors.white,
-          ),
+          Icon(_photoTypeIcon(photo.photoType), size: 15, color: Colors.white),
           const SizedBox(width: 5),
           Flexible(
             child: Text(

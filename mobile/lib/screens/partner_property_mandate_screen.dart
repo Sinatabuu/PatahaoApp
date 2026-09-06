@@ -75,8 +75,7 @@ class _PartnerPropertyMandateScreenState
       _agreement['is_verified'] == true ||
       _agreement['is_locked'] == true;
 
-  bool get _authorizationComplete =>
-      _agreementAccepted && _mandateDeclared;
+  bool get _authorizationComplete => _agreementAccepted && _mandateDeclared;
 
   bool get _saleDocumentsAdded {
     if (!_isSaleProperty) {
@@ -292,9 +291,7 @@ class _PartnerPropertyMandateScreenState
                     : null,
               );
         } else {
-          final agreementId = int.tryParse(
-            agreement['id']?.toString() ?? '',
-          );
+          final agreementId = int.tryParse(agreement['id']?.toString() ?? '');
 
           if (agreementId == null) {
             throw Exception('The commission agreement ID is invalid.');
@@ -325,9 +322,7 @@ class _PartnerPropertyMandateScreenState
           _agreement = agreement;
         });
 
-        final agreementId = int.tryParse(
-          agreement['id']?.toString() ?? '',
-        );
+        final agreementId = int.tryParse(agreement['id']?.toString() ?? '');
 
         if (agreementId == null) {
           throw Exception('The commission agreement ID is invalid.');
@@ -346,9 +341,7 @@ class _PartnerPropertyMandateScreenState
         });
       }
 
-      final agreementId = int.tryParse(
-        agreement['id']?.toString() ?? '',
-      );
+      final agreementId = int.tryParse(agreement['id']?.toString() ?? '');
 
       if (agreementId == null) {
         throw Exception('The commission agreement ID is invalid.');
@@ -376,9 +369,7 @@ class _PartnerPropertyMandateScreenState
       }
 
       if (mandate['partner_declared'] != true) {
-        final mandateId = int.tryParse(
-          mandate['id']?.toString() ?? '',
-        );
+        final mandateId = int.tryParse(mandate['id']?.toString() ?? '');
 
         if (mandateId == null) {
           throw Exception('The property mandate ID is invalid.');
@@ -774,14 +765,11 @@ class _PartnerPropertyMandateScreenState
     final documentsAdded = steps.where((step) {
       final document = _documentForStep(step);
 
-      return document != null &&
-          document['status']?.toString() != 'rejected';
+      return document != null && document['status']?.toString() != 'rejected';
     }).length;
 
     final totalDocuments = steps.length;
-    final progress = totalDocuments > 0
-        ? documentsAdded / totalDocuments
-        : 0.0;
+    final progress = totalDocuments > 0 ? documentsAdded / totalDocuments : 0.0;
 
     return _SectionCard(
       title: 'Sale documents',
@@ -963,7 +951,8 @@ class _PartnerPropertyMandateScreenState
         icon: Icons.hourglass_top_rounded,
         child: _InfoBanner(
           icon: Icons.hourglass_top_rounded,
-          text: 'Submitted. Pata Hao will review the authorization and documents.',
+          text:
+              'Submitted. Pata Hao will review the authorization and documents.',
         ),
       );
     }
@@ -1349,9 +1338,7 @@ class _PartnerPropertyMandateScreenState
                                 'Owner authority and commission terms are securely recorded.',
                           ),
                           const SizedBox(height: 12),
-                          Text(
-                            'Owner: ${_ownerNameController.text.trim()}',
-                          ),
+                          Text('Owner: ${_ownerNameController.text.trim()}'),
                           const SizedBox(height: 4),
                           Text('Commission: ${_serverCommissionLabel()}'),
                         ],
@@ -1370,7 +1357,6 @@ class _PartnerPropertyMandateScreenState
             ),
     );
   }
-
 }
 
 class _PropertySummaryCard extends StatelessWidget {
