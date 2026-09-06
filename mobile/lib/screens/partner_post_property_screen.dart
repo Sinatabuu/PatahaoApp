@@ -359,9 +359,149 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
     return false;
   }
 
+  Future<void> _chooseSavedDraft(
+    List<Map<String, dynamic>> drafts,
+  ) async {
+    final orderedDrafts = List<Map<String, dynamic>>.from(drafts)
+      ..sort((left, right) {
+        final leftId = int.tryParse(left['id']?.toString() ?? '') ?? 0;
+        final rightId = int.tryParse(right['id']?.toString() ?? '') ?? 0;
+
+        return rightId.compareTo(leftId);
+      });
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Text(
+                  'Choose a saved draft',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: orderedDrafts.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final candidate = orderedDrafts[index];
+                    final distance = _candidateDistance(candidate);
+
+                    return ListTile(
+                      leading: const Icon(Icons.edit_note_outlined),
+                      title: Text(_candidateTitle(candidate)),
+                      subtitle: Text(
+                        [
+                          _candidateLocation(candidate),
+                          if (distance.isNotEmpty) distance,
+                        ].join(' · '),
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop(candidate);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected != null && mounted) {
+      await _openMyProperty(selected);
+    }
+  }
+
+  Widget _buildCandidateCard(Map<String, dynamic> candidate) {
+    final isMine = _candidateBelongsToCurrentPartner(candidate);
+    final distance = _candidateDistance(candidate);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _candidateTitle(candidate),
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _candidateLocation(candidate),
+              style: const TextStyle(color: Colors.black54),
+            ),
+            if (distance.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                distance,
+                style: const TextStyle(color: Colors.black54),
+              ),
+            ],
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _isSubmittingDecision
+                    ? null
+                    : () {
+                        if (isMine) {
+                          _openMyProperty(candidate);
+                        } else {
+                          _joinProperty(candidate);
+                        }
+                      },
+                icon: Icon(
+                  isMine ? Icons.home_work_outlined : Icons.link,
+                ),
+                label: Text(
+                  isMine
+                      ? 'Open My Property'
+                      : 'This Is the Same Property',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final location = _location;
+    final ownDrafts = _candidates
+        .where(
+          (candidate) =>
+              _candidateBelongsToCurrentPartner(candidate) &&
+              candidate['status']?.toString() == 'draft',
+        )
+        .toList();
+    final otherCandidates = _candidates
+        .where(
+          (candidate) =>
+              !_candidateBelongsToCurrentPartner(candidate) ||
+              candidate['status']?.toString() != 'draft',
+        )
+        .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
@@ -519,96 +659,90 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
                   ),
                 ),
               ] else ...[
-                const Text(
-                  'Nearby properties found',
-                  style: TextStyle(
+                Text(
+                  ownDrafts.isNotEmpty
+                      ? ownDrafts.length == 1
+                            ? 'Continue your saved draft'
+                            : '${ownDrafts.length} saved drafts found here'
+                      : 'Nearby properties found',
+                  style: const TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF111827),
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'These properties are close to your current '
-                  'location. Check carefully before creating '
-                  'another property.',
-                  style: TextStyle(color: Colors.black54, height: 1.4),
+                Text(
+                  ownDrafts.isNotEmpty
+                      ? 'Continue an existing draft, or confirm that this is '
+                            'a different property.'
+                      : 'Check these nearby properties before creating a '
+                            'different one.',
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    height: 1.4,
+                  ),
                 ),
                 const SizedBox(height: 14),
-                ..._candidates.map((candidate) {
-                  final isMine = _candidateBelongsToCurrentPartner(candidate);
-
-                  final distance = _candidateDistance(candidate);
-
-                  return Card(
+                if (ownDrafts.length == 1)
+                  _buildCandidateCard(ownDrafts.first)
+                else if (ownDrafts.length > 1)
+                  Card(
                     margin: const EdgeInsets.only(bottom: 14),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            _candidateTitle(candidate),
-                            style: const TextStyle(
+                          const Text(
+                            'Your saved drafts',
+                            style: TextStyle(
                               fontSize: 17,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            _candidateLocation(candidate),
+                            '${ownDrafts.length} drafts are safely stored in '
+                            'My Properties.',
                             style: const TextStyle(color: Colors.black54),
                           ),
-                          if (distance.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              distance,
-                              style: const TextStyle(color: Colors.black54),
-                            ),
-                          ],
                           const SizedBox(height: 14),
-                          if (isMine)
-                            SizedBox(
-                              width: double.infinity,
-                              child: FilledButton.icon(
-                                onPressed: _isSubmittingDecision
-                                    ? null
-                                    : () {
-                                        _openMyProperty(candidate);
-                                      },
-                                icon: const Icon(Icons.home_work_outlined),
-                                label: Text(
-                                  candidate['status'] == 'draft'
-                                      ? 'Continue My Draft'
-                                      : 'Open My Property',
-                                ),
-                              ),
-                            )
-                          else
-                            SizedBox(
-                              width: double.infinity,
-                              child: FilledButton.icon(
-                                onPressed: _isSubmittingDecision
-                                    ? null
-                                    : () {
-                                        _joinProperty(candidate);
-                                      },
-                                icon: const Icon(Icons.link),
-                                label: const Text('This is the Same Property'),
-                              ),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _isSubmittingDecision
+                                  ? null
+                                  : () {
+                                      _chooseSavedDraft(ownDrafts);
+                                    },
+                              icon: const Icon(Icons.list_alt_outlined),
+                              label: const Text('Choose a Saved Draft'),
                             ),
+                          ),
                         ],
                       ),
                     ),
-                  );
-                }),
+                  ),
+                if (otherCandidates.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Other nearby properties',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...otherCandidates.map(_buildCandidateCard),
+                ],
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: _isSubmittingDecision
                       ? null
                       : _confirmDifferentProperty,
                   icon: const Icon(Icons.add_home_work_outlined),
-                  label: const Text('None of These - Create New Property'),
+                  label: const Text('This Is a Different Property'),
                 ),
               ],
             ],
