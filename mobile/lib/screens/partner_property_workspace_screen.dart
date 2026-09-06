@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mobile/models/partner_property_photo.dart';
 import 'package:mobile/models/partner_property_photo_coverage.dart';
 import 'package:mobile/models/property.dart';
+import 'package:mobile/services/partner_mandate_service.dart';
 import 'package:mobile/services/partner_property_service.dart';
 import 'package:mobile/screens/partner_property_mandate_screen.dart';
 
@@ -55,8 +56,36 @@ class _PartnerPropertyWorkspaceScreenState
   bool _isUploading = false;
   String? _errorMessage;
   bool _isSubmittingForVerification = false;
+  bool _authorizationStatusAvailable = false;
+
+  Map<String, dynamic> _mandate = <String, dynamic>{};
+  Map<String, dynamic> _salePack = <String, dynamic>{};
 
   Property get property => widget.property;
+
+  bool get _isSaleProperty =>
+      property.listingType.toLowerCase() == 'sale';
+
+  String get _mandateStatus =>
+      _mandate['status']?.toString() ?? '';
+
+  bool get _authorizationUnderReview =>
+      _mandateStatus == 'under_review';
+
+  bool get _authorizationApproved =>
+      _mandateStatus == 'approved';
+
+  bool get _authorizationReadyForPropertyReview {
+    if (!_authorizationApproved) {
+      return false;
+    }
+
+    if (!_isSaleProperty) {
+      return true;
+    }
+
+    return _salePack['publication_allowed'] == true;
+  }
 
   PartnerPropertyPhotoCoverage get _photoCoverage {
     return PartnerPropertyPhotoCoverage.evaluate(
@@ -84,12 +113,39 @@ class _PartnerPropertyWorkspaceScreenState
         property.id,
       );
 
+      Map<String, dynamic> mandate = <String, dynamic>{};
+      Map<String, dynamic> salePack = <String, dynamic>{};
+      var authorizationStatusAvailable = false;
+
+      try {
+        mandate = await PartnerMandateService.instance
+            .fetchMandateForProperty(property.id);
+
+        if (_isSaleProperty && mandate.isNotEmpty) {
+          final mandateId = int.tryParse(
+            mandate['id']?.toString() ?? '',
+          );
+
+          if (mandateId != null) {
+            salePack = await PartnerMandateService.instance
+                .fetchSaleMandatePack(mandateId);
+          }
+        }
+
+        authorizationStatusAvailable = true;
+      } catch (_) {
+        authorizationStatusAvailable = false;
+      }
+
       if (!mounted) {
         return;
       }
 
       setState(() {
         _photos = photos;
+        _mandate = mandate;
+        _salePack = salePack;
+        _authorizationStatusAvailable = authorizationStatusAvailable;
         _isLoading = false;
       });
     } catch (error) {
@@ -559,8 +615,8 @@ class _PartnerPropertyWorkspaceScreenState
   }
 
   Future<void> _openPropertyMandate() async {
-    final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
         builder: (_) => PartnerPropertyMandateScreen(property: property),
       ),
     );
@@ -569,9 +625,7 @@ class _PartnerPropertyWorkspaceScreenState
       return;
     }
 
-    if (changed == true) {
-      await _loadPhotos();
-    }
+    await _loadPhotos();
   }
 
   Future<void> _showPhotoActions(PartnerPropertyPhoto photo) async {
@@ -801,6 +855,8 @@ class _PartnerPropertyWorkspaceScreenState
   @override
   Widget build(BuildContext context) {
     final coverage = _photoCoverage;
+    final canSubmitProperty =
+        coverage.complete && _authorizationReadyForPropertyReview;
 
     return Scaffold(
       appBar: AppBar(
@@ -869,22 +925,46 @@ class _PartnerPropertyWorkspaceScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
-                          Icon(Icons.assignment_turned_in_outlined),
-                          SizedBox(width: 8),
-                          Text(
-                            'Property authorization',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
+                          Icon(
+                            _authorizationReadyForPropertyReview
+                                ? Icons.check_circle
+                                : _authorizationUnderReview
+                                ? Icons.hourglass_top_rounded
+                                : Icons.verified_user_outlined,
+                            color: _authorizationReadyForPropertyReview
+                                ? const Color(0xFF15803D)
+                                : null,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _authorizationReadyForPropertyReview
+                                  ? 'Authorization approved'
+                                  : _authorizationUnderReview
+                                  ? 'Authorization under review'
+                                  : 'Property authorization',
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        property.listingType.toLowerCase() == 'sale'
+                        !_authorizationStatusAvailable
+                            ? 'Open the guided setup to check or complete the '
+                                  'property authorization.'
+                            : _authorizationReadyForPropertyReview
+                            ? 'Pata Hao has approved the authorization and '
+                                  'required documents.'
+                            : _authorizationUnderReview
+                            ? 'Pata Hao is reviewing the authorization and '
+                                  'documents. No new submission is needed.'
+                            : _isSaleProperty
                             ? 'Confirm the owner and agreed commission, then '
                                   'add the three required sale documents.'
                             : 'Confirm the landlord and agreed commission in '
@@ -893,11 +973,15 @@ class _PartnerPropertyWorkspaceScreenState
                       const SizedBox(height: 14),
                       SizedBox(
                         width: double.infinity,
-                        child: FilledButton.icon(
+                        child: OutlinedButton.icon(
                           onPressed: _openPropertyMandate,
-                          icon: const Icon(Icons.handshake_outlined),
+                          icon: const Icon(Icons.arrow_forward),
                           label: Text(
-                            property.listingType.toLowerCase() == 'sale'
+                            _authorizationReadyForPropertyReview
+                                ? 'View Authorization'
+                                : _authorizationUnderReview
+                                ? 'View Review Status'
+                                : _isSaleProperty
                                 ? 'Open Sale Setup'
                                 : 'Open Rental Setup',
                           ),
@@ -913,9 +997,10 @@ class _PartnerPropertyWorkspaceScreenState
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _isSubmittingForVerification
-                      ? null
-                      : _submitForVerification,
+                  onPressed:
+                      canSubmitProperty && !_isSubmittingForVerification
+                      ? _submitForVerification
+                      : null,
                   icon: _isSubmittingForVerification
                       ? const SizedBox(
                           width: 18,
@@ -923,24 +1008,33 @@ class _PartnerPropertyWorkspaceScreenState
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Icon(
-                          coverage.complete
+                          !coverage.complete
+                              ? Icons.photo_library_outlined
+                              : _authorizationReadyForPropertyReview
                               ? Icons.verified_outlined
-                              : Icons.photo_library_outlined,
+                              : Icons.lock_clock_outlined,
                         ),
                   label: Text(
                     _isSubmittingForVerification
                         ? 'Submitting...'
-                        : coverage.complete
-                        ? 'Submit Property for Verification'
-                        : 'Complete Photo Requirements',
+                        : !coverage.complete
+                        ? 'Complete Photo Requirements'
+                        : !_authorizationReadyForPropertyReview
+                        ? 'Awaiting Authorization Approval'
+                        : 'Submit Property for Verification',
                   ),
                 ),
               ),
 
-              const Text(
-                'Pata Hao will verify the property only after '
-                'the commercial authorization and mandate requirements '
-                'are complete.',
+              const SizedBox(height: 8),
+
+              Text(
+                !coverage.complete
+                    ? 'Complete the photo checklist to continue.'
+                    : !_authorizationReadyForPropertyReview
+                    ? 'Property submission unlocks automatically after '
+                          'Pata Hao approves the authorization and documents.'
+                    : 'Photos and authorization are ready.',
                 textAlign: TextAlign.center,
               ),
             ],
