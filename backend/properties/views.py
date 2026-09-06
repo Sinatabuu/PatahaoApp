@@ -454,6 +454,9 @@ class PropertyViewSet(viewsets.ModelViewSet):
                     "listing_type":
                         property_obj.listing_type,
                     "status": property_obj.status,
+                    "created_at": (
+                        property_obj.created_at.isoformat()
+                    ),
                     "county": property_obj.county,
                     "town": property_obj.town,
                     "estate": property_obj.estate,

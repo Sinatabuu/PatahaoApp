@@ -127,6 +127,88 @@ class _PartnerNewPropertyFormScreenState
         .trim();
   }
 
+  bool _candidateIsMine(Map<String, dynamic> candidate) {
+    final value = candidate['is_mine'];
+
+    if (value == true) {
+      return true;
+    }
+
+    final text = value?.toString().trim().toLowerCase();
+    return text == 'true' || text == '1' || text == 'yes';
+  }
+
+  Future<Property?> _recoverRecentDraft() async {
+    final expectedTitle = _titleController.text.trim().toLowerCase();
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+      }
+
+      try {
+        final result =
+            await PartnerPropertyService.instance.findNearbyProperties(
+          latitude: widget.latitude,
+          longitude: widget.longitude,
+        );
+
+        final rawCandidates = result['candidates'];
+
+        if (rawCandidates is! List) {
+          continue;
+        }
+
+        final candidates = rawCandidates
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .where((candidate) {
+              final title =
+                  candidate['title']?.toString().trim().toLowerCase() ?? '';
+
+              return _candidateIsMine(candidate) &&
+                  candidate['status'] == 'draft' &&
+                  title == expectedTitle;
+            })
+            .toList()
+          ..sort((left, right) {
+            final leftId = int.tryParse(left['id']?.toString() ?? '') ?? 0;
+            final rightId = int.tryParse(right['id']?.toString() ?? '') ?? 0;
+            return rightId.compareTo(leftId);
+          });
+
+        for (final candidate in candidates) {
+          final createdAt = DateTime.tryParse(
+            candidate['created_at']?.toString() ?? '',
+          );
+
+          if (createdAt == null) {
+            continue;
+          }
+
+          final age = DateTime.now().toUtc().difference(createdAt.toUtc());
+
+          if (age > const Duration(minutes: 15) ||
+              age < const Duration(minutes: -1)) {
+            continue;
+          }
+
+          final propertyId =
+              int.tryParse(candidate['id']?.toString() ?? '');
+
+          if (propertyId == null || propertyId <= 0) {
+            continue;
+          }
+
+          return PartnerPropertyService.instance.fetchMyProperty(propertyId);
+        }
+      } catch (_) {
+        // Recovery is best-effort; the original create error is shown below.
+      }
+    }
+
+    return null;
+  }
   Future<void> _submit() async {
     if (_isSubmitting) {
       return;
@@ -166,21 +248,33 @@ class _PartnerNewPropertyFormScreenState
     var workspaceFinished = false;
 
     try {
-      property = await PartnerPropertyService.instance.createProperty(
-        title: _titleController.text,
-        propertyType: propertyType,
-        listingType: _listingType,
-        price: price,
-        county: _countyController.text,
-        town: _townController.text,
-        estate: _estateController.text,
-        address: _addressController.text,
-        latitude: widget.latitude,
-        longitude: widget.longitude,
-        bedrooms: bedrooms,
-        bathrooms: bathrooms,
-        description: _descriptionController.text,
-      );
+      var recovered = false;
+
+      try {
+        property = await PartnerPropertyService.instance.createProperty(
+          title: _titleController.text,
+          propertyType: propertyType,
+          listingType: _listingType,
+          price: price,
+          county: _countyController.text,
+          town: _townController.text,
+          estate: _estateController.text,
+          address: _addressController.text,
+          latitude: widget.latitude,
+          longitude: widget.longitude,
+          bedrooms: bedrooms,
+          bathrooms: bathrooms,
+          description: _descriptionController.text,
+        );
+      } catch (createError) {
+        property = await _recoverRecentDraft();
+
+        if (property == null) {
+          throw createError;
+        }
+
+        recovered = true;
+      }
 
       if (!mounted) {
         return;
@@ -189,8 +283,10 @@ class _PartnerNewPropertyFormScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Property "${property.title}" created. '
-            'Continue setting it up below.',
+            recovered
+                ? 'Your saved draft was recovered. Continue below.'
+                : 'Property "${property.title}" created. '
+                    'Continue setting it up below.',
           ),
         ),
       );

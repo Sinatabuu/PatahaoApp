@@ -356,3 +356,7 @@ class NearbyPropertyOwnershipTests(TestCase):
 
         self.assertTrue(candidate["is_mine"])
         self.assertEqual(candidate["status"], Property.STATUS_DRAFT)
+        self.assertEqual(
+            candidate["created_at"],
+            self.property_obj.created_at.isoformat(),
+        )
