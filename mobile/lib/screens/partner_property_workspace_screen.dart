@@ -63,17 +63,13 @@ class _PartnerPropertyWorkspaceScreenState
 
   Property get property => widget.property;
 
-  bool get _isSaleProperty =>
-      property.listingType.toLowerCase() == 'sale';
+  bool get _isSaleProperty => property.listingType.toLowerCase() == 'sale';
 
-  String get _mandateStatus =>
-      _mandate['status']?.toString() ?? '';
+  String get _mandateStatus => _mandate['status']?.toString() ?? '';
 
-  bool get _authorizationUnderReview =>
-      _mandateStatus == 'under_review';
+  bool get _authorizationUnderReview => _mandateStatus == 'under_review';
 
-  bool get _authorizationApproved =>
-      _mandateStatus == 'approved';
+  bool get _authorizationApproved => _mandateStatus == 'approved';
 
   bool get _authorizationReadyForPropertyReview {
     if (!_authorizationApproved) {
@@ -118,13 +114,12 @@ class _PartnerPropertyWorkspaceScreenState
       var authorizationStatusAvailable = false;
 
       try {
-        mandate = await PartnerMandateService.instance
-            .fetchMandateForProperty(property.id);
+        mandate = await PartnerMandateService.instance.fetchMandateForProperty(
+          property.id,
+        );
 
         if (_isSaleProperty && mandate.isNotEmpty) {
-          final mandateId = int.tryParse(
-            mandate['id']?.toString() ?? '',
-          );
+          final mandateId = int.tryParse(mandate['id']?.toString() ?? '');
 
           if (mandateId != null) {
             salePack = await PartnerMandateService.instance
@@ -997,8 +992,7 @@ class _PartnerPropertyWorkspaceScreenState
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed:
-                      canSubmitProperty && !_isSubmittingForVerification
+                  onPressed: canSubmitProperty && !_isSubmittingForVerification
                       ? _submitForVerification
                       : null,
                   icon: _isSubmittingForVerification
