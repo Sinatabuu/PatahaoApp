@@ -498,7 +498,7 @@ class _PartnerPropertyMandateScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Mandate submitted to Pata Hao for review.'),
+          content: Text('Authorization submitted to Pata Hao for review.'),
         ),
       );
     } catch (error) {
@@ -867,7 +867,7 @@ class _PartnerPropertyMandateScreenState
       decoration: BoxDecoration(
         color: const Color(0xFFFFFFFF),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: iconColor.withValues(alpha: 0.35)),
+        border: Border.all(color: iconColor.withAlpha(90)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -999,7 +999,7 @@ class _PartnerPropertyMandateScreenState
               label: Text(
                 _isSubmittingForReview
                     ? 'Submitting...'
-                    : 'Submit for Verification',
+                    : 'Send Authorization for Review',
               ),
             ),
           ),
