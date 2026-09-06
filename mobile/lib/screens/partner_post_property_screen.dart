@@ -338,6 +338,7 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
 
   bool _candidateBelongsToCurrentPartner(Map<String, dynamic> candidate) {
     final values = <dynamic>[
+      candidate['is_mine'],
       candidate['is_my_property'],
       candidate['belongs_to_partner'],
       candidate['owned_by_me'],
@@ -576,7 +577,11 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
                                         _openMyProperty(candidate);
                                       },
                                 icon: const Icon(Icons.home_work_outlined),
-                                label: const Text('Open My Property'),
+                                label: Text(
+                                  candidate['status'] == 'draft'
+                                      ? 'Continue My Draft'
+                                      : 'Open My Property',
+                                ),
                               ),
                             )
                           else

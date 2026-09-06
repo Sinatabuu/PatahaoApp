@@ -423,7 +423,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
             else:
                 proximity = "weak"
 
-            is_mine = False
+            is_mine = (
+                partner is not None
+                and property_obj.partner_id == partner.id
+            )
             my_participation_status = None
 
             if partner is not None:
@@ -450,6 +453,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
                         property_obj.property_type,
                     "listing_type":
                         property_obj.listing_type,
+                    "status": property_obj.status,
                     "county": property_obj.county,
                     "town": property_obj.town,
                     "estate": property_obj.estate,
@@ -472,7 +476,11 @@ class PropertyViewSet(viewsets.ModelViewSet):
             )
 
         candidates.sort(
-            key=lambda item: item["distance_meters"]
+            key=lambda item: (
+                not item["is_mine"],
+                item["status"] != Property.STATUS_DRAFT,
+                item["distance_meters"],
+            )
         )
 
         return Response(

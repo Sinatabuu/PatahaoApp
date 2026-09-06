@@ -299,3 +299,60 @@ class PropertyPhotoCoverageSubmissionTests(TestCase):
                 "Access or entrance",
             ],
         )
+
+class NearbyPropertyOwnershipTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+
+        self.user = user_model.objects.create_user(
+            username="nearby-source-partner",
+            password="test-password",
+        )
+
+        self.partner = Partner.objects.create(
+            user=self.user,
+            business_name="Nearby Source Homes",
+            verification_status=Partner.STATUS_APPROVED,
+            is_active=True,
+        )
+
+        self.property_obj = Property.objects.create(
+            partner=self.partner,
+            title="Existing Sale Draft",
+            property_type=Property.TYPE_HOUSE,
+            listing_type=Property.LISTING_SALE,
+            price=Decimal("12500000.00"),
+            county="Nairobi",
+            town="Roysambu",
+            estate="Garden Estate",
+            address="Existing Draft Road",
+            latitude=Decimal("-1.218000"),
+            longitude=Decimal("36.886000"),
+            bedrooms=4,
+            bathrooms=3,
+            description="A source-owned draft that must be resumable.",
+            status=Property.STATUS_DRAFT,
+        )
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_source_partner_draft_is_identified_as_mine(self):
+        response = self.client.get(
+            "/api/partner/properties/nearby/",
+            {
+                "latitude": "-1.218000",
+                "longitude": "36.886000",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        candidate = next(
+            item
+            for item in response.data["candidates"]
+            if item["id"] == self.property_obj.id
+        )
+
+        self.assertTrue(candidate["is_mine"])
+        self.assertEqual(candidate["status"], Property.STATUS_DRAFT)

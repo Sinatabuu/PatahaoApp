@@ -140,32 +140,20 @@ class _PartnerNewPropertyFormScreenState
 
     final propertyType = _propertyType;
 
-    if (propertyType == null ||
-        propertyType.trim().isEmpty) {
+    if (propertyType == null || propertyType.trim().isEmpty) {
       setState(() {
-        _errorMessage =
-            'Please choose a property type.';
+        _errorMessage = 'Please choose a property type.';
       });
       return;
     }
 
     final price = double.tryParse(
-      _priceController.text
-          .replaceAll(',', '')
-          .trim(),
+      _priceController.text.replaceAll(',', '').trim(),
     );
+    final bedrooms = int.tryParse(_bedroomsController.text.trim());
+    final bathrooms = int.tryParse(_bathroomsController.text.trim());
 
-    final bedrooms = int.tryParse(
-      _bedroomsController.text.trim(),
-    );
-
-    final bathrooms = int.tryParse(
-      _bathroomsController.text.trim(),
-    );
-
-    if (price == null ||
-        bedrooms == null ||
-        bathrooms == null) {
+    if (price == null || bedrooms == null || bathrooms == null) {
       return;
     }
 
@@ -174,10 +162,11 @@ class _PartnerNewPropertyFormScreenState
       _errorMessage = null;
     });
 
+    Property? property;
+    var workspaceFinished = false;
+
     try {
-      final Property property =
-          await PartnerPropertyService.instance
-              .createProperty(
+      property = await PartnerPropertyService.instance.createProperty(
         title: _titleController.text,
         propertyType: propertyType,
         listingType: _listingType,
@@ -195,36 +184,26 @@ class _PartnerNewPropertyFormScreenState
 
       if (!mounted) {
         return;
-        }
+      }
 
-        ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(
+          content: Text(
             'Property "${property.title}" created. '
-            'Now add property photos.',
-            ),
+            'Continue setting it up below.',
+          ),
         ),
-        );
-
-        await Navigator.of(context).push(
-        MaterialPageRoute(
-            builder: (_) => PartnerPropertyWorkspaceScreen(
-            property: property,
-            ),
-        ),
-        );
-
-        if (!mounted) {
-        return;
-        }
-
-        Navigator.of(context).pop<Property>(
-        property,
-        );
-
-      Navigator.of(context).pop<Property>(
-        property,
       );
+
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => PartnerPropertyWorkspaceScreen(
+            property: property!,
+          ),
+        ),
+      );
+
+      workspaceFinished = true;
     } catch (error) {
       if (!mounted) {
         return;
@@ -239,6 +218,10 @@ class _PartnerNewPropertyFormScreenState
           _isSubmitting = false;
         });
       }
+    }
+
+    if (workspaceFinished && mounted && property != null) {
+      Navigator.of(context).pop<Property>(property);
     }
   }
 
