@@ -270,7 +270,7 @@ class _PartnerNewPropertyFormScreenState
         property = await _recoverRecentDraft();
 
         if (property == null) {
-          throw createError;
+          rethrow;
         }
 
         recovered = true;
