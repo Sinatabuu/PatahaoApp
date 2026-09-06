@@ -339,7 +339,7 @@ class NearbyPropertyOwnershipTests(TestCase):
 
     def test_source_partner_draft_is_identified_as_mine(self):
         response = self.client.get(
-            "/api/partner/properties/nearby/",
+            "/api/properties/nearby/",
             {
                 "latitude": "-1.218000",
                 "longitude": "36.886000",
