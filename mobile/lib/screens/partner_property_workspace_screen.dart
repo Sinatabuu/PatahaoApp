@@ -810,22 +810,9 @@ class _PartnerPropertyWorkspaceScreenState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PROPERTY WORKSPACE V2'),
+        title: const Text('Property setup'),
         backgroundColor: const Color(0xFF14532D),
         foregroundColor: Colors.white,
-        actions: [
-          TextButton.icon(
-            onPressed: _openPropertyMandate,
-            icon: const Icon(Icons.handshake_outlined, color: Colors.white),
-            label: const Text(
-              'Mandate',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _isUploading ? null : _pickAndUploadPhoto,
@@ -893,7 +880,7 @@ class _PartnerPropertyWorkspaceScreenState
                           Icon(Icons.assignment_turned_in_outlined),
                           SizedBox(width: 8),
                           Text(
-                            'Commercial Authorization',
+                            'Property authorization',
                             style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
@@ -902,10 +889,12 @@ class _PartnerPropertyWorkspaceScreenState
                         ],
                       ),
                       const SizedBox(height: 10),
-                      const Text(
-                        'Complete the owner details, commission terms, '
-                        'and digital property mandate before submitting '
-                        'this property for verification.',
+                      Text(
+                        property.listingType.toLowerCase() == 'sale'
+                            ? 'Confirm the owner and agreed commission, then '
+                                  'add the three required sale documents.'
+                            : 'Confirm the landlord and agreed commission in '
+                                  'one guided step.',
                       ),
                       const SizedBox(height: 14),
                       SizedBox(
@@ -913,7 +902,11 @@ class _PartnerPropertyWorkspaceScreenState
                         child: FilledButton.icon(
                           onPressed: _openPropertyMandate,
                           icon: const Icon(Icons.handshake_outlined),
-                          label: const Text('Complete Property Mandate'),
+                          label: Text(
+                            property.listingType.toLowerCase() == 'sale'
+                                ? 'Open Sale Setup'
+                                : 'Open Rental Setup',
+                          ),
                         ),
                       ),
                     ],
@@ -944,7 +937,7 @@ class _PartnerPropertyWorkspaceScreenState
                     _isSubmittingForVerification
                         ? 'Submitting...'
                         : coverage.complete
-                        ? 'Submit for Verification'
+                        ? 'Submit Property for Verification'
                         : 'Complete Photo Requirements',
                   ),
                 ),
