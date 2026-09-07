@@ -30,6 +30,7 @@ def complete_authorization_review(
     *,
     mandate_id,
     reviewer,
+    reviewed_document_ids=(),
 ):
     """Complete one staff authorization decision atomically."""
 
@@ -169,6 +170,27 @@ def complete_authorization_review(
             + "."
         )
 
+    acknowledged_document_ids = {
+        int(document_id)
+        for document_id in reviewed_document_ids
+    }
+    unreviewed_documents = [
+        document.get_document_type_display()
+        for document in review_documents
+        if (
+            required_document_types
+            and document.id not in acknowledged_document_ids
+        )
+    ]
+
+    if unreviewed_documents:
+        raise ValidationError(
+            "Open and inspect every current evidence file before "
+            "authorization approval: "
+            + ", ".join(unreviewed_documents)
+            + "."
+        )
+
     if not agreement.is_verified:
         agreement.verify(
             verified_by=reviewer,
@@ -232,6 +254,9 @@ def complete_authorization_review(
                 }
                 for document in review_documents
             ],
+            "reviewed_document_ids": sorted(
+                acknowledged_document_ids
+            ),
             "property_submitted_for_verification": (
                 property_submitted
             ),

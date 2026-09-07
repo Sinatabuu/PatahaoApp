@@ -297,6 +297,19 @@ class PropertyMandateSerializer(serializers.ModelSerializer):
 
 
 
+class AuthorizationReviewCompletionSerializer(
+    serializers.Serializer,
+):
+    reviewed_document_ids = serializers.ListField(
+        child=serializers.IntegerField(
+            min_value=1,
+        ),
+        allow_empty=True,
+        required=False,
+        default=list,
+    )
+
+
 class MandateDocumentUploadSerializer(serializers.Serializer):
     MAX_FILE_SIZE = 10 * 1024 * 1024
 

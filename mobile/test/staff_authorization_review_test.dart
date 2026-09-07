@@ -37,6 +37,7 @@ void main() {
     final evidence = StaffAuthorizationEvidence.fromStep({
       'label': 'Ownership proof',
       'document': {
+        'id': 42,
         'original_filename': 'title-deed.pdf',
         'status_display': 'Under review',
         'file_size': 2048,
@@ -44,10 +45,25 @@ void main() {
       },
     });
 
+    expect(evidence.id, 42);
     expect(evidence.label, 'Ownership proof');
     expect(evidence.filename, 'title-deed.pdf');
     expect(evidence.status, 'Under review');
     expect(evidence.fileSizeLabel, '2.0 KB');
     expect(evidence.shortHash, '1234567890ab');
+    expect(evidence.isProvided, isTrue);
+    expect(evidence.fileExtension, 'pdf');
+  });
+
+  test('marks a missing evidence step as unavailable', () {
+    final evidence = StaffAuthorizationEvidence.fromStep({
+      'label': 'Owner identity',
+      'document': null,
+    });
+
+    expect(evidence.id, 0);
+    expect(evidence.filename, 'Not provided');
+    expect(evidence.isProvided, isFalse);
+    expect(evidence.fileExtension, '');
   });
 }

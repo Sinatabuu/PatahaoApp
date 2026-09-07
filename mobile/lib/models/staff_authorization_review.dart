@@ -90,6 +90,7 @@ class StaffAuthorizationReview {
 
 class StaffAuthorizationEvidence {
   const StaffAuthorizationEvidence({
+    required this.id,
     required this.label,
     required this.filename,
     required this.status,
@@ -97,6 +98,7 @@ class StaffAuthorizationEvidence {
     required this.fileHash,
   });
 
+  final int id;
   final String label;
   final String filename;
   final String status;
@@ -112,6 +114,9 @@ class StaffAuthorizationEvidence {
         : <String, dynamic>{};
 
     return StaffAuthorizationEvidence(
+      id: StaffAuthorizationReview._toInt(
+        document['id'],
+      ),
       label: step['label']?.toString() ?? 'Evidence',
       filename:
           document['original_filename']?.toString() ?? 'Not provided',
@@ -122,6 +127,18 @@ class StaffAuthorizationEvidence {
       ),
       fileHash: document['file_hash']?.toString() ?? '',
     );
+  }
+
+  bool get isProvided => id > 0 && filename != 'Not provided';
+
+  String get fileExtension {
+    final separatorIndex = filename.lastIndexOf('.');
+
+    if (separatorIndex < 0 || separatorIndex == filename.length - 1) {
+      return '';
+    }
+
+    return filename.substring(separatorIndex + 1).toLowerCase();
   }
 
   String get fileSizeLabel {

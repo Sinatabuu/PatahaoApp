@@ -1,12 +1,15 @@
+import mimetypes
+
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.http import Http404
+from django.http import FileResponse, Http404
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.html import format_html
 
 from .models import (
     AuthorizationReview,
@@ -55,6 +58,26 @@ class RejectMandateDocumentForm(forms.Form):
             "Explain specifically why this evidence cannot be accepted. "
             "The reason becomes part of the immutable mandate audit trail."
         ),
+    )
+
+
+def _open_evidence_button(document):
+    if document is None or not document.file:
+        return "No evidence file."
+
+    url = reverse(
+        "admin:mandates_mandatedocument_evidence",
+        args=[
+            document.pk,
+        ],
+    )
+
+    return format_html(
+        (
+            '<a class="button" href="{}" target="_blank" '
+            'rel="noopener">Open evidence</a>'
+        ),
+        url,
     )
 
 
@@ -131,6 +154,7 @@ class MandateDocumentInline(admin.TabularInline):
     fields = [
         "document_type",
         "file",
+        "open_evidence",
         "status",
         "is_current",
         "file_hash",
@@ -144,6 +168,7 @@ class MandateDocumentInline(admin.TabularInline):
     readonly_fields = [
         "document_type",
         "file",
+        "open_evidence",
         "status",
         "is_current",
         "file_hash",
@@ -155,6 +180,15 @@ class MandateDocumentInline(admin.TabularInline):
     ]
 
     can_delete = False
+
+    @admin.display(
+        description="Inspect",
+    )
+    def open_evidence(
+        self,
+        obj,
+    ):
+        return _open_evidence_button(obj)
 
     def has_add_permission(
         self,
@@ -487,6 +521,14 @@ class AuthorizationReviewAdmin(PropertyMandateAdmin):
                 complete_authorization_review(
                     mandate_id=review.id,
                     reviewer=request.user,
+                    reviewed_document_ids=(
+                        review.documents.filter(
+                            is_current=True,
+                        ).values_list(
+                            "id",
+                            flat=True,
+                        )
+                    ),
                 )
                 approved += 1
             except Exception as error:
@@ -514,6 +556,7 @@ class MandateDocumentAdmin(admin.ModelAdmin):
     list_display = [
         "mandate",
         "document_type",
+        "open_evidence",
         "status",
         "is_current",
         "original_filename",
@@ -553,6 +596,15 @@ class MandateDocumentAdmin(admin.ModelAdmin):
 
         custom_urls = [
             path(
+                "<path:object_id>/evidence/",
+                self.admin_site.admin_view(
+                    self.evidence_view,
+                ),
+                name=(
+                    "mandates_mandatedocument_evidence"
+                ),
+            ),
+            path(
                 "<path:object_id>/supersede/",
                 self.admin_site.admin_view(
                     self.supersede_document_view,
@@ -573,6 +625,45 @@ class MandateDocumentAdmin(admin.ModelAdmin):
         ]
 
         return custom_urls + urls
+
+    def evidence_view(
+        self,
+        request,
+        object_id,
+    ):
+        document = self.get_object(
+            request,
+            object_id,
+        )
+
+        if document is None:
+            raise Http404(
+                "Mandate document not found."
+            )
+
+        if not self.has_view_permission(
+            request,
+            document,
+        ):
+            raise PermissionDenied
+
+        filename = (
+            document.original_filename
+            or document.file.name.rsplit("/", 1)[-1]
+        )
+        content_type = (
+            mimetypes.guess_type(filename)[0]
+            or "application/octet-stream"
+        )
+        response = FileResponse(
+            document.file.open("rb"),
+            as_attachment=False,
+            filename=filename,
+            content_type=content_type,
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
     def supersede_document_view(
         self,
@@ -807,6 +898,7 @@ class MandateDocumentAdmin(admin.ModelAdmin):
         obj=None,
     ):
         readonly = [
+            "open_evidence",
             "file_hash",
             "file_size",
             "uploaded_at",
@@ -852,8 +944,6 @@ class MandateDocumentAdmin(admin.ModelAdmin):
             ],
         )
 
-        from django.utils.html import format_html
-
         return format_html(
             '<a class="button" href="{}">Supersede evidence</a>',
             url,
@@ -882,12 +972,19 @@ class MandateDocumentAdmin(admin.ModelAdmin):
             ],
         )
 
-        from django.utils.html import format_html
-
         return format_html(
             '<a class="button" href="{}">Reject evidence</a>',
             url,
         )
+
+    @admin.display(
+        description="Inspect evidence",
+    )
+    def open_evidence(
+        self,
+        obj,
+    ):
+        return _open_evidence_button(obj)
 
     def save_model(
         self,

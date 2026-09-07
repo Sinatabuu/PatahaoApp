@@ -129,6 +129,16 @@ class StaffAuthorizationReviewTests(TestCase):
                 uploaded_by=self.partner_user,
             )
 
+        self.documents = list(
+            self.mandate.documents.filter(
+                is_current=True,
+            ).order_by("id")
+        )
+        self.reviewed_document_ids = [
+            document.id
+            for document in self.documents
+        ]
+
         self.client = APIClient()
 
     def test_submitted_authorization_is_visible_to_staff(self):
@@ -191,7 +201,11 @@ class StaffAuthorizationReviewTests(TestCase):
                     "pk": self.mandate.id,
                 },
             ),
-            {},
+            {
+                "reviewed_document_ids": (
+                    self.reviewed_document_ids
+                ),
+            },
             format="json",
         )
 
@@ -283,7 +297,11 @@ class StaffAuthorizationReviewTests(TestCase):
                     "pk": self.mandate.id,
                 },
             ),
-            {},
+            {
+                "reviewed_document_ids": (
+                    self.reviewed_document_ids
+                ),
+            },
             format="json",
         )
 
@@ -312,6 +330,99 @@ class StaffAuthorizationReviewTests(TestCase):
                 "property_submitted_for_verification"
             ]
         )
+
+    def test_staff_must_acknowledge_every_current_evidence_file(
+        self,
+    ):
+        self.client.force_authenticate(
+            user=self.admin,
+        )
+
+        response = self.client.post(
+            reverse(
+                "mandate-complete-review",
+                kwargs={
+                    "pk": self.mandate.id,
+                },
+            ),
+            {
+                "reviewed_document_ids": (
+                    self.reviewed_document_ids[:-1]
+                ),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+        )
+        self.assertIn(
+            "Open and inspect every current evidence file",
+            str(response.data),
+        )
+
+        self.mandate.refresh_from_db()
+
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists(),
+        )
+
+    def test_staff_can_fetch_evidence_through_protected_endpoint(
+        self,
+    ):
+        document = self.documents[0]
+        self.client.force_authenticate(
+            user=self.admin,
+        )
+
+        response = self.client.get(
+            reverse(
+                "mandate-evidence-file",
+                kwargs={
+                    "pk": self.mandate.id,
+                    "document_id": document.id,
+                },
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/pdf",
+        )
+        self.assertEqual(
+            response["Cache-Control"],
+            "private, no-store",
+        )
+        self.assertEqual(
+            b"".join(response.streaming_content),
+            b"%PDF-1.4\nreview evidence",
+        )
+
+    def test_partner_cannot_fetch_authorization_evidence(self):
+        document = self.documents[0]
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = self.client.get(
+            reverse(
+                "mandate-evidence-file",
+                kwargs={
+                    "pk": self.mandate.id,
+                    "document_id": document.id,
+                },
+            )
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_partner_cannot_complete_authorization_review(self):
         self.client.force_authenticate(
@@ -356,6 +467,60 @@ class StaffAuthorizationReviewTests(TestCase):
         self.assertContains(
             response,
             self.mandate.mandate_number,
+        )
+
+    def test_django_admin_review_displays_open_evidence_controls(self):
+        self.client.force_login(
+            self.admin,
+        )
+
+        response = self.client.get(
+            reverse(
+                "admin:mandates_authorizationreview_change",
+                args=[
+                    self.mandate.id,
+                ],
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Open evidence",
+            count=len(self.documents),
+        )
+
+        for document in self.documents:
+            self.assertContains(
+                response,
+                reverse(
+                    "admin:mandates_mandatedocument_evidence",
+                    args=[
+                        document.id,
+                    ],
+                ),
+            )
+
+    def test_django_admin_evidence_view_requires_staff_login(self):
+        document = self.documents[0]
+        evidence_url = reverse(
+            "admin:mandates_mandatedocument_evidence",
+            args=[
+                document.id,
+            ],
+        )
+
+        response = self.client.get(evidence_url)
+
+        self.assertEqual(response.status_code, 302)
+
+        self.client.force_login(self.admin)
+        response = self.client.get(evidence_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            b"".join(response.streaming_content),
+            b"%PDF-1.4\nreview evidence",
         )
 
     def test_django_admin_can_approve_authorization_review(self):

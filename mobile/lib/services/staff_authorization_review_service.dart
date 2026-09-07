@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -107,9 +108,12 @@ class StaffAuthorizationReviewService {
   }
 
   Future<Map<String, dynamic>> completeReview(
-    int mandateId,
-  ) async {
+    int mandateId, {
+    required Iterable<int> reviewedDocumentIds,
+  }) async {
     _validateId(mandateId);
+
+    final documentIds = reviewedDocumentIds.toSet().toList()..sort();
 
     final uri = Uri.parse(
       '${PropertyService.baseUrl}'
@@ -124,7 +128,11 @@ class StaffAuthorizationReviewService {
               ..._authorizationHeaders(accessToken),
               'Content-Type': 'application/json',
             },
-            body: jsonEncode(<String, dynamic>{}),
+            body: jsonEncode(
+              <String, dynamic>{
+                'reviewed_document_ids': documentIds,
+              },
+            ),
           )
           .timeout(_timeout);
     });
@@ -143,6 +151,63 @@ class StaffAuthorizationReviewService {
     return _requireMap(
       decoded,
       message: 'The authorization approval response was invalid.',
+    );
+  }
+
+  Future<StaffAuthorizationEvidenceFile> fetchEvidence(
+    int mandateId,
+    int documentId, {
+    required String filename,
+  }) async {
+    _validateId(mandateId);
+
+    if (documentId <= 0) {
+      throw ArgumentError.value(
+        documentId,
+        'documentId',
+        'Document ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/mandates/$mandateId/documents/$documentId/file/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .get(
+            uri,
+            headers: _authorizationHeaders(accessToken),
+          )
+          .timeout(_timeout);
+    });
+
+    if (response.statusCode != 200) {
+      final decoded = _decodeResponse(response);
+
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to open this evidence file.',
+        ),
+      );
+    }
+
+    if (response.bodyBytes.isEmpty) {
+      throw const FormatException(
+        'The evidence file was empty.',
+      );
+    }
+
+    final contentType = (
+      response.headers['content-type'] ?? 'application/octet-stream'
+    ).split(';').first.trim().toLowerCase();
+
+    return StaffAuthorizationEvidenceFile(
+      bytes: response.bodyBytes,
+      contentType: contentType,
+      filename: filename,
     );
   }
 
@@ -251,4 +316,18 @@ class StaffAuthorizationReviewService {
       );
     }
   }
+}
+
+class StaffAuthorizationEvidenceFile {
+  const StaffAuthorizationEvidenceFile({
+    required this.bytes,
+    required this.contentType,
+    required this.filename,
+  });
+
+  final Uint8List bytes;
+  final String contentType;
+  final String filename;
+
+  bool get isImage => contentType.startsWith('image/');
 }

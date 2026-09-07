@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:mobile/models/staff_authorization_review.dart';
@@ -78,7 +79,7 @@ class _StaffAuthorizationReviewsScreenState
         return;
       }
 
-      final shouldApprove = await showDialog<bool>(
+      final reviewedDocumentIds = await showDialog<List<int>>(
         context: context,
         builder: (dialogContext) {
           return _AuthorizationReviewDialog(
@@ -88,12 +89,13 @@ class _StaffAuthorizationReviewsScreenState
         },
       );
 
-      if (shouldApprove != true || !mounted) {
+      if (reviewedDocumentIds == null || !mounted) {
         return;
       }
 
       await StaffAuthorizationReviewService.instance.completeReview(
         review.id,
+        reviewedDocumentIds: reviewedDocumentIds,
       );
 
       if (!mounted) {
@@ -389,6 +391,8 @@ class _AuthorizationReviewDialog extends StatefulWidget {
 class _AuthorizationReviewDialogState
     extends State<_AuthorizationReviewDialog> {
   bool _confirmed = false;
+  int? _openingEvidenceId;
+  final Set<int> _openedEvidenceIds = <int>{};
 
   List<StaffAuthorizationEvidence> get _evidence {
     final rawSteps = widget.salePack['steps'];
@@ -415,15 +419,150 @@ class _AuthorizationReviewDialogState
       (
         _evidence.isEmpty ||
         _evidence.any(
-          (item) => item.filename == 'Not provided',
+          (item) => !item.isProvided,
         )
       );
+
+  bool get _allEvidenceOpened =>
+      !_salePackRequired ||
+      (
+        _evidence.isNotEmpty &&
+        _evidence
+            .where((item) => item.isProvided)
+            .every((item) => _openedEvidenceIds.contains(item.id))
+      );
+
+  Future<void> _openEvidence(
+    StaffAuthorizationEvidence evidence,
+  ) async {
+    if (!evidence.isProvided || _openingEvidenceId != null) {
+      return;
+    }
+
+    setState(() {
+      _openingEvidenceId = evidence.id;
+    });
+
+    try {
+      final evidenceFile = await StaffAuthorizationReviewService.instance
+          .fetchEvidence(
+            widget.review.id,
+            evidence.id,
+            filename: evidence.filename,
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      var opened = false;
+
+      if (evidenceFile.isImage) {
+        await precacheImage(
+          MemoryImage(evidenceFile.bytes),
+          context,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        await showDialog<void>(
+          context: context,
+          builder: (imageContext) {
+            return Dialog(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 900,
+                  maxHeight: 760,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      title: Text(evidence.label),
+                      subtitle: Text(evidence.filename),
+                      trailing: IconButton(
+                        tooltip: 'Close',
+                        onPressed: () {
+                          Navigator.of(imageContext).pop();
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Flexible(
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 5,
+                        child: Image.memory(
+                          evidenceFile.bytes,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+        opened = true;
+      } else {
+        final savedPath = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save evidence for inspection',
+          fileName: evidence.filename,
+          bytes: evidenceFile.bytes,
+        );
+        opened = savedPath != null;
+
+        if (opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Evidence saved. Open it with your PDF viewer, '
+                'then return to complete the review.',
+              ),
+            ),
+          );
+        }
+      }
+
+      if (opened && mounted) {
+        setState(() {
+          _openedEvidenceIds.add(evidence.id);
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error
+                  .toString()
+                  .replaceFirst(RegExp(r'^Exception:\s*'), '')
+                  .replaceFirst(RegExp(r'^FormatException:\s*'), '')
+                  .trim(),
+            ),
+            backgroundColor: const Color(0xFFB91C1C),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _openingEvidenceId = null;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final review = widget.review;
     final evidence = _evidence;
-    final canApprove = _confirmed && !_hasMissingEvidence;
+    final canApprove =
+        _confirmed && !_hasMissingEvidence && _allEvidenceOpened;
 
     return AlertDialog(
       title: Text(review.propertyTitle),
@@ -485,7 +624,16 @@ class _AuthorizationReviewDialogState
                 )
               else
                 ...evidence.map(
-                  (item) => _EvidenceRow(evidence: item),
+                  (item) => _EvidenceRow(
+                    evidence: item,
+                    wasOpened: _openedEvidenceIds.contains(item.id),
+                    isOpening: _openingEvidenceId == item.id,
+                    onOpen: item.isProvided
+                        ? () {
+                            _openEvidence(item);
+                          }
+                        : null,
+                  ),
                 ),
               if (_hasMissingEvidence) ...[
                 const SizedBox(height: 10),
@@ -498,6 +646,17 @@ class _AuthorizationReviewDialogState
                   ),
                 ),
               ],
+              if (!_hasMissingEvidence && !_allEvidenceOpened) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  'Open every current evidence file before confirming '
+                  'this authorization.',
+                  style: TextStyle(
+                    color: Color(0xFF92400E),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
               const Divider(height: 28),
               CheckboxListTile(
                 value: _confirmed,
@@ -505,11 +664,11 @@ class _AuthorizationReviewDialogState
                 controlAffinity:
                     ListTileControlAffinity.leading,
                 title: const Text(
-                  'I reviewed the owner authority, commission terms, '
-                  'and current evidence.',
+                  'I opened and inspected the owner authority, '
+                  'commission terms, and every current evidence file.',
                   style: TextStyle(fontSize: 14),
                 ),
-                onChanged: _hasMissingEvidence
+                onChanged: _hasMissingEvidence || !_allEvidenceOpened
                     ? null
                     : (value) {
                         setState(() {
@@ -534,14 +693,16 @@ class _AuthorizationReviewDialogState
       actions: [
         TextButton(
           onPressed: () {
-            Navigator.of(context).pop(false);
+            Navigator.of(context).pop();
           },
           child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: canApprove
               ? () {
-                  Navigator.of(context).pop(true);
+                  final documentIds = _openedEvidenceIds.toList()
+                    ..sort();
+                  Navigator.of(context).pop(documentIds);
                 }
               : null,
           child: const Text('Approve Authorization'),
@@ -570,9 +731,15 @@ class _AuthorizationReviewDialogState
 class _EvidenceRow extends StatelessWidget {
   const _EvidenceRow({
     required this.evidence,
+    required this.wasOpened,
+    required this.isOpening,
+    required this.onOpen,
   });
 
   final StaffAuthorizationEvidence evidence;
+  final bool wasOpened;
+  final bool isOpening;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -621,6 +788,28 @@ class _EvidenceRow extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: isOpening ? null : onOpen,
+            icon: isOpening
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  )
+                : Icon(
+                    wasOpened
+                        ? Icons.check_circle_outline
+                        : Icons.open_in_new,
+                  ),
+            label: Text(
+              isOpening
+                  ? 'Opening...'
+                  : (wasOpened ? 'Opened' : 'View Evidence'),
+            ),
+          ),
         ],
       ),
     );

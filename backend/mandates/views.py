@@ -1,5 +1,8 @@
+import mimetypes
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 
 from rest_framework import parsers, permissions, status, viewsets
@@ -16,6 +19,7 @@ from .models import (
     PropertyMandate,
 )
 from .serializers import (
+    AuthorizationReviewCompletionSerializer,
     MandateDocumentReplacementSerializer,
     MandateDocumentUploadSerializer,
     PartnerMandateDeclarationSerializer,
@@ -399,10 +403,24 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
                 "authorization reviews."
             )
 
+        input_serializer = (
+            AuthorizationReviewCompletionSerializer(
+                data=request.data,
+            )
+        )
+        input_serializer.is_valid(
+            raise_exception=True,
+        )
+
         try:
             mandate = complete_authorization_review(
                 mandate_id=pk,
                 reviewer=request.user,
+                reviewed_document_ids=(
+                    input_serializer.validated_data[
+                        "reviewed_document_ids"
+                    ]
+                ),
             )
         except DjangoValidationError as error:
             raise APIValidationError(
@@ -421,6 +439,53 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=(
+            r"documents/"
+            r"(?P<document_id>[^/.]+)/"
+            r"file"
+        ),
+        url_name="evidence-file",
+    )
+    def evidence_file(
+        self,
+        request,
+        pk=None,
+        document_id=None,
+    ):
+        if not request.user.is_staff:
+            raise PermissionDenied(
+                "Only Pata Hao administrators may inspect "
+                "authorization evidence."
+            )
+
+        mandate = self.get_object()
+        document = get_object_or_404(
+            MandateDocument,
+            pk=document_id,
+            mandate_id=mandate.id,
+        )
+
+        filename = (
+            document.original_filename
+            or document.file.name.rsplit("/", 1)[-1]
+        )
+        content_type = (
+            mimetypes.guess_type(filename)[0]
+            or "application/octet-stream"
+        )
+        response = FileResponse(
+            document.file.open("rb"),
+            as_attachment=False,
+            filename=filename,
+            content_type=content_type,
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @action(
         detail=True,
