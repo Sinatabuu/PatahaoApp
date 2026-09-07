@@ -273,6 +273,14 @@ class AdminOperationsSummaryView(APIView):
             status=Property.STATUS_PENDING,
         ).count()
 
+        pending_authorization_reviews = (
+            PropertyMandate.objects
+            .filter(
+                status=PropertyMandate.Status.UNDER_REVIEW,
+            )
+            .count()
+        )
+
         published_properties = Property.objects.filter(
             status=Property.STATUS_PUBLISHED,
         ).count()
@@ -305,6 +313,9 @@ class AdminOperationsSummaryView(APIView):
         return Response(
             {
                 "pending_reviews": pending_reviews,
+                "pending_authorization_reviews": (
+                    pending_authorization_reviews
+                ),
                 "published_properties": published_properties,
                 "active_partners": active_partners,
                 "todays_viewings": todays_viewings,
