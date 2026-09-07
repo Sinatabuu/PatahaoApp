@@ -412,8 +412,11 @@ class _AuthorizationReviewDialogState
 
   bool get _hasMissingEvidence =>
       _salePackRequired &&
-      _evidence.any(
-        (item) => item.filename == 'Not provided',
+      (
+        _evidence.isEmpty ||
+        _evidence.any(
+          (item) => item.filename == 'Not provided',
+        )
       );
 
   @override
