@@ -473,6 +473,44 @@ class PartnerPropertyService {
     );
   }
 
+  Future<void> deleteDraftProperty(int propertyId) async {
+    _validateId(
+      propertyId,
+      name: 'propertyId',
+      message: 'Property ID must be greater than zero.',
+    );
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/partner/properties/$propertyId/draft/',
+    );
+
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .delete(
+              uri,
+              headers: _authorizationHeaders(accessToken),
+            )
+            .timeout(_timeout);
+      },
+    );
+
+    if (response.statusCode == 200 ||
+        response.statusCode == 204) {
+      return;
+    }
+
+    final dynamic decoded = _decodeResponse(response);
+
+    throw Exception(
+      _extractErrorMessage(
+        decoded,
+        fallback: 'Unable to delete this property draft.',
+      ),
+    );
+  }
+
   Future<Map<String, dynamic>> findNearbyProperties({
     required double latitude,
     required double longitude,
