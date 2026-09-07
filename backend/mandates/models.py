@@ -332,6 +332,21 @@ class PropertyMandate(models.Model):
         return f"{self.mandate_number} — {self.property.title}"
 
 
+class AuthorizationReview(PropertyMandate):
+    """
+    Staff work queue for mandates submitted by partners.
+
+    This proxy creates no duplicate data or database table. It gives
+    Django Admin a clear Authorization Reviews section backed by the
+    authoritative PropertyMandate records.
+    """
+
+    class Meta:
+        proxy = True
+        verbose_name = "Authorization review"
+        verbose_name_plural = "Authorization reviews"
+
+
 class MandateDocument(models.Model):
     class DocumentType(models.TextChoices):
         SIGNED_MANDATE = "signed_mandate", "Signed property mandate"
