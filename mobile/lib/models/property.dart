@@ -109,6 +109,7 @@ class Property {
   final int bathrooms;
   final String description;
   final String status;
+  final bool canDeleteDraft;
   final String verificationReturnReason;
   final String trustBadge;
   final bool isSuccessBroadcastActive;
@@ -142,6 +143,7 @@ class Property {
     required this.photos,
     required this.videos,
     required this.amenities,
+    this.canDeleteDraft = false,
     this.isSuccessBroadcastActive = false,
     this.successBadge = '',
     this.transactionCompletedAt,
@@ -172,6 +174,7 @@ class Property {
       bathrooms: _toInt(json['bathrooms']),
       description: json['description']?.toString() ?? '',
       status: json['status']?.toString() ?? '',
+      canDeleteDraft: json['can_delete_draft'] == true,
       verificationReturnReason:
           json['verification_return_reason']?.toString() ?? '',
       trustBadge: json['trust_badge']?.toString() ?? 'none',
