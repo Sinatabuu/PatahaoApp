@@ -3,11 +3,15 @@ from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
+
+from commissions.models import CommissionAgreement
 
 from mandates.models import (
     MandateDocument,
     MandateEvent,
     PropertyMandate,
+    PropertyOwner,
 )
 
 
@@ -16,6 +20,212 @@ class PublicationReadiness:
     allowed: bool
     reasons: tuple[str, ...]
     mandate: PropertyMandate | None = None
+
+
+@transaction.atomic
+def complete_authorization_review(
+    *,
+    mandate_id,
+    reviewer,
+):
+    """Complete one staff authorization decision atomically."""
+
+    if reviewer is None or not reviewer.is_staff:
+        raise ValidationError(
+            "Only a Pata Hao administrator may complete "
+            "authorization reviews."
+        )
+
+    mandate = (
+        PropertyMandate.objects
+        .select_for_update()
+        .select_related(
+            "property",
+            "owner",
+            "partner",
+            "partner__user",
+            "commission_agreement",
+            "commission_agreement__accepted_by",
+            "commission_agreement__verified_by",
+            "declared_by",
+            "approved_by",
+        )
+        .get(pk=mandate_id)
+    )
+
+    if mandate.status == PropertyMandate.Status.APPROVED:
+        return mandate
+
+    if mandate.status != PropertyMandate.Status.UNDER_REVIEW:
+        raise ValidationError(
+            "Only an authorization submitted for review "
+            "can be approved."
+        )
+
+    if mandate.commission_agreement_id is None:
+        raise ValidationError(
+            "A commission agreement is required before "
+            "authorization approval."
+        )
+
+    agreement = (
+        CommissionAgreement.objects
+        .select_for_update()
+        .get(pk=mandate.commission_agreement_id)
+    )
+
+    owner = (
+        PropertyOwner.objects
+        .select_for_update()
+        .get(pk=mandate.owner_id)
+    )
+
+    if not owner.is_active:
+        raise ValidationError(
+            "The property owner record is inactive and "
+            "cannot be approved."
+        )
+
+    if owner.verification_status in {
+        PropertyOwner.VerificationStatus.REJECTED,
+        PropertyOwner.VerificationStatus.SUSPENDED,
+    }:
+        raise ValidationError(
+            "The property owner record must be resolved before "
+            "this authorization can be approved."
+        )
+
+    current_documents = list(
+        MandateDocument.objects
+        .select_for_update()
+        .filter(
+            mandate=mandate,
+            is_current=True,
+        )
+        .order_by("document_type", "id")
+    )
+
+    required_document_types = set()
+
+    if (
+        mandate.property.listing_type
+        == mandate.property.LISTING_SALE
+    ):
+        required_document_types = {
+            MandateDocument.DocumentType.OWNER_ID,
+            MandateDocument.DocumentType.OWNERSHIP_PROOF,
+            MandateDocument.DocumentType.SIGNED_MANDATE,
+        }
+
+        documents_by_type = {
+            document.document_type: document
+            for document in current_documents
+        }
+
+        missing_types = (
+            required_document_types
+            - set(documents_by_type)
+        )
+
+        if missing_types:
+            missing_labels = [
+                str(
+                    MandateDocument.DocumentType(
+                        document_type,
+                    ).label
+                )
+                for document_type in sorted(missing_types)
+            ]
+
+            raise ValidationError(
+                "The Sale Mandate Pack is incomplete: "
+                + ", ".join(missing_labels)
+                + "."
+            )
+
+    review_documents = [
+        document
+        for document in current_documents
+        if (
+            not required_document_types
+            or document.document_type
+            in required_document_types
+        )
+    ]
+
+    rejected_documents = [
+        document.get_document_type_display()
+        for document in review_documents
+        if document.status == MandateDocument.Status.REJECTED
+    ]
+
+    if rejected_documents:
+        raise ValidationError(
+            "Rejected evidence must be replaced before approval: "
+            + ", ".join(rejected_documents)
+            + "."
+        )
+
+    if not agreement.is_verified:
+        agreement.verify(
+            verified_by=reviewer,
+        )
+        agreement.save()
+
+    if not agreement.is_locked:
+        agreement.lock()
+        agreement.save()
+
+    if not owner.is_verified:
+        owner.verification_status = (
+            PropertyOwner.VerificationStatus.VERIFIED
+        )
+        owner.verified_by = reviewer
+        owner.verified_at = timezone.now()
+        owner.verification_notes = (
+            "Verified through the Pata Hao authorization "
+            "review queue."
+        )
+        owner.save()
+
+    for document in review_documents:
+        if document.status != MandateDocument.Status.APPROVED:
+            document.approve(
+                reviewed_by=reviewer,
+            )
+
+    mandate.commission_agreement = agreement
+    mandate.owner = owner
+    mandate.approve(
+        approved_by=reviewer,
+    )
+    mandate.save()
+
+    MandateEvent.objects.create(
+        mandate=mandate,
+        action="authorization_review_completed",
+        actor=reviewer,
+        notes=(
+            "Pata Hao completed the authorization review and "
+            "approved the owner, commercial terms, evidence, "
+            "and digital mandate."
+        ),
+        metadata={
+            "owner_id": owner.id,
+            "commission_agreement_id": agreement.id,
+            "approved_documents": [
+                {
+                    "id": document.id,
+                    "document_type": document.document_type,
+                    "file_hash": document.file_hash,
+                }
+                for document in review_documents
+            ],
+        },
+    )
+
+    mandate.refresh_from_db()
+    return mandate
 
 
 
