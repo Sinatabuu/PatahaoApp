@@ -362,6 +362,22 @@ class NearbyPropertyOwnershipTests(TestCase):
             self.property_obj.created_at.isoformat(),
         )
 
+        inventory_response = self.client.get(
+            "/api/partner/properties/",
+        )
+
+        self.assertEqual(inventory_response.status_code, 200)
+
+        inventory_property = next(
+            item
+            for item in inventory_response.data
+            if item["id"] == self.property_obj.id
+        )
+
+        self.assertTrue(
+            inventory_property["can_delete_draft"],
+        )
+
     def test_source_partner_can_delete_own_draft(self):
         response = self.client.delete(
             (
