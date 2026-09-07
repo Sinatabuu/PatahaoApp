@@ -50,6 +50,7 @@ class _PartnerPropertyWorkspaceScreenState
     extends State<PartnerPropertyWorkspaceScreen> {
   final ImagePicker _imagePicker = ImagePicker();
 
+  late Property _property;
   List<PartnerPropertyPhoto> _photos = const [];
 
   bool _isLoading = true;
@@ -61,7 +62,7 @@ class _PartnerPropertyWorkspaceScreenState
   Map<String, dynamic> _mandate = <String, dynamic>{};
   Map<String, dynamic> _salePack = <String, dynamic>{};
 
-  Property get property => widget.property;
+  Property get property => _property;
 
   bool get _isSaleProperty => property.listingType.toLowerCase() == 'sale';
 
@@ -95,6 +96,7 @@ class _PartnerPropertyWorkspaceScreenState
   @override
   void initState() {
     super.initState();
+    _property = widget.property;
     _loadPhotos();
   }
 
@@ -105,6 +107,8 @@ class _PartnerPropertyWorkspaceScreenState
     });
 
     try {
+      final currentProperty = await PartnerPropertyService.instance
+          .fetchMyProperty(property.id);
       final photos = await PartnerPropertyService.instance.fetchPropertyPhotos(
         property.id,
       );
@@ -137,6 +141,7 @@ class _PartnerPropertyWorkspaceScreenState
       }
 
       setState(() {
+        _property = currentProperty;
         _photos = photos;
         _mandate = mandate;
         _salePack = salePack;
@@ -850,8 +855,20 @@ class _PartnerPropertyWorkspaceScreenState
   @override
   Widget build(BuildContext context) {
     final coverage = _photoCoverage;
-    final canSubmitProperty =
-        coverage.complete && _authorizationReadyForPropertyReview;
+
+    VoidCallback? primaryAction;
+
+    if (!_isSubmittingForVerification) {
+      if (!coverage.complete) {
+        primaryAction = () {
+          _showCoverageRequirements(coverage);
+        };
+      } else if (_authorizationReadyForPropertyReview) {
+        primaryAction = _submitForVerification;
+      } else if (!_authorizationUnderReview) {
+        primaryAction = _openPropertyMandate;
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -965,23 +982,22 @@ class _PartnerPropertyWorkspaceScreenState
                             : 'Confirm the landlord and agreed commission in '
                                   'one guided step.',
                       ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _openPropertyMandate,
-                          icon: const Icon(Icons.arrow_forward),
-                          label: Text(
-                            _authorizationReadyForPropertyReview
-                                ? 'View Authorization'
-                                : _authorizationUnderReview
-                                ? 'View Review Status'
-                                : _isSaleProperty
-                                ? 'Open Sale Setup'
-                                : 'Open Rental Setup',
+                      if (!_authorizationReadyForPropertyReview &&
+                          !_authorizationUnderReview) ...[
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _openPropertyMandate,
+                            icon: const Icon(Icons.arrow_forward),
+                            label: Text(
+                              _isSaleProperty
+                                  ? 'Complete Sale Authorization'
+                                  : 'Complete Rental Authorization',
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -992,9 +1008,7 @@ class _PartnerPropertyWorkspaceScreenState
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: canSubmitProperty && !_isSubmittingForVerification
-                      ? _submitForVerification
-                      : null,
+                  onPressed: primaryAction,
                   icon: _isSubmittingForVerification
                       ? const SizedBox(
                           width: 18,
@@ -1012,10 +1026,14 @@ class _PartnerPropertyWorkspaceScreenState
                     _isSubmittingForVerification
                         ? 'Submitting...'
                         : !coverage.complete
-                        ? 'Complete Photo Requirements'
+                        ? coverage.missingPhotoLabels.length == 1
+                              ? 'Add ${coverage.missingPhotoLabels.first} Photo'
+                              : 'Complete Photo Requirements'
                         : !_authorizationReadyForPropertyReview
-                        ? 'Awaiting Authorization Approval'
-                        : 'Submit Property for Verification',
+                        ? _authorizationUnderReview
+                              ? 'Authorization Review in Progress'
+                              : 'Complete Property Authorization'
+                        : 'Send Property to Pata Hao',
                   ),
                 ),
               ),
@@ -1024,12 +1042,53 @@ class _PartnerPropertyWorkspaceScreenState
 
               Text(
                 !coverage.complete
-                    ? 'Complete the photo checklist to continue.'
+                    ? coverage.missingPhotoLabels.isNotEmpty
+                          ? 'Still needed: '
+                                '${coverage.missingPhotoLabels.join(', ')}.'
+                          : 'Complete the photo checklist to continue.'
                     : !_authorizationReadyForPropertyReview
                     ? 'Property submission unlocks automatically after '
                           'Pata Hao approves the authorization and documents.'
                     : 'Photos and authorization are ready.',
                 textAlign: TextAlign.center,
+              ),
+            ],
+
+            if (property.status == 'pending') ...[
+              const SizedBox(height: 16),
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.schedule_send_outlined,
+                        color: Color(0xFF166534),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Sent to Pata Hao',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              'This property is awaiting staff review. '
+                              'No further submission is needed.',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
 
@@ -1049,7 +1108,10 @@ class _PartnerPropertyWorkspaceScreenState
 
             if (!_isLoading) ...[
               const SizedBox(height: 16),
-              _PhotoCoverageSummary(coverage: coverage),
+              _PhotoCoverageSummary(
+                coverage: coverage,
+                onAddPhoto: _pickAndUploadPhoto,
+              ),
             ],
 
             if (!_isLoading && _photos.isNotEmpty) ...[
@@ -1191,18 +1253,27 @@ class _StatusChip extends StatelessWidget {
 }
 
 class _PhotoCoverageSummary extends StatelessWidget {
-  const _PhotoCoverageSummary({required this.coverage});
+  const _PhotoCoverageSummary({
+    required this.coverage,
+    required this.onAddPhoto,
+  });
 
   final PartnerPropertyPhotoCoverage coverage;
+  final VoidCallback onAddPhoto;
 
   @override
   Widget build(BuildContext context) {
     final color = coverage.complete
         ? const Color(0xFF166534)
         : const Color(0xFFB45309);
-    final progress = (coverage.photoCount / coverage.minimumPhotoCount)
+    final photoProgress = (coverage.photoCount / coverage.minimumPhotoCount)
         .clamp(0.0, 1.0)
         .toDouble();
+    final viewProgress = coverage.requiredViewCount == 0
+        ? 1.0
+        : (coverage.coveredRequiredViewCount / coverage.requiredViewCount)
+              .clamp(0.0, 1.0)
+              .toDouble();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1229,19 +1300,24 @@ class _PhotoCoverageSummary extends StatelessWidget {
                   style: TextStyle(color: color, fontWeight: FontWeight.w700),
                 ),
               ),
-              Text(
-                '${coverage.photoCount}/${coverage.minimumPhotoCount}',
-                style: TextStyle(color: color, fontWeight: FontWeight.w700),
-              ),
             ],
           ),
-          const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: progress,
-            color: color,
-            backgroundColor: color.withValues(alpha: 0.16),
+          const SizedBox(height: 16),
+          _CoverageProgressRow(
+            label: 'Photos uploaded',
+            value: '${coverage.photoCount}/${coverage.minimumPhotoCount}',
+            progress: photoProgress,
+            complete: coverage.hasMinimumPhotos,
           ),
           const SizedBox(height: 12),
+          _CoverageProgressRow(
+            label: 'Required views',
+            value:
+                '${coverage.coveredRequiredViewCount}/${coverage.requiredViewCount}',
+            progress: viewProgress,
+            complete: coverage.missingPhotoTypes.isEmpty,
+          ),
+          const SizedBox(height: 14),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1271,8 +1347,79 @@ class _PhotoCoverageSummary extends StatelessWidget {
               'photo${coverage.minimumPhotoCount - coverage.photoCount == 1 ? '' : 's'}.',
             ),
           ],
+          if (coverage.missingPhotoLabels.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Still needed: ${coverage.missingPhotoLabels.join(', ')}.',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Add the missing view, or open an existing photo and change '
+              'its category if it already shows that area.',
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onAddPhoto,
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+                label: Text(
+                  coverage.missingPhotoLabels.length == 1
+                      ? 'Add ${coverage.missingPhotoLabels.first} Photo'
+                      : 'Add Missing Property View',
+                ),
+              ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _CoverageProgressRow extends StatelessWidget {
+  const _CoverageProgressRow({
+    required this.label,
+    required this.value,
+    required this.progress,
+    required this.complete,
+  });
+
+  final String label;
+  final String value;
+  final double progress;
+  final bool complete;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = complete
+        ? const Color(0xFF166534)
+        : const Color(0xFFB45309);
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(
+              value,
+              style: TextStyle(color: color, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        LinearProgressIndicator(
+          value: progress,
+          color: color,
+          backgroundColor: color.withValues(alpha: 0.16),
+        ),
+      ],
     );
   }
 }

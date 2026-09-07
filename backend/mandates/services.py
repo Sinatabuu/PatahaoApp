@@ -6,6 +6,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from commissions.models import CommissionAgreement
+from properties.service import (
+    submit_property_for_verification_if_ready,
+)
 
 from mandates.models import (
     MandateDocument,
@@ -201,6 +204,14 @@ def complete_authorization_review(
     )
     mandate.save()
 
+    property_readiness, property_submitted = (
+        submit_property_for_verification_if_ready(
+            mandate.property,
+            actor=reviewer,
+            automatic=True,
+        )
+    )
+
     MandateEvent.objects.create(
         mandate=mandate,
         action="authorization_review_completed",
@@ -221,6 +232,20 @@ def complete_authorization_review(
                 }
                 for document in review_documents
             ],
+            "property_submitted_for_verification": (
+                property_submitted
+            ),
+            "property_submission_missing_fields": list(
+                property_readiness.missing_fields
+            ),
+            "property_submission_missing_photo_types": (
+                property_readiness.photo_coverage[
+                    "missing_photo_types"
+                ]
+            ),
+            "property_submission_has_cover": (
+                property_readiness.has_cover
+            ),
         },
     )
 

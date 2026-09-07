@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import User
 from commissions.models import CommissionAgreement
+from core.models import ActivityLog
 from mandates.models import (
     MandateDocument,
     MandateEvent,
@@ -16,7 +17,14 @@ from mandates.models import (
     PropertyOwner,
 )
 from partners.models import Partner
-from properties.models import Property
+from properties.models import Property, PropertyPhoto
+from properties.photo_coverage import (
+    PHOTO_TYPE_BATHROOM,
+    PHOTO_TYPE_BEDROOM,
+    PHOTO_TYPE_EXTERIOR,
+    PHOTO_TYPE_KITCHEN,
+    PHOTO_TYPE_LIVING_AREA,
+)
 
 
 class StaffAuthorizationReviewTests(TestCase):
@@ -195,6 +203,7 @@ class StaffAuthorizationReviewTests(TestCase):
         self.mandate.refresh_from_db()
         self.owner.refresh_from_db()
         self.agreement.refresh_from_db()
+        self.property.refresh_from_db()
 
         self.assertEqual(
             self.mandate.status,
@@ -218,6 +227,90 @@ class StaffAuthorizationReviewTests(TestCase):
                 mandate=self.mandate,
                 action="authorization_review_completed",
             ).exists(),
+        )
+        self.assertEqual(
+            self.property.status,
+            Property.STATUS_DRAFT,
+        )
+
+    def test_complete_property_enters_review_after_authorization_approval(
+        self,
+    ):
+        self.property.latitude = Decimal("-1.2180000")
+        self.property.longitude = Decimal("36.8860000")
+        self.property.bedrooms = 3
+        self.property.bathrooms = 2
+        self.property.save()
+
+        photo_types = [
+            PHOTO_TYPE_EXTERIOR,
+            PHOTO_TYPE_LIVING_AREA,
+            PHOTO_TYPE_KITCHEN,
+            PHOTO_TYPE_BEDROOM,
+            PHOTO_TYPE_BATHROOM,
+        ]
+
+        PropertyPhoto.objects.bulk_create(
+            [
+                PropertyPhoto(
+                    property=self.property,
+                    image=(
+                        "property_photos/authorization-"
+                        f"{index}.jpg"
+                    ),
+                    photo_type=photo_type,
+                    is_cover=index == 0,
+                    image_width=1600,
+                    image_height=900,
+                    file_size=250000,
+                    quality_status=(
+                        PropertyPhoto.QualityStatus.ACCEPTED
+                    ),
+                    quality_score=100,
+                )
+                for index, photo_type in enumerate(photo_types)
+            ]
+        )
+
+        self.client.force_authenticate(
+            user=self.admin,
+        )
+
+        response = self.client.post(
+            reverse(
+                "mandate-complete-review",
+                kwargs={
+                    "pk": self.mandate.id,
+                },
+            ),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.property.refresh_from_db()
+
+        self.assertEqual(
+            self.property.status,
+            Property.STATUS_PENDING,
+        )
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                action="property_submitted_for_verification",
+                entity_type="Property",
+                entity_id=str(self.property.id),
+            ).exists(),
+        )
+
+        event = MandateEvent.objects.get(
+            mandate=self.mandate,
+            action="authorization_review_completed",
+        )
+        self.assertTrue(
+            event.metadata[
+                "property_submitted_for_verification"
+            ]
         )
 
     def test_partner_cannot_complete_authorization_review(self):

@@ -88,6 +88,8 @@ void main() {
       expect(coverage.photoCount, 5);
       expect(coverage.hasMinimumPhotos, isTrue);
       expect(coverage.hasCover, isTrue);
+      expect(coverage.coveredRequiredViewCount, 5);
+      expect(coverage.requiredViewCount, 5);
       expect(coverage.missingPhotoTypes, isEmpty);
       expect(coverage.complete, isTrue);
     });
@@ -112,6 +114,8 @@ void main() {
 
       expect(coverage.hasMinimumPhotos, isTrue);
       expect(coverage.hasCover, isTrue);
+      expect(coverage.coveredRequiredViewCount, 0);
+      expect(coverage.requiredViewCount, 3);
       expect(
         coverage.missingPhotoLabels,
         [
@@ -120,6 +124,41 @@ void main() {
           'Access or entrance',
         ],
       );
+      expect(coverage.complete, isFalse);
+    });
+
+    test('photo quantity does not hide a missing required view', () {
+      final photoTypes = [
+        PartnerPropertyPhotoType.exterior,
+        PartnerPropertyPhotoType.livingArea,
+        PartnerPropertyPhotoType.kitchen,
+        PartnerPropertyPhotoType.bathroom,
+        PartnerPropertyPhotoType.other,
+      ];
+
+      final photos = [
+        for (var index = 0; index < photoTypes.length; index++)
+          PartnerPropertyPhoto(
+            id: index + 1,
+            imageUrl: '/photo-$index.jpg',
+            caption: '',
+            isCover: index == 0,
+            photoType: photoTypes[index],
+          ),
+      ];
+
+      final coverage = PartnerPropertyPhotoCoverage.evaluate(
+        propertyType: 'house',
+        bedrooms: 3,
+        bathrooms: 2,
+        photos: photos,
+      );
+
+      expect(coverage.photoCount, 5);
+      expect(coverage.hasMinimumPhotos, isTrue);
+      expect(coverage.coveredRequiredViewCount, 4);
+      expect(coverage.requiredViewCount, 5);
+      expect(coverage.missingPhotoLabels, ['Bedroom']);
       expect(coverage.complete, isFalse);
     });
   });

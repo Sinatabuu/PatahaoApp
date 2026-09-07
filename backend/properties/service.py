@@ -1,6 +1,110 @@
 from dataclasses import dataclass, field
 
 from properties.models import Property
+from properties.photo_coverage import evaluate_photo_coverage
+
+
+@dataclass(frozen=True)
+class PropertySubmissionReadiness:
+    ready: bool
+    missing_fields: tuple[str, ...]
+    photo_coverage: dict
+    has_cover: bool
+
+
+def evaluate_property_submission_readiness(
+    property_obj: Property,
+) -> PropertySubmissionReadiness:
+    """Evaluate the partner-to-staff property review handoff."""
+
+    required_fields = {
+        "title": property_obj.title.strip(),
+        "property type": property_obj.property_type,
+        "listing type": property_obj.listing_type,
+        "price": (
+            property_obj.price is not None
+            and property_obj.price > 0
+        ),
+        "county": property_obj.county.strip(),
+        "town": property_obj.town.strip(),
+        "description": property_obj.description.strip(),
+        "GPS latitude": property_obj.latitude is not None,
+        "GPS longitude": property_obj.longitude is not None,
+    }
+
+    missing_fields = tuple(
+        label
+        for label, value in required_fields.items()
+        if not value
+    )
+
+    photos = list(property_obj.photos.all())
+    photo_coverage = evaluate_photo_coverage(
+        property_obj,
+        photos,
+    )
+    has_cover = any(photo.is_cover for photo in photos)
+
+    return PropertySubmissionReadiness(
+        ready=(
+            not missing_fields
+            and photo_coverage["complete"]
+            and has_cover
+        ),
+        missing_fields=missing_fields,
+        photo_coverage=photo_coverage,
+        has_cover=has_cover,
+    )
+
+
+def submit_property_for_verification_if_ready(
+    property_obj: Property,
+    *,
+    actor,
+    automatic=False,
+) -> tuple[PropertySubmissionReadiness, bool]:
+    """Move a complete draft into staff review without bypassing checks."""
+
+    readiness = evaluate_property_submission_readiness(
+        property_obj,
+    )
+
+    if (
+        property_obj.status != Property.STATUS_DRAFT
+        or not readiness.ready
+    ):
+        return readiness, False
+
+    property_obj.status = Property.STATUS_PENDING
+    property_obj.save(
+        update_fields=[
+            "status",
+            "updated_at",
+        ]
+    )
+
+    from core.models import ActivityLog
+
+    if automatic:
+        description = (
+            f"{property_obj.title} automatically entered property "
+            "verification after Pata Hao approved its authorization."
+        )
+    else:
+        description = (
+            f"{property_obj.partner} submitted property "
+            f"{property_obj.title} for verification."
+        )
+
+    ActivityLog.objects.create(
+        actor=actor,
+        action="property_submitted_for_verification",
+        entity_type="Property",
+        entity_id=str(property_obj.id),
+        description=description,
+    )
+
+    return readiness, True
 
 
 @dataclass

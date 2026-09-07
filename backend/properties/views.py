@@ -14,13 +14,16 @@ from .models import (
     PropertyPhoto,
     PropertyFavorite
 )
-from .photo_coverage import evaluate_photo_coverage
 from .serializers import (
     PartnerPropertySerializer,
     PartnerPropertyPhotoSerializer,
     PropertyPhotoSerializer,
     PropertyPhotoUploadSerializer,
     PropertySerializer,
+)
+from .service import (
+    evaluate_property_submission_readiness,
+    submit_property_for_verification_if_ready,
 )
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -774,34 +777,10 @@ class PartnerPropertyViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        missing_fields = []
-
-        if not property_obj.title.strip():
-            missing_fields.append("title")
-
-        if not property_obj.property_type:
-            missing_fields.append("property type")
-
-        if not property_obj.listing_type:
-            missing_fields.append("listing type")
-
-        if property_obj.price is None or property_obj.price <= 0:
-            missing_fields.append("price")
-
-        if not property_obj.county.strip():
-            missing_fields.append("county")
-
-        if not property_obj.town.strip():
-            missing_fields.append("town")
-
-        if not property_obj.description.strip():
-            missing_fields.append("description")
-
-        if property_obj.latitude is None:
-            missing_fields.append("GPS latitude")
-
-        if property_obj.longitude is None:
-            missing_fields.append("GPS longitude")
+        readiness = evaluate_property_submission_readiness(
+            property_obj,
+        )
+        missing_fields = list(readiness.missing_fields)
 
         if missing_fields:
             return Response(
@@ -815,16 +794,7 @@ class PartnerPropertyViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        photos = list(
-            PropertyPhoto.objects.filter(
-                property=property_obj,
-            )
-        )
-
-        coverage = evaluate_photo_coverage(
-            property_obj,
-            photos,
-        )
+        coverage = readiness.photo_coverage
 
         photo_count = coverage["photo_count"]
 
@@ -852,16 +822,7 @@ class PartnerPropertyViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cover_photo = next(
-            (
-                photo
-                for photo in photos
-                if photo.is_cover
-            ),
-            None,
-        )
-
-        if cover_photo is None:
+        if not readiness.has_cover:
             return Response(
                 {
                     "detail": (
@@ -874,26 +835,25 @@ class PartnerPropertyViewSet(
             )
 
 
-        property_obj.status = Property.STATUS_PENDING
-
-        property_obj.save(
-            update_fields=[
-                "status",
-
-                "updated_at",
-            ]
-        )
-
-        ActivityLog.objects.create(
+        _, submitted = submit_property_for_verification_if_ready(
+            property_obj,
             actor=request.user,
-            action="property_submitted_for_verification",
-            entity_type="Property",
-            entity_id=str(property_obj.id),
-            description=(
-                f"{partner} submitted property "
-                f"{property_obj.title} for verification."
-            ),
         )
+
+        if not submitted:
+            return Response(
+                {
+                    "detail": (
+                        "The property is not ready for verification."
+                    ),
+                    **coverage,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        cover_photo = property_obj.photos.filter(
+            is_cover=True,
+        ).first()
 
         return Response(
             {

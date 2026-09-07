@@ -19,6 +19,12 @@ class PartnerPropertyPhotoCoverage {
 
   bool get hasMinimumPhotos => photoCount >= minimumPhotoCount;
 
+  int get requiredViewCount => requiredPhotoTypes.length;
+
+  int get coveredRequiredViewCount {
+    return requiredViewCount - missingPhotoTypes.length;
+  }
+
   bool get complete {
     return hasMinimumPhotos && hasCover && missingPhotoTypes.isEmpty;
   }
