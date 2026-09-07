@@ -9,12 +9,14 @@ from django.urls import path, reverse
 from django.utils import timezone
 
 from .models import (
+    AuthorizationReview,
     MandateDocument,
     MandateEvent,
     PropertyMandate,
     PropertyOwner,
 )
 from .services import (
+    complete_authorization_review,
     reject_mandate_document,
     supersede_mandate_document,
 )
@@ -419,6 +421,91 @@ class PropertyMandateAdmin(admin.ModelAdmin):
                 request,
                 message,
                 level="error",
+            )
+
+
+@admin.register(AuthorizationReview)
+class AuthorizationReviewAdmin(PropertyMandateAdmin):
+    """Dedicated Django Admin queue for partner submissions."""
+
+    list_display = [
+        "submitted_at",
+        "property",
+        "owner",
+        "partner",
+        "mandate_number",
+        "authorization_method",
+    ]
+
+    list_filter = [
+        "authorization_method",
+        "owner__verification_status",
+        "submitted_at",
+    ]
+
+    ordering = [
+        "submitted_at",
+        "id",
+    ]
+
+    actions = [
+        "complete_selected_authorization_reviews",
+    ]
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .filter(
+                status=PropertyMandate.Status.UNDER_REVIEW,
+            )
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False
+
+    @admin.action(
+        description="Approve selected authorization reviews",
+    )
+    def complete_selected_authorization_reviews(
+        self,
+        request,
+        queryset,
+    ):
+        approved = 0
+        failed = []
+
+        for review in queryset:
+            try:
+                complete_authorization_review(
+                    mandate_id=review.id,
+                    reviewer=request.user,
+                )
+                approved += 1
+            except Exception as error:
+                failed.append(
+                    f"{review.mandate_number}: {error}"
+                )
+
+        if approved:
+            self.message_user(
+                request,
+                f"{approved} authorization review(s) approved.",
+                level=messages.SUCCESS,
+            )
+
+        for message in failed:
+            self.message_user(
+                request,
+                message,
+                level=messages.ERROR,
             )
 
 
