@@ -1,0 +1,241 @@
+from decimal import Decimal
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from rest_framework.test import APIClient
+
+from accounts.models import User
+from commissions.models import CommissionAgreement
+from mandates.models import (
+    MandateDocument,
+    MandateEvent,
+    PropertyMandate,
+    PropertyOwner,
+)
+from partners.models import Partner
+from properties.models import Property
+
+
+class StaffAuthorizationReviewTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="authorization_admin",
+            email="authorization-admin@example.com",
+            password="test-pass-123",
+            role=User.ROLE_ADMIN,
+            is_staff=True,
+        )
+
+        self.partner_user = User.objects.create_user(
+            username="authorization_partner",
+            email="authorization-partner@example.com",
+            password="test-pass-123",
+            role=User.ROLE_PARTNER,
+        )
+
+        self.partner = Partner.objects.create(
+            user=self.partner_user,
+            business_name="Authorization Partner",
+            verification_status=Partner.STATUS_APPROVED,
+            verified_by=self.admin,
+            verified_at=timezone.now(),
+        )
+
+        self.property = Property.objects.create(
+            partner=self.partner,
+            title="Authorization Review Home",
+            property_type=Property.TYPE_HOUSE,
+            listing_type=Property.LISTING_SALE,
+            price=Decimal("12500000.00"),
+            county="Nairobi",
+            town="Nairobi",
+            description="A sale listing waiting for authorization review.",
+            status=Property.STATUS_DRAFT,
+        )
+
+        self.agreement = CommissionAgreement.objects.create(
+            property=self.property,
+            owner_name="Authorization Owner",
+            owner_phone_number="0700000099",
+            commission_method=(
+                CommissionAgreement.CommissionMethod.PERCENTAGE
+            ),
+            commission_basis=(
+                CommissionAgreement.CommissionBasis.SALE_PRICE
+            ),
+            commission_rate=Decimal("3.000"),
+            transaction_value=self.property.price,
+            created_by=self.partner_user,
+        )
+        self.agreement.accept_by_partner(
+            user=self.partner_user,
+        )
+        self.agreement.save()
+
+        self.owner = PropertyOwner.objects.create(
+            owner_type=PropertyOwner.OwnerType.INDIVIDUAL,
+            legal_name="Authorization Owner",
+            phone_number="0700000099",
+            created_by=self.partner_user,
+        )
+
+        self.mandate = PropertyMandate.objects.create(
+            property=self.property,
+            owner=self.owner,
+            partner=self.partner,
+            commission_agreement=self.agreement,
+            authorization_method=(
+                PropertyMandate.AuthorizationMethod.WRITTEN
+            ),
+            owner_authority_confirmed=True,
+            no_cash_acknowledged=True,
+            anti_circumvention_acknowledged=True,
+            created_by=self.partner_user,
+        )
+        self.mandate.declare_by_partner(
+            user=self.partner_user,
+        )
+        self.mandate.save()
+        self.mandate.submit_for_review()
+        self.mandate.save()
+
+        for document_type in [
+            MandateDocument.DocumentType.OWNER_ID,
+            MandateDocument.DocumentType.OWNERSHIP_PROOF,
+            MandateDocument.DocumentType.SIGNED_MANDATE,
+        ]:
+            MandateDocument.objects.create(
+                mandate=self.mandate,
+                document_type=document_type,
+                file=SimpleUploadedFile(
+                    f"{document_type}.pdf",
+                    b"%PDF-1.4\nreview evidence",
+                    content_type="application/pdf",
+                ),
+                status=MandateDocument.Status.UPLOADED,
+                is_current=True,
+                uploaded_by=self.partner_user,
+            )
+
+        self.client = APIClient()
+
+    def test_submitted_authorization_is_visible_to_staff(self):
+        self.client.force_authenticate(
+            user=self.admin,
+        )
+
+        response = self.client.get(
+            reverse("mandate-list"),
+            {
+                "status": (
+                    PropertyMandate.Status.UNDER_REVIEW
+                ),
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+        self.assertEqual(
+            len(response.data),
+            1,
+        )
+        self.assertEqual(
+            response.data[0]["id"],
+            self.mandate.id,
+        )
+        self.assertEqual(
+            response.data[0]["property_title"],
+            self.property.title,
+        )
+
+        summary_response = self.client.get(
+            reverse(
+                "governance-admin-operations-summary",
+            ),
+        )
+
+        self.assertEqual(
+            summary_response.status_code,
+            200,
+        )
+        self.assertEqual(
+            summary_response.data[
+                "pending_authorization_reviews"
+            ],
+            1,
+        )
+
+    def test_staff_can_complete_authorization_review(self):
+        self.client.force_authenticate(
+            user=self.admin,
+        )
+
+        response = self.client.post(
+            reverse(
+                "mandate-complete-review",
+                kwargs={
+                    "pk": self.mandate.id,
+                },
+            ),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.mandate.refresh_from_db()
+        self.owner.refresh_from_db()
+        self.agreement.refresh_from_db()
+
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.APPROVED,
+        )
+        self.assertTrue(
+            self.owner.is_verified,
+        )
+        self.assertTrue(
+            self.agreement.is_publish_ready(),
+        )
+        self.assertFalse(
+            self.mandate.documents.filter(
+                is_current=True,
+            ).exclude(
+                status=MandateDocument.Status.APPROVED,
+            ).exists(),
+        )
+        self.assertTrue(
+            MandateEvent.objects.filter(
+                mandate=self.mandate,
+                action="authorization_review_completed",
+            ).exists(),
+        )
+
+    def test_partner_cannot_complete_authorization_review(self):
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = self.client.post(
+            reverse(
+                "mandate-complete-review",
+                kwargs={
+                    "pk": self.mandate.id,
+                },
+            ),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            403,
+        )
