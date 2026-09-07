@@ -234,8 +234,7 @@ class _MyPropertiesScreenState extends State<MyPropertiesScreen> {
                       return _PartnerPropertyCard(
                         property: property,
                         onManage: () => _openPropertyWorkspace(property),
-                        onDeleteDraft:
-                            property.status.trim().toLowerCase() == 'draft'
+                        onDeleteDraft: property.canDeleteDraft
                             ? () => _deleteDraft(property)
                             : null,
                         isDeleting: _deletingDraftIds.contains(property.id),
