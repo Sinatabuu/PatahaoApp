@@ -359,6 +359,120 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
     return false;
   }
 
+  bool _candidateCanDeleteDraft(Map<String, dynamic> candidate) {
+    final value = candidate['can_delete_draft'];
+
+    if (value == true) {
+      return true;
+    }
+
+    final text = value?.toString().trim().toLowerCase();
+
+    return text == 'true' || text == '1' || text == 'yes';
+  }
+
+  Future<void> _deleteDraft(Map<String, dynamic> candidate) async {
+    if (_isSubmittingDecision ||
+        !_candidateCanDeleteDraft(candidate)) {
+      return;
+    }
+
+    final propertyId = int.tryParse(
+      candidate['id']?.toString() ?? '',
+    );
+
+    if (propertyId == null || propertyId <= 0) {
+      return;
+    }
+
+    final propertyTitle = _candidateTitle(candidate);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete this draft?'),
+          content: Text(
+            'Delete "$propertyTitle" from your saved drafts? '
+            'Submitted and published properties are protected.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Keep Draft'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFB91C1C),
+              ),
+              child: const Text('Delete Draft'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isSubmittingDecision = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await PartnerPropertyService.instance.deleteDraftProperty(
+        propertyId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _candidates = _candidates
+            .where(
+              (item) =>
+                  int.tryParse(item['id']?.toString() ?? '') !=
+                  propertyId,
+            )
+            .toList();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Draft "$propertyTitle" deleted.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final message = _cleanError(error);
+
+      setState(() {
+        _errorMessage = message;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingDecision = false;
+        });
+      }
+    }
+  }
+
   Future<void> _chooseSavedDraft(
     List<Map<String, dynamic>> drafts,
   ) async {
@@ -397,6 +511,9 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
                   itemBuilder: (context, index) {
                     final candidate = orderedDrafts[index];
                     final distance = _candidateDistance(candidate);
+                    final canDeleteDraft = _candidateCanDeleteDraft(
+                      candidate,
+                    );
 
                     return ListTile(
                       leading: const Icon(Icons.edit_note_outlined),
@@ -407,7 +524,24 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
                           if (distance.isNotEmpty) distance,
                         ].join(' · '),
                       ),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (canDeleteDraft)
+                            IconButton(
+                              tooltip: 'Delete draft',
+                              onPressed: () async {
+                                Navigator.of(sheetContext).pop();
+                                await _deleteDraft(candidate);
+                              },
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: Color(0xFFB91C1C),
+                              ),
+                            ),
+                          const Icon(Icons.chevron_right),
+                        ],
+                      ),
                       onTap: () {
                         Navigator.of(sheetContext).pop(candidate);
                       },
@@ -428,6 +562,7 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
 
   Widget _buildCandidateCard(Map<String, dynamic> candidate) {
     final isMine = _candidateBelongsToCurrentPartner(candidate);
+    final canDeleteDraft = _candidateCanDeleteDraft(candidate);
     final distance = _candidateDistance(candidate);
 
     return Card(
@@ -479,6 +614,24 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
                 ),
               ),
             ),
+            if (canDeleteDraft) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _isSubmittingDecision
+                      ? null
+                      : () async {
+                          await _deleteDraft(candidate);
+                        },
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete Draft'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFB91C1C),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
