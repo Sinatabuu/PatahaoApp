@@ -509,7 +509,7 @@ class _AuthorizationReviewDialogState
         );
         opened = true;
       } else {
-        final savedPath = await FilePicker.platform.saveFile(
+        final savedPath = await FilePicker.saveFile(
           dialogTitle: 'Save evidence for inspection',
           fileName: evidence.filename,
           bytes: evidenceFile.bytes,
