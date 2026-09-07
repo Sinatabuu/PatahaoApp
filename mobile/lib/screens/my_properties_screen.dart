@@ -19,6 +19,8 @@ class _MyPropertiesScreenState extends State<MyPropertiesScreen> {
   String _selectedStatus = 'all';
   String _selectedListingType = 'all';
 
+  final Set<int> _deletingDraftIds = <int>{};
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +41,90 @@ class _MyPropertiesScreenState extends State<MyPropertiesScreen> {
 
   void _applyFilters() {
     setState(_loadProperties);
+  }
+
+  Future<void> _deleteDraft(Property property) async {
+    if (property.status.trim().toLowerCase() != 'draft' ||
+        _deletingDraftIds.contains(property.id)) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete this draft?'),
+          content: Text(
+            'Delete "${property.title}" from your saved drafts? '
+            'Submitted and published properties are protected.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Keep Draft'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFB91C1C),
+              ),
+              child: const Text('Delete Draft'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _deletingDraftIds.add(property.id);
+    });
+
+    try {
+      await PartnerPropertyService.instance.deleteDraftProperty(
+        property.id,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      await _refreshProperties();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Draft "${property.title}" deleted.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingDraftIds.remove(property.id);
+        });
+      }
+    }
   }
 
   Future<void> _openPropertyWorkspace(Property property) async {
@@ -148,6 +234,11 @@ class _MyPropertiesScreenState extends State<MyPropertiesScreen> {
                       return _PartnerPropertyCard(
                         property: property,
                         onManage: () => _openPropertyWorkspace(property),
+                        onDeleteDraft:
+                            property.status.trim().toLowerCase() == 'draft'
+                            ? () => _deleteDraft(property)
+                            : null,
+                        isDeleting: _deletingDraftIds.contains(property.id),
                       );
                     },
                   ),
@@ -267,10 +358,17 @@ class _FilterBar extends StatelessWidget {
 }
 
 class _PartnerPropertyCard extends StatelessWidget {
-  const _PartnerPropertyCard({required this.property, required this.onManage});
+  const _PartnerPropertyCard({
+    required this.property,
+    required this.onManage,
+    required this.onDeleteDraft,
+    required this.isDeleting,
+  });
 
   final Property property;
   final VoidCallback onManage;
+  final Future<void> Function()? onDeleteDraft;
+  final bool isDeleting;
 
   String? _imageUrl() {
     final coverPhoto = property.coverPhoto;
@@ -406,6 +504,34 @@ class _PartnerPropertyCard extends StatelessWidget {
                       label: const Text('Manage Property'),
                     ),
                   ),
+                  if (onDeleteDraft != null) ...[
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: isDeleting
+                            ? null
+                            : () async {
+                                await onDeleteDraft!();
+                              },
+                        icon: isDeleting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.delete_outline),
+                        label: Text(
+                          isDeleting ? 'Deleting...' : 'Delete Draft',
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFB91C1C),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
