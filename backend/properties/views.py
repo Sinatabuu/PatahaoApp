@@ -396,6 +396,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
         queryset = (
             Property.objects
+            .exclude(status=Property.STATUS_ARCHIVED)
             .exclude(latitude__isnull=True)
             .exclude(longitude__isnull=True)
             .select_related("partner")
@@ -473,6 +474,12 @@ class PropertyViewSet(viewsets.ModelViewSet):
                     ),
                     "proximity": proximity,
                     "is_mine": is_mine,
+                    "can_delete_draft": (
+                        partner is not None
+                        and property_obj.partner_id == partner.id
+                        and property_obj.status
+                        == Property.STATUS_DRAFT
+                    ),
                     "my_participation_status":
                         my_participation_status,
                 }
@@ -642,6 +649,86 @@ class PartnerPropertyViewSet(
                 f"{partner} created property "
                 f"{property_obj.title}"
             ),
+        )
+
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path="draft",
+    )
+    @transaction.atomic
+    def delete_draft(self, request, pk=None):
+        """
+        Remove an unused source-owned draft from partner views.
+
+        The record is archived rather than physically deleted so
+        business and audit history remain intact.
+        """
+
+        partner = self._get_partner()
+
+        property_obj = (
+            Property.objects
+            .select_for_update()
+            .filter(pk=pk)
+            .first()
+        )
+
+        if property_obj is None:
+            return Response(
+                {
+                    "detail": "Property not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if property_obj.partner_id != partner.id:
+            raise PermissionDenied(
+                "Only the source partner may delete this draft."
+            )
+
+        if property_obj.status != Property.STATUS_DRAFT:
+            return Response(
+                {
+                    "detail": (
+                        "Only draft properties can be deleted. "
+                        "Submitted or published properties are protected."
+                    ),
+                    "property_id": property_obj.id,
+                    "status": property_obj.status,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        property_title = property_obj.title
+
+        property_obj.status = Property.STATUS_ARCHIVED
+        property_obj.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="partner_property_draft_deleted",
+            entity_type="Property",
+            entity_id=str(property_obj.id),
+            description=(
+                f"{partner} deleted draft property "
+                f"{property_title}"
+            ),
+        )
+
+        return Response(
+            {
+                "detail": "Draft deleted.",
+                "property_id": property_obj.id,
+                "property_title": property_title,
+                "status": property_obj.status,
+            },
+            status=status.HTTP_200_OK,
         )
 
     @action(
@@ -946,6 +1033,10 @@ class PartnerPropertyViewSet(
         if requested_status:
             queryset = queryset.filter(
                 status=requested_status,
+            )
+        else:
+            queryset = queryset.exclude(
+                status=Property.STATUS_ARCHIVED,
             )
 
         if listing_type:
