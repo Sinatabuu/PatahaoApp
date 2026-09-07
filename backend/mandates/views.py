@@ -10,10 +10,13 @@ from rest_framework.exceptions import (
 )
 from rest_framework.response import Response
 
+from commissions.models import CommissionAgreement
+
 from .models import (
     MandateDocument,
     MandateEvent,
     PropertyMandate,
+    PropertyOwner,
 )
 from .serializers import (
     MandateDocumentReplacementSerializer,
@@ -77,6 +80,31 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
             )
             .order_by("-created_at")
         )
+
+        requested_status = (
+            self.request.query_params.get("status", "")
+            or ""
+        ).strip()
+
+        if requested_status:
+            valid_statuses = {
+                value
+                for value, _label
+                in PropertyMandate.Status.choices
+            }
+
+            if requested_status not in valid_statuses:
+                raise APIValidationError(
+                    {
+                        "status": (
+                            "Unknown mandate review status."
+                        ),
+                    }
+                )
+
+            queryset = queryset.filter(
+                status=requested_status,
+            )
 
         if self.request.user.is_staff:
             return queryset
@@ -353,6 +381,278 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
 
         return Response(
             self.get_serializer(mandate).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="complete-review",
+    )
+    @transaction.atomic
+    def complete_review(
+        self,
+        request,
+        pk=None,
+    ):
+        """
+        Complete one staff authorization decision atomically.
+
+        The staff member explicitly approves the owner, commission terms,
+        current sale evidence, and mandate from one review screen. Domain
+        model checks remain authoritative and every approved evidence hash
+        is recorded in the immutable mandate event trail.
+        """
+
+        if not request.user.is_staff:
+            raise PermissionDenied(
+                "Only Pata Hao administrators may complete "
+                "authorization reviews."
+            )
+
+        mandate = (
+            PropertyMandate.objects
+            .select_for_update()
+            .select_related(
+                "property",
+                "owner",
+                "partner",
+                "partner__user",
+                "commission_agreement",
+                "commission_agreement__accepted_by",
+                "commission_agreement__verified_by",
+                "declared_by",
+                "approved_by",
+            )
+            .get(pk=pk)
+        )
+
+        if mandate.status == PropertyMandate.Status.APPROVED:
+            return Response(
+                {
+                    "detail": "Authorization is already approved.",
+                    "mandate": self.get_serializer(mandate).data,
+                    "sale_pack": get_sale_mandate_pack_status(
+                        mandate,
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if mandate.status != PropertyMandate.Status.UNDER_REVIEW:
+            raise APIValidationError(
+                {
+                    "detail": (
+                        "Only an authorization submitted for review "
+                        "can be approved."
+                    ),
+                }
+            )
+
+        agreement = mandate.commission_agreement
+
+        if agreement is None:
+            raise APIValidationError(
+                {
+                    "detail": (
+                        "A commission agreement is required before "
+                        "authorization approval."
+                    ),
+                }
+            )
+
+        agreement = (
+            CommissionAgreement.objects
+            .select_for_update()
+            .get(pk=agreement.pk)
+        )
+
+        owner = (
+            PropertyOwner.objects
+            .select_for_update()
+            .get(pk=mandate.owner_id)
+        )
+
+        if not owner.is_active:
+            raise APIValidationError(
+                {
+                    "detail": (
+                        "The property owner record is inactive and "
+                        "cannot be approved."
+                    ),
+                }
+            )
+
+        if owner.verification_status in {
+            PropertyOwner.VerificationStatus.REJECTED,
+            PropertyOwner.VerificationStatus.SUSPENDED,
+        }:
+            raise APIValidationError(
+                {
+                    "detail": (
+                        "The property owner record must be resolved "
+                        "before this authorization can be approved."
+                    ),
+                }
+            )
+
+        current_documents = list(
+            MandateDocument.objects
+            .select_for_update()
+            .filter(
+                mandate=mandate,
+                is_current=True,
+            )
+            .order_by("document_type", "id")
+        )
+
+        required_document_types = set()
+
+        if (
+            mandate.property.listing_type
+            == mandate.property.LISTING_SALE
+        ):
+            required_document_types = {
+                MandateDocument.DocumentType.OWNER_ID,
+                MandateDocument.DocumentType.OWNERSHIP_PROOF,
+                MandateDocument.DocumentType.SIGNED_MANDATE,
+            }
+
+            documents_by_type = {
+                document.document_type: document
+                for document in current_documents
+            }
+
+            missing_types = (
+                required_document_types
+                - set(documents_by_type)
+            )
+
+            if missing_types:
+                missing_labels = [
+                    str(
+                        MandateDocument.DocumentType(
+                            document_type,
+                        ).label
+                    )
+                    for document_type in sorted(missing_types)
+                ]
+
+                raise APIValidationError(
+                    {
+                        "detail": (
+                            "The Sale Mandate Pack is incomplete: "
+                            + ", ".join(missing_labels)
+                            + "."
+                        ),
+                    }
+                )
+
+        review_documents = [
+            document
+            for document in current_documents
+            if (
+                not required_document_types
+                or document.document_type
+                in required_document_types
+            )
+        ]
+
+        rejected_documents = [
+            document.get_document_type_display()
+            for document in review_documents
+            if document.status == MandateDocument.Status.REJECTED
+        ]
+
+        if rejected_documents:
+            raise APIValidationError(
+                {
+                    "detail": (
+                        "Rejected evidence must be replaced before "
+                        "approval: "
+                        + ", ".join(rejected_documents)
+                        + "."
+                    ),
+                }
+            )
+
+        try:
+            if not agreement.is_verified:
+                agreement.verify(
+                    verified_by=request.user,
+                )
+                agreement.save()
+
+            if not agreement.is_locked:
+                agreement.lock()
+                agreement.save()
+
+            if not owner.is_verified:
+                owner.verification_status = (
+                    PropertyOwner.VerificationStatus.VERIFIED
+                )
+                owner.verified_by = request.user
+                owner.verified_at = timezone.now()
+                owner.verification_notes = (
+                    "Verified through the Pata Hao authorization "
+                    "review queue."
+                )
+                owner.save()
+
+            for document in review_documents:
+                if document.status != MandateDocument.Status.APPROVED:
+                    document.approve(
+                        reviewed_by=request.user,
+                    )
+
+            mandate.commission_agreement = agreement
+            mandate.owner = owner
+            mandate.approve(
+                approved_by=request.user,
+            )
+            mandate.save()
+
+        except DjangoValidationError as error:
+            raise APIValidationError(
+                {
+                    "detail": error.messages,
+                }
+            ) from error
+
+        MandateEvent.objects.create(
+            mandate=mandate,
+            action="authorization_review_completed",
+            actor=request.user,
+            notes=(
+                "Pata Hao completed the authorization review and "
+                "approved the owner, commercial terms, evidence, "
+                "and digital mandate."
+            ),
+            metadata={
+                "owner_id": owner.id,
+                "commission_agreement_id": agreement.id,
+                "approved_documents": [
+                    {
+                        "id": document.id,
+                        "document_type": document.document_type,
+                        "file_hash": document.file_hash,
+                    }
+                    for document in review_documents
+                ],
+            },
+        )
+
+        mandate.refresh_from_db()
+
+        return Response(
+            {
+                "detail": "Authorization approved.",
+                "mandate": self.get_serializer(mandate).data,
+                "sale_pack": get_sale_mandate_pack_status(
+                    mandate,
+                ),
+            },
             status=status.HTTP_200_OK,
         )
 
