@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:mobile/screens/staff_property_review_queue_screen.dart';
+import 'package:mobile/screens/staff_authorization_reviews_screen.dart';
 import 'package:mobile/screens/staff_properties_screen.dart';
 import 'package:mobile/services/staff_operations_service.dart';
 import 'package:mobile/services/auth_service.dart';
@@ -69,6 +70,22 @@ class _StaffOperationsDashboardScreenState
         _errorMessage = _cleanError(error);
       });
     }
+  }
+
+  Future<void> _openAuthorizationReviews() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) {
+          return const StaffAuthorizationReviewsScreen();
+        },
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadSummary();
   }
 
   Future<void> _openReviewDesk() async {
@@ -326,6 +343,36 @@ class _StaffOperationsDashboardScreenState
           'Administration',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
+        const SizedBox(height: 12),
+
+        Card(
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 10,
+            ),
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFFFF7ED),
+              child: Icon(
+                Icons.assignment_late_outlined,
+                color: Color(0xFFC2410C),
+              ),
+            ),
+            title: const Text(
+              'Authorization Reviews',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(
+              summary.pendingAuthorizationReviews == 1
+                  ? '1 authorization waiting for review'
+                  : '${summary.pendingAuthorizationReviews} '
+                      'authorizations waiting for review',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openAuthorizationReviews,
+          ),
+        ),
+
         const SizedBox(height: 12),
 
         Card(
