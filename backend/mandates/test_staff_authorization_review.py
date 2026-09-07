@@ -27,6 +27,7 @@ class StaffAuthorizationReviewTests(TestCase):
             password="test-pass-123",
             role=User.ROLE_ADMIN,
             is_staff=True,
+            is_superuser=True,
         )
 
         self.partner_user = User.objects.create_user(
@@ -238,4 +239,60 @@ class StaffAuthorizationReviewTests(TestCase):
         self.assertEqual(
             response.status_code,
             403,
+        )
+
+    def test_django_admin_displays_authorization_review_queue(self):
+        self.client.force_login(
+            self.admin,
+        )
+
+        response = self.client.get(
+            reverse(
+                "admin:mandates_authorizationreview_changelist",
+            ),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+        self.assertContains(
+            response,
+            self.property.title,
+        )
+        self.assertContains(
+            response,
+            self.mandate.mandate_number,
+        )
+
+    def test_django_admin_can_approve_authorization_review(self):
+        self.client.force_login(
+            self.admin,
+        )
+
+        response = self.client.post(
+            reverse(
+                "admin:mandates_authorizationreview_changelist",
+            ),
+            {
+                "action": (
+                    "complete_selected_authorization_reviews"
+                ),
+                "_selected_action": [
+                    str(self.mandate.id),
+                ],
+            },
+            follow=True,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.mandate.refresh_from_db()
+
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.APPROVED,
         )
