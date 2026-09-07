@@ -459,6 +459,7 @@ class NearbyPropertyOwnershipTests(TestCase):
 
         other_user = user_model.objects.create_user(
             username="nearby-other-partner",
+            email="nearby-other-partner@example.com",
             password="test-password",
         )
 
