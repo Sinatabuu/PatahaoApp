@@ -402,12 +402,14 @@ class PartnerPropertySerializer(PropertySerializer):
     partner_role = serializers.SerializerMethodField()
     participation_status = serializers.SerializerMethodField()
     photo_coverage = serializers.SerializerMethodField()
+    can_delete_draft = serializers.SerializerMethodField()
 
     class Meta(PropertySerializer.Meta):
         fields = PropertySerializer.Meta.fields + (
             "partner_role",
             "participation_status",
             "photo_coverage",
+            "can_delete_draft",
 
         )
 
@@ -415,6 +417,15 @@ class PartnerPropertySerializer(PropertySerializer):
         return evaluate_photo_coverage(
             obj,
             obj.photos.all(),
+        )
+
+    def get_can_delete_draft(self, obj):
+        partner = self._get_partner()
+
+        return (
+            partner is not None
+            and obj.partner_id == partner.id
+            and obj.status == Property.STATUS_DRAFT
         )
 
     def _get_partner(self):
