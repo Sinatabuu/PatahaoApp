@@ -355,8 +355,119 @@ class NearbyPropertyOwnershipTests(TestCase):
         )
 
         self.assertTrue(candidate["is_mine"])
+        self.assertTrue(candidate["can_delete_draft"])
         self.assertEqual(candidate["status"], Property.STATUS_DRAFT)
         self.assertEqual(
             candidate["created_at"],
             self.property_obj.created_at.isoformat(),
         )
+
+    def test_source_partner_can_delete_own_draft(self):
+        response = self.client.delete(
+            (
+                f"/api/partner/properties/"
+                f"{self.property_obj.id}/draft/"
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["detail"],
+            "Draft deleted.",
+        )
+
+        self.property_obj.refresh_from_db()
+
+        self.assertEqual(
+            self.property_obj.status,
+            Property.STATUS_ARCHIVED,
+        )
+
+        nearby_response = self.client.get(
+            "/api/properties/nearby/",
+            {
+                "latitude": "-1.218000",
+                "longitude": "36.886000",
+            },
+        )
+
+        self.assertEqual(nearby_response.status_code, 200)
+        self.assertNotIn(
+            self.property_obj.id,
+            [
+                item["id"]
+                for item in nearby_response.data["candidates"]
+            ],
+        )
+
+        inventory_response = self.client.get(
+            "/api/partner/properties/",
+        )
+
+        self.assertEqual(inventory_response.status_code, 200)
+        self.assertNotIn(
+            self.property_obj.id,
+            [
+                item["id"]
+                for item in inventory_response.data
+            ],
+        )
+
+    def test_submitted_property_cannot_be_deleted_as_draft(self):
+        self.property_obj.status = Property.STATUS_PENDING
+        self.property_obj.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        response = self.client.delete(
+            (
+                f"/api/partner/properties/"
+                f"{self.property_obj.id}/draft/"
+            )
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        self.property_obj.refresh_from_db()
+
+        self.assertEqual(
+            self.property_obj.status,
+            Property.STATUS_PENDING,
+        )
+
+    def test_partner_cannot_delete_another_source_draft(self):
+        user_model = get_user_model()
+
+        other_user = user_model.objects.create_user(
+            username="nearby-other-partner",
+            password="test-password",
+        )
+
+        Partner.objects.create(
+            user=other_user,
+            business_name="Other Nearby Homes",
+            verification_status=Partner.STATUS_APPROVED,
+            is_active=True,
+        )
+
+        self.client.force_authenticate(user=other_user)
+
+        response = self.client.delete(
+            (
+                f"/api/partner/properties/"
+                f"{self.property_obj.id}/draft/"
+            )
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        self.property_obj.refresh_from_db()
+
+        self.assertEqual(
+            self.property_obj.status,
+            Property.STATUS_DRAFT,
+        )
+
