@@ -132,6 +132,7 @@ class StaffOperationsService {
 class StaffOperationsSummary {
   const StaffOperationsSummary({
     required this.pendingReviews,
+    required this.pendingAuthorizationReviews,
     required this.publishedProperties,
     required this.activePartners,
     required this.todaysViewings,
@@ -141,6 +142,7 @@ class StaffOperationsSummary {
   });
 
   final int pendingReviews;
+  final int pendingAuthorizationReviews;
   final int publishedProperties;
   final int activePartners;
   final int todaysViewings;
@@ -151,6 +153,9 @@ class StaffOperationsSummary {
   factory StaffOperationsSummary.fromJson(Map<String, dynamic> json) {
     return StaffOperationsSummary(
       pendingReviews: _parseInt(json['pending_reviews']),
+      pendingAuthorizationReviews: _parseInt(
+        json['pending_authorization_reviews'],
+      ),
       publishedProperties: _parseInt(json['published_properties']),
       activePartners: _parseInt(json['active_partners']),
       todaysViewings: _parseInt(json['todays_viewings']),
