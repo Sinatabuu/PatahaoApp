@@ -43,12 +43,14 @@ class StaffAuthorizationReviewService {
       );
     }
 
-    final dynamic rawResults;
+    final List<dynamic> rawResults;
 
     if (decoded is List) {
       rawResults = decoded;
     } else if (decoded is Map && decoded['results'] is List) {
-      rawResults = decoded['results'];
+      rawResults = List<dynamic>.from(
+        decoded['results'] as List,
+      );
     } else {
       throw const FormatException(
         'The authorization review server returned invalid data.',
