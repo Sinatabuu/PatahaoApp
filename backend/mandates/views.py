@@ -109,6 +109,14 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
             )
 
         if self.request.user.is_staff:
+            if (
+                requested_status
+                == PropertyMandate.Status.UNDER_REVIEW
+            ):
+                queryset = queryset.exclude(
+                    property__status="archived",
+                )
+
             return queryset
 
         partner = self._get_partner()

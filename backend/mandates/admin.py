@@ -493,6 +493,9 @@ class AuthorizationReviewAdmin(PropertyMandateAdmin):
             .filter(
                 status=PropertyMandate.Status.UNDER_REVIEW,
             )
+            .exclude(
+                property__status="archived",
+            )
         )
 
     def has_add_permission(self, request):

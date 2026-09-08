@@ -2796,3 +2796,129 @@ class SaleMandatePublicationTests(TestCase):
                 action="document_replaced_after_rejection",
             ).exists(),
         )
+
+class AuthorizationReviewQueueTests(TestCase):
+    def setUp(self):
+        self.admin_user = User.objects.create_user(
+            username="authorization_queue_admin",
+            email="authorization-queue-admin@example.com",
+            password="test-pass-123",
+            role=User.ROLE_ADMIN,
+            is_staff=True,
+        )
+        self.partner_user = User.objects.create_user(
+            username="authorization_queue_partner",
+            email="authorization-queue-partner@example.com",
+            password="test-pass-123",
+            role=User.ROLE_PARTNER,
+        )
+        self.partner = Partner.objects.create(
+            user=self.partner_user,
+            business_name="Authorization Queue Partner",
+            verification_status=Partner.STATUS_APPROVED,
+            verified_by=self.admin_user,
+            verified_at=timezone.now(),
+        )
+        self.owner = PropertyOwner.objects.create(
+            legal_name="Authorization Queue Owner",
+            phone_number="0700000099",
+            created_by=self.admin_user,
+        )
+        self.active_property = self._create_property(
+            title="Active Authorization Review",
+            status=Property.STATUS_DRAFT,
+        )
+        self.archived_property = self._create_property(
+            title="Archived Authorization Review",
+            status=Property.STATUS_ARCHIVED,
+        )
+        self.active_mandate = self._create_mandate(
+            self.active_property,
+        )
+        self.archived_mandate = self._create_mandate(
+            self.archived_property,
+        )
+
+    def _create_property(self, *, title, status):
+        return Property.objects.create(
+            partner=self.partner,
+            title=title,
+            property_type=Property.TYPE_HOUSE,
+            listing_type=Property.LISTING_SALE,
+            price=Decimal("10000000.00"),
+            county="Nairobi",
+            town="Nairobi",
+            description="Authorization queue test property.",
+            status=status,
+        )
+
+    def _create_mandate(self, property_obj):
+        return PropertyMandate.objects.create(
+            property=property_obj,
+            owner=self.owner,
+            partner=self.partner,
+            status=PropertyMandate.Status.UNDER_REVIEW,
+            owner_authority_confirmed=True,
+            no_cash_acknowledged=True,
+            anti_circumvention_acknowledged=True,
+            partner_declared=True,
+            partner_declared_at=timezone.now(),
+            declared_by=self.partner_user,
+            submitted_at=timezone.now(),
+            created_by=self.partner_user,
+        )
+
+    def test_staff_api_excludes_archived_property_reviews(self):
+        client = APIClient()
+        client.force_authenticate(user=self.admin_user)
+
+        response = client.get(
+            "/api/mandates/",
+            {
+                "status": PropertyMandate.Status.UNDER_REVIEW,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        reviews = response.data
+
+        if isinstance(reviews, dict):
+            reviews = reviews["results"]
+
+        review_ids = {
+            review["id"]
+            for review in reviews
+        }
+
+        self.assertIn(self.active_mandate.id, review_ids)
+        self.assertNotIn(
+            self.archived_mandate.id,
+            review_ids,
+        )
+
+    def test_django_admin_excludes_archived_property_reviews(self):
+        from mandates.admin import AuthorizationReviewAdmin
+        from mandates.models import AuthorizationReview
+
+        request = RequestFactory().get(
+            "/admin/mandates/authorizationreview/",
+        )
+        request.user = self.admin_user
+
+        model_admin = AuthorizationReviewAdmin(
+            AuthorizationReview,
+            admin.site,
+        )
+        review_ids = set(
+            model_admin.get_queryset(request).values_list(
+                "id",
+                flat=True,
+            )
+        )
+
+        self.assertIn(self.active_mandate.id, review_ids)
+        self.assertNotIn(
+            self.archived_mandate.id,
+            review_ids,
+        )
