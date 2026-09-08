@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import User
+from governance.models import PartnerTier
 from partners.models import Partner
 
 from .models import Property, PropertyAmenity
@@ -31,6 +32,15 @@ class PropertyAmenitiesTests(APITestCase):
             verification_status=Partner.STATUS_APPROVED,
             verified_by=self.admin_user,
             verified_at=timezone.now(),
+        )
+        self.partner_tier = PartnerTier.objects.create(
+            code="amenities-test",
+            name="Amenities Test Tier",
+            rank=901,
+            property_limit=20,
+            minimum_completed_deals=0,
+            minimum_trust_score=Decimal("0.00"),
+            active=True,
         )
         self.property_obj = Property.objects.create(
             partner=self.partner,
