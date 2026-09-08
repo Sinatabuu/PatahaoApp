@@ -5,6 +5,7 @@ from core.models import ActivityLog
 
 from .models import (
     Property,
+    PropertyAmenity,
     PropertyPartner,
     PropertyPhoto,
     PropertyVideo,
@@ -423,6 +424,27 @@ def return_properties_to_draft(
         )
 
 
+@admin.register(PropertyAmenity)
+class PropertyAmenityAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "slug",
+        "display_order",
+        "is_active",
+    )
+    list_editable = (
+        "display_order",
+        "is_active",
+    )
+    search_fields = (
+        "name",
+        "slug",
+    )
+    prepopulated_fields = {
+        "slug": ("name",),
+    }
+
+
 @admin.register(PropertyPartner)
 class PropertyPartnerAdmin(admin.ModelAdmin):
     list_display = (
@@ -545,6 +567,7 @@ class PropertyAdmin(admin.ModelAdmin):
                 "fields": (
                     "bedrooms",
                     "bathrooms",
+                    "amenities",
                 )
             },
         ),
@@ -559,6 +582,10 @@ class PropertyAdmin(admin.ModelAdmin):
                 )
             },
         ),
+    )
+
+    filter_horizontal = (
+        "amenities",
     )
 
     inlines = [

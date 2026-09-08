@@ -5,6 +5,7 @@ from partners.models import Partner
 
 from .models import (
     Property,
+    PropertyAmenity,
     PropertyFavorite,
     PropertyPartner,
     PropertyPhoto,
@@ -54,6 +55,18 @@ class PublicPartnerSerializer(serializers.ModelSerializer):
             )
 
         return obj.profile_photo.url
+
+
+class PropertyAmenitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyAmenity
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "icon",
+            "display_order",
+        )
 
 
 class PropertyPhotoSerializer(serializers.ModelSerializer):
@@ -296,6 +309,11 @@ class PropertySerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    amenities = PropertyAmenitySerializer(
+        many=True,
+        read_only=True,
+    )
+
     partner = PublicPartnerSerializer(
         read_only=True,
     )
@@ -358,6 +376,7 @@ class PropertySerializer(serializers.ModelSerializer):
             "trust_badge",
             "photos",
             "videos",
+            "amenities",
             "created_at",
             "updated_at",
 
@@ -393,6 +412,16 @@ class PropertySerializer(serializers.ModelSerializer):
             return None
 
         return favorite.id
+
+class PropertyAmenitiesUpdateSerializer(serializers.Serializer):
+    amenities = serializers.SlugRelatedField(
+        many=True,
+        slug_field="slug",
+        queryset=PropertyAmenity.objects.filter(
+            is_active=True,
+        ),
+    )
+
 
 class PartnerPropertySerializer(PropertySerializer):
     photos = PartnerPropertyPhotoSerializer(

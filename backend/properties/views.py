@@ -10,6 +10,7 @@ from django.db.models import Q
 from django.utils import timezone
 from .models import (
     Property,
+    PropertyAmenity,
     PropertyPartner,
     PropertyPhoto,
     PropertyFavorite
@@ -17,6 +18,8 @@ from .models import (
 from .serializers import (
     PartnerPropertySerializer,
     PartnerPropertyPhotoSerializer,
+    PropertyAmenitiesUpdateSerializer,
+    PropertyAmenitySerializer,
     PropertyPhotoSerializer,
     PropertyPhotoUploadSerializer,
     PropertySerializer,
@@ -199,6 +202,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
             .prefetch_related(
                 "photos",
                 "videos",
+                "amenities",
             )
             .order_by("-created_at")
         )
@@ -655,6 +659,83 @@ class PartnerPropertyViewSet(
         )
 
     @action(
+        detail=False,
+        methods=["get"],
+        url_path="amenity-options",
+    )
+    def amenity_options(self, request):
+        self._get_partner()
+
+        amenities = PropertyAmenity.objects.filter(
+            is_active=True,
+        )
+
+        return Response(
+            PropertyAmenitySerializer(
+                amenities,
+                many=True,
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="amenities",
+    )
+    @transaction.atomic
+    def update_amenities(self, request, pk=None):
+        partner = self._get_partner()
+        property_obj = self.get_object()
+
+        if property_obj.partner_id != partner.id:
+            raise PermissionDenied(
+                "Only the source partner may update amenities."
+            )
+
+        if property_obj.status not in {
+            Property.STATUS_DRAFT,
+            Property.STATUS_PENDING,
+        }:
+            return Response(
+                {
+                    "detail": (
+                        "Amenities can be changed while the property "
+                        "is being prepared or reviewed."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        input_serializer = PropertyAmenitiesUpdateSerializer(
+            data=request.data,
+        )
+        input_serializer.is_valid(
+            raise_exception=True,
+        )
+
+        amenities = input_serializer.validated_data[
+            "amenities"
+        ]
+        property_obj.amenities.set(amenities)
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="partner_property_amenities_updated",
+            entity_type="Property",
+            entity_id=str(property_obj.id),
+            description=(
+                f"{partner} updated amenities for "
+                f"{property_obj.title}."
+            ),
+        )
+
+        return Response(
+            self.get_serializer(property_obj).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
         detail=True,
         methods=["delete"],
         url_path="draft",
@@ -976,6 +1057,7 @@ class PartnerPropertyViewSet(
             .prefetch_related(
                 "photos",
                 "videos",
+                "amenities",
                 "partner_participations",
             )
             .distinct()

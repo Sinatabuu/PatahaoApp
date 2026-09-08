@@ -127,6 +127,111 @@ class PartnerPropertyService {
     );
   }
 
+  Future<List<PropertyAmenity>> fetchAmenityOptions() async {
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/partner/properties/amenity-options/',
+    );
+
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .get(
+              uri,
+              headers: _authorizationHeaders(accessToken),
+            )
+            .timeout(_timeout);
+      },
+    );
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to load amenity choices.',
+        ),
+      );
+    }
+
+    if (decoded is! List) {
+      throw const FormatException(
+        'The amenity choices response was invalid.',
+      );
+    }
+
+    return decoded
+        .whereType<Map>()
+        .map(
+          (item) => PropertyAmenity.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<Property> updatePropertyAmenities({
+    required int propertyId,
+    required Iterable<String> amenitySlugs,
+  }) async {
+    _validateId(
+      propertyId,
+      name: 'propertyId',
+      message: 'Property ID must be greater than zero.',
+    );
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/partner/properties/$propertyId/amenities/',
+    );
+
+    final slugs = amenitySlugs
+        .map((slug) => slug.trim())
+        .where((slug) => slug.isNotEmpty)
+        .toSet()
+        .toList(growable: false)
+      ..sort();
+
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .patch(
+              uri,
+              headers: {
+                ..._authorizationHeaders(accessToken),
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'amenities': slugs,
+              }),
+            )
+            .timeout(_timeout);
+      },
+    );
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to save property amenities.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The property amenities response was invalid.',
+      );
+    }
+
+    return Property.fromJson(
+      Map<String, dynamic>.from(decoded),
+    );
+  }
+
   Future<List<PartnerPropertyPhoto>> fetchPropertyPhotos(
     int propertyId,
   ) async {

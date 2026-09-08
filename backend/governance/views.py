@@ -219,6 +219,16 @@ def _review_payload(property_obj):
             "longitude": property_obj.longitude,
             "status": property_obj.status,
             "verification_return_reason": property_obj.verification_return_reason,
+            "amenities": [
+                {
+                    "id": amenity.id,
+                    "name": amenity.name,
+                    "slug": amenity.slug,
+                    "icon": amenity.icon,
+                    "display_order": amenity.display_order,
+                }
+                for amenity in property_obj.amenities.all()
+            ],
             "created_at": property_obj.created_at,
             "updated_at": property_obj.updated_at,
         },
@@ -337,7 +347,7 @@ class StaffOnlyAPIView(APIView):
                 "partner__user",
                 "partner__commission_plan",
             )
-            .prefetch_related("photos"),
+            .prefetch_related("photos", "amenities"),
             pk=property_id,
         )
 
@@ -420,7 +430,7 @@ class PropertyReviewListView(StaffOnlyAPIView):
                 "partner__user",
                 "partner__commission_plan",
             )
-            .prefetch_related("photos")
+            .prefetch_related("photos", "amenities")
             .order_by("created_at", "id")
         )
 
@@ -441,7 +451,7 @@ class PropertyReviewDetailView(StaffOnlyAPIView):
                 "partner__user",
                 "partner__commission_plan",
             )
-            .prefetch_related("photos"),
+            .prefetch_related("photos", "amenities"),
             pk=property_id,
         )
 

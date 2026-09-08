@@ -11,6 +11,21 @@ from .photo_coverage import (
 )
 
 
+class PropertyAmenity(models.Model):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True)
+    icon = models.CharField(max_length=50, blank=True)
+    display_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["display_order", "name"]
+        verbose_name_plural = "property amenities"
+
+    def __str__(self):
+        return self.name
+
+
 class Property(models.Model):
     TYPE_APARTMENT = "apartment"
     TYPE_HOUSE = "house"
@@ -69,6 +84,12 @@ class Property(models.Model):
         on_delete=models.PROTECT,
         related_name="properties",
         null=True,
+        blank=True,
+    )
+
+    amenities = models.ManyToManyField(
+        PropertyAmenity,
+        related_name="properties",
         blank=True,
     )
 

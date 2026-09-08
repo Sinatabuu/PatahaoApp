@@ -52,9 +52,12 @@ class _PartnerPropertyWorkspaceScreenState
 
   late Property _property;
   List<PartnerPropertyPhoto> _photos = const [];
+  List<PropertyAmenity> _amenityOptions = const [];
+  Set<String> _selectedAmenitySlugs = <String>{};
 
   bool _isLoading = true;
   bool _isUploading = false;
+  bool _isSavingAmenities = false;
   String? _errorMessage;
   bool _isSubmittingForVerification = false;
   bool _authorizationStatusAvailable = false;
@@ -71,6 +74,21 @@ class _PartnerPropertyWorkspaceScreenState
   bool get _authorizationUnderReview => _mandateStatus == 'under_review';
 
   bool get _authorizationApproved => _mandateStatus == 'approved';
+
+  bool get _canEditAmenities {
+    return property.status == 'draft' || property.status == 'pending';
+  }
+
+  bool get _amenitiesHaveChanged {
+    final savedSlugs = property.amenities
+        .map((amenity) => amenity.slug)
+        .toSet();
+
+    return savedSlugs.length != _selectedAmenitySlugs.length ||
+        savedSlugs.any(
+          (slug) => !_selectedAmenitySlugs.contains(slug),
+        );
+  }
 
   bool get _authorizationReadyForPropertyReview {
     if (!_authorizationApproved) {
@@ -113,6 +131,15 @@ class _PartnerPropertyWorkspaceScreenState
         property.id,
       );
 
+      List<PropertyAmenity> amenityOptions;
+
+      try {
+        amenityOptions = await PartnerPropertyService.instance
+            .fetchAmenityOptions();
+      } catch (_) {
+        amenityOptions = currentProperty.amenities;
+      }
+
       Map<String, dynamic> mandate = <String, dynamic>{};
       Map<String, dynamic> salePack = <String, dynamic>{};
       var authorizationStatusAvailable = false;
@@ -143,6 +170,10 @@ class _PartnerPropertyWorkspaceScreenState
       setState(() {
         _property = currentProperty;
         _photos = photos;
+        _amenityOptions = amenityOptions;
+        _selectedAmenitySlugs = currentProperty.amenities
+            .map((amenity) => amenity.slug)
+            .toSet();
         _mandate = mandate;
         _salePack = salePack;
         _authorizationStatusAvailable = authorizationStatusAvailable;
@@ -611,6 +642,75 @@ class _PartnerPropertyWorkspaceScreenState
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+    }
+  }
+
+  void _toggleAmenity(String slug) {
+    if (!_canEditAmenities || _isSavingAmenities) {
+      return;
+    }
+
+    setState(() {
+      if (_selectedAmenitySlugs.contains(slug)) {
+        _selectedAmenitySlugs.remove(slug);
+      } else {
+        _selectedAmenitySlugs.add(slug);
+      }
+    });
+  }
+
+  Future<void> _saveAmenities() async {
+    if (!_canEditAmenities ||
+        _isSavingAmenities ||
+        !_amenitiesHaveChanged) {
+      return;
+    }
+
+    setState(() {
+      _isSavingAmenities = true;
+    });
+
+    try {
+      final updatedProperty = await PartnerPropertyService.instance
+          .updatePropertyAmenities(
+            propertyId: property.id,
+            amenitySlugs: _selectedAmenitySlugs,
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _property = updatedProperty;
+        _selectedAmenitySlugs = updatedProperty.amenities
+            .map((amenity) => amenity.slug)
+            .toSet();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Amenities saved.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingAmenities = false;
+        });
+      }
     }
   }
 
@@ -1092,6 +1192,19 @@ class _PartnerPropertyWorkspaceScreenState
               ),
             ],
 
+            if (!_isLoading) ...[
+              const SizedBox(height: 18),
+              _AmenitiesCard(
+                options: _amenityOptions,
+                selectedSlugs: _selectedAmenitySlugs,
+                canEdit: _canEditAmenities,
+                isSaving: _isSavingAmenities,
+                hasChanges: _amenitiesHaveChanged,
+                onToggle: _toggleAmenity,
+                onSave: _saveAmenities,
+              ),
+            ],
+
             const SizedBox(height: 18),
 
             const Text(
@@ -1166,6 +1279,128 @@ class _PartnerPropertyWorkspaceScreenState
     );
   }
 }
+
+class _AmenitiesCard extends StatelessWidget {
+  const _AmenitiesCard({
+    required this.options,
+    required this.selectedSlugs,
+    required this.canEdit,
+    required this.isSaving,
+    required this.hasChanges,
+    required this.onToggle,
+    required this.onSave,
+  });
+
+  final List<PropertyAmenity> options;
+  final Set<String> selectedSlugs;
+  final bool canEdit;
+  final bool isSaving;
+  final bool hasChanges;
+  final ValueChanged<String> onToggle;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.checklist_rounded,
+                  color: Color(0xFF15803D),
+                ),
+                SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    'Amenities',
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text('Optional'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Select what customers can expect. Amenities help people '
+              'decide before calling or requesting a viewing.',
+            ),
+            const SizedBox(height: 14),
+            if (options.isEmpty)
+              const Text(
+                'Amenity choices are temporarily unavailable. '
+                'You can continue setting up the property.',
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: options.map((amenity) {
+                  final selected = selectedSlugs.contains(
+                    amenity.slug,
+                  );
+
+                  return FilterChip(
+                    label: Text(amenity.name),
+                    selected: selected,
+                    onSelected: canEdit
+                        ? (_) => onToggle(amenity.slug)
+                        : null,
+                  );
+                }).toList(growable: false),
+              ),
+            if (canEdit && options.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: hasChanges && !isSaving
+                      ? onSave
+                      : null,
+                  icon: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.save_outlined),
+                  label: Text(
+                    isSaving
+                        ? 'Saving...'
+                        : hasChanges
+                        ? 'Save Amenities'
+                        : 'Amenities Saved',
+                  ),
+                ),
+              ),
+            ],
+            if (!canEdit) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Amenities are read-only after property verification.',
+                style: TextStyle(
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 
 class _PropertyHeader extends StatelessWidget {
   const _PropertyHeader({required this.property});

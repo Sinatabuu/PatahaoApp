@@ -546,6 +546,12 @@ class _PropertyCard extends StatelessWidget {
 
     final partnerName = partner['display_name']?.toString() ?? '';
 
+    final amenities = (property['amenities'] as List? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((item) => item['name']?.toString().trim() ?? '')
+        .where((name) => name.isNotEmpty)
+        .toList();
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -570,6 +576,12 @@ class _PropertyCard extends StatelessWidget {
             _InfoLine(
               label: 'Partner',
               value: partnerName.isEmpty ? 'Unknown partner' : partnerName,
+            ),
+            _InfoLine(
+              label: 'Amenities',
+              value: amenities.isEmpty
+                  ? 'None selected'
+                  : amenities.join(', '),
             ),
           ],
         ),
