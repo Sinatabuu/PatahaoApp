@@ -401,3 +401,65 @@ class PartnerAccessControlApiTests(APITestCase):
             ).status,
             PartnerDisciplinaryAction.Status.REVOKED,
         )
+
+    def test_partner_detail_shows_restriction_and_restoration_history(self):
+        suspension_response = self._suspend_partner()
+
+        self.assertEqual(
+            suspension_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        restoration_reason = (
+            "The incident was reviewed and corrective "
+            "steps were completed."
+        )
+        restoration_response = self.client.post(
+            (
+                "/api/admin/partners/"
+                f"{self.partner.id}/reinstate/"
+            ),
+            {
+                "reason": restoration_reason,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            restoration_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        response = self.client.get(
+            f"/api/admin/partners/{self.partner.id}/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        governance = response.data["governance"]
+        action = governance["history"][0]
+        reinstatement = governance["reinstatements"][0]
+
+        self.assertEqual(
+            action["status"],
+            PartnerDisciplinaryAction.Status.REVOKED,
+        )
+        self.assertEqual(
+            action["policy_code"],
+            self.suspension_policy.code,
+        )
+        self.assertEqual(
+            action["imposed_by"],
+            self.staff.username,
+        )
+        self.assertEqual(
+            reinstatement["reason"],
+            restoration_reason,
+        )
+        self.assertEqual(
+            reinstatement["approved_by"],
+            self.staff.username,
+        )

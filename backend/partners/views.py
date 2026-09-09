@@ -31,6 +31,7 @@ from commissions.models import (
 from core.models import ActivityLog
 from governance.models import (
     PartnerDisciplinaryAction,
+    PartnerReinstatement,
     PolicyRule,
 )
 from notifications.models import Notification
@@ -457,6 +458,13 @@ def _governance_error_detail(exc):
     return str(exc)
 
 
+def _admin_user_label(user):
+    if user is None:
+        return ""
+
+    return user.get_full_name().strip() or user.username
+
+
 def _admin_partner_governance_payload(partner):
     restriction = get_partner_restriction_summary(partner)
 
@@ -470,6 +478,13 @@ def _admin_partner_governance_payload(partner):
         )
         .filter(partner=partner)
         .order_by("-starts_at", "-id")[:20]
+    )
+
+    reinstatements = (
+        PartnerReinstatement.objects
+        .select_related("approved_by")
+        .filter(partner=partner)
+        .order_by("-reinstated_at", "-id")[:20]
     )
 
     return {
@@ -509,12 +524,36 @@ def _admin_partner_governance_payload(partner):
                 "reason": action.reason,
                 "starts_at": action.starts_at,
                 "ends_at": action.ends_at,
+                "imposed_by_id": action.imposed_by_id,
+                "imposed_by": _admin_user_label(
+                    action.imposed_by
+                ),
                 "revoked_at": action.revoked_at,
+                "revoked_by_id": action.revoked_by_id,
+                "revoked_by": _admin_user_label(
+                    action.revoked_by
+                ),
                 "revocation_reason": (
                     action.revocation_reason
                 ),
             }
             for action in history
+        ],
+        "reinstatements": [
+            {
+                "id": reinstatement.id,
+                "reason": reinstatement.reason,
+                "approved_by_id": (
+                    reinstatement.approved_by_id
+                ),
+                "approved_by": _admin_user_label(
+                    reinstatement.approved_by
+                ),
+                "reinstated_at": (
+                    reinstatement.reinstated_at
+                ),
+            }
+            for reinstatement in reinstatements
         ],
     }
 

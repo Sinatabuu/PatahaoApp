@@ -155,6 +155,57 @@ class _StaffPartnerDetailScreenState extends State<StaffPartnerDetailScreen> {
         .toList(growable: false);
   }
 
+  List<Map<String, dynamic>> get _accessHistory {
+    final events = <Map<String, dynamic>>[];
+    final rawActions = _governance['history'];
+
+    if (rawActions is List) {
+      for (final rawAction in rawActions.whereType<Map>()) {
+        final action = Map<String, dynamic>.from(rawAction);
+        action['event_type'] = 'restriction';
+        action['occurred_at'] = action['starts_at'];
+        events.add(action);
+      }
+    }
+
+    final rawReinstatements = _governance['reinstatements'];
+
+    if (rawReinstatements is List) {
+      for (final rawReinstatement in rawReinstatements.whereType<Map>()) {
+        final reinstatement = Map<String, dynamic>.from(rawReinstatement);
+        reinstatement['event_type'] = 'restoration';
+        reinstatement['occurred_at'] = reinstatement['reinstated_at'];
+        events.add(reinstatement);
+      }
+    }
+
+    events.sort((left, right) {
+      final leftDate = DateTime.tryParse(
+        left['occurred_at']?.toString() ?? '',
+      );
+      final rightDate = DateTime.tryParse(
+        right['occurred_at']?.toString() ?? '',
+      );
+
+      return (rightDate ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(
+        leftDate ?? DateTime.fromMillisecondsSinceEpoch(0),
+      );
+    });
+
+    return events;
+  }
+
+  void _showAccessHistory() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) {
+        return _PartnerAccessHistorySheet(events: _accessHistory);
+      },
+    );
+  }
+
   bool get _isPermanentlyBanned {
     return _governance['permanently_banned'] == true;
   }
@@ -710,6 +761,7 @@ class _StaffPartnerDetailScreenState extends State<StaffPartnerDetailScreen> {
             onSuspend: () => _restrictPartner(permanent: false),
             onPermanentBan: () => _restrictPartner(permanent: true),
             onRestore: _restorePartnerAccess,
+            onViewHistory: _showAccessHistory,
           ),
 
           const SizedBox(height: 14),
@@ -792,6 +844,7 @@ class _PartnerAccessControlCard extends StatelessWidget {
     required this.onSuspend,
     required this.onPermanentBan,
     required this.onRestore,
+    required this.onViewHistory,
   });
 
   final Map<String, dynamic> governance;
@@ -800,6 +853,7 @@ class _PartnerAccessControlCard extends StatelessWidget {
   final VoidCallback onSuspend;
   final VoidCallback onPermanentBan;
   final VoidCallback onRestore;
+  final VoidCallback onViewHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -965,6 +1019,15 @@ class _PartnerAccessControlCard extends StatelessWidget {
                 fontSize: 12,
               ),
             ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: onViewHistory,
+                icon: const Icon(Icons.history_outlined),
+                label: const Text('View Access History'),
+              ),
+            ),
           ],
         ),
       ),
@@ -972,6 +1035,187 @@ class _PartnerAccessControlCard extends StatelessWidget {
   }
 }
 
+class _PartnerAccessHistorySheet extends StatelessWidget {
+  const _PartnerAccessHistorySheet({required this.events});
+
+  final List<Map<String, dynamic>> events;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.78,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Partner Access History',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Read-only record of restrictions and restorations',
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: events.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'No access restrictions or restorations recorded.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: events.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      return _buildEventCard(events[index]);
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventCard(Map<String, dynamic> event) {
+    final isRestoration = event['event_type'] == 'restoration';
+    final reason = event['reason']?.toString().trim() ?? '';
+    final occurredAt = event['occurred_at']?.toString() ?? '';
+    final admin = isRestoration
+        ? event['approved_by']?.toString().trim() ?? ''
+        : event['imposed_by']?.toString().trim() ?? '';
+    final policy = event['policy_title']?.toString().trim() ?? '';
+    final status = event['status']?.toString().trim() ?? '';
+    final revocationReason =
+        event['revocation_reason']?.toString().trim() ?? '';
+    final revokedBy = event['revoked_by']?.toString().trim() ?? '';
+    final color = isRestoration
+        ? const Color(0xFF15803D)
+        : const Color(0xFFB45309);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  isRestoration
+                      ? Icons.lock_open_outlined
+                      : Icons.gavel_outlined,
+                  color: color,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isRestoration
+                            ? 'Access restored'
+                            : event['action_type_label']?.toString() ??
+                                  'Access restricted',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _formatAccessDateTime(occurredAt),
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isRestoration && status.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      _accessHistoryStatus(status),
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            if (policy.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Policy: $policy',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+            if (reason.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(reason),
+            ],
+            if (revocationReason.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('Closure reason: $revocationReason'),
+            ],
+            if (admin.isNotEmpty || revokedBy.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                [
+                  if (admin.isNotEmpty) 'Recorded by $admin',
+                  if (revokedBy.isNotEmpty) 'Closed by $revokedBy',
+                ].join(' • '),
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 class _PartnerRestrictionDecision {
   const _PartnerRestrictionDecision({
     required this.policyCode,
@@ -1001,6 +1245,35 @@ String _formatAccessDate(String value) {
   final year = local.year.toString();
 
   return '$year-$month-$day';
+}
+
+String _accessHistoryStatus(String value) {
+  return value
+      .replaceAll('_', ' ')
+      .split(' ')
+      .where((part) => part.isNotEmpty)
+      .map(
+        (part) =>
+            '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+      )
+      .join(' ');
+}
+
+String _formatAccessDateTime(String value) {
+  final parsed = DateTime.tryParse(value);
+
+  if (parsed == null) {
+    return value.trim().isEmpty ? 'Date not recorded' : value;
+  }
+
+  final local = parsed.toLocal();
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  final year = local.year.toString();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+
+  return '$year-$month-$day $hour:$minute';
 }
 
 class _DetailCard extends StatelessWidget {
