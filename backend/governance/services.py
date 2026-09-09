@@ -1334,13 +1334,34 @@ def impose_disciplinary_action(
         ends_at=ends_at,
     )
 
-    if action.is_restrictive and partner.is_active:
-        partner.is_active = False
-        partner.save(
-            update_fields=[
-                "is_active",
-            ]
-        )
+    if action.is_restrictive:
+        partner_update_fields = []
+
+        if partner.is_active:
+            partner.is_active = False
+            partner_update_fields.append("is_active")
+
+        if partner.accepts_viewing_requests:
+            partner.accepts_viewing_requests = False
+            partner_update_fields.append(
+                "accepts_viewing_requests"
+            )
+
+        if (
+            partner.verification_status
+            != partner.STATUS_SUSPENDED
+        ):
+            partner.verification_status = (
+                partner.STATUS_SUSPENDED
+            )
+            partner_update_fields.append(
+                "verification_status"
+            )
+
+        if partner_update_fields:
+            partner.save(
+                update_fields=partner_update_fields,
+            )
 
     return action
 
@@ -1792,13 +1813,32 @@ def reinstate_partner(
         reviewed_actions,
     )
 
+    partner_update_fields = []
+
     if not partner.is_active:
         partner.is_active = True
+        partner_update_fields.append("is_active")
 
+    if not partner.accepts_viewing_requests:
+        partner.accepts_viewing_requests = True
+        partner_update_fields.append(
+            "accepts_viewing_requests"
+        )
+
+    if (
+        partner.verification_status
+        != partner.STATUS_APPROVED
+    ):
+        partner.verification_status = (
+            partner.STATUS_APPROVED
+        )
+        partner_update_fields.append(
+            "verification_status"
+        )
+
+    if partner_update_fields:
         partner.save(
-            update_fields=[
-                "is_active",
-            ]
+            update_fields=partner_update_fields,
         )
 
     return reinstatement

@@ -108,6 +108,127 @@ class StaffPartnerAdminService {
     return Map<String, dynamic>.from(decoded);
   }
 
+  Future<Map<String, dynamic>> restrictPartner({
+    required int partnerId,
+    required String policyCode,
+    required String actionType,
+    required String reason,
+    int? durationDays,
+    bool confirmPermanentBan = false,
+  }) async {
+    if (partnerId <= 0) {
+      throw ArgumentError.value(
+        partnerId,
+        'partnerId',
+        'Partner ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/admin/partners/$partnerId/disciplinary-action/',
+    );
+
+    final payload = <String, dynamic>{
+      'policy_code': policyCode.trim(),
+      'action_type': actionType.trim(),
+      'reason': reason.trim(),
+      'confirm_permanent_ban': confirmPermanentBan,
+    };
+
+    if (durationDays != null) {
+      payload['duration_days'] = durationDays;
+    }
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to restrict this partner.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The partner access response was invalid.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> reinstatePartner({
+    required int partnerId,
+    required String reason,
+    bool confirmPermanentBanReversal = false,
+  }) async {
+    if (partnerId <= 0) {
+      throw ArgumentError.value(
+        partnerId,
+        'partnerId',
+        'Partner ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/admin/partners/$partnerId/reinstate/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'reason': reason.trim(),
+              'confirm_permanent_ban_reversal': (
+                confirmPermanentBanReversal
+              ),
+            }),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to restore this partner.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The partner reinstatement response was invalid.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
   Future<http.Response> _sendAuthorizedRequest(
     Future<http.Response> Function(String accessToken) request,
   ) async {

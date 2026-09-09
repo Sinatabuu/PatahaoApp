@@ -5,10 +5,87 @@ from .models import (
     PartnerPromotionReview,
     PartnerTier,
     PartnerTierAssignment,
-    PartnerViolation,
     PartnerReinstatement,
+    PartnerViolation,
     PolicyRule,
 )
+
+@admin.register(PolicyRule)
+class PolicyRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "code",
+        "title",
+        "severity",
+        "recommended_action",
+        "active",
+        "effective_from",
+    )
+    list_filter = (
+        "severity",
+        "recommended_action",
+        "active",
+    )
+    search_fields = (
+        "code",
+        "title",
+        "description",
+    )
+
+
+@admin.register(PartnerViolation)
+class PartnerViolationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "partner",
+        "policy",
+        "status",
+        "reported_by",
+        "reviewed_by",
+        "reported_at",
+    )
+    list_filter = (
+        "status",
+        "policy",
+    )
+    search_fields = (
+        "partner__display_name",
+        "partner__business_name",
+        "policy__code",
+        "summary",
+        "details",
+    )
+    readonly_fields = (
+        "partner",
+        "policy",
+        "status",
+        "summary",
+        "details",
+        "evidence_snapshot",
+        "reported_by",
+        "reviewed_by",
+        "reported_at",
+        "review_started_at",
+        "decided_at",
+        "decision_notes",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False
+
+    def has_delete_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False
+
 
 @admin.register(PartnerTier)
 class PartnerTierAdmin(admin.ModelAdmin):
@@ -67,6 +144,8 @@ class PartnerPromotionReviewAdmin(admin.ModelAdmin):
         "partner__display_name",
         "partner__business_name",
     )
+
+
 @admin.register(PartnerDisciplinaryAction)
 class PartnerDisciplinaryActionAdmin(admin.ModelAdmin):
     list_display = (
@@ -93,19 +172,38 @@ class PartnerDisciplinaryActionAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = (
-        "created_at",
-        "revoked_at",
-    )
-
-    autocomplete_fields = (
-        "partner",
-        "imposed_by",
-        "revoked_by",
-    )
-
-    raw_id_fields = (
         "violation",
+        "partner",
+        "action_type",
+        "status",
+        "reason",
+        "decision_snapshot",
+        "imposed_by",
+        "starts_at",
+        "ends_at",
+        "created_at",
+        "revoked_by",
+        "revoked_at",
+        "revocation_reason",
     )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False
+
+    def has_delete_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False
+
 
 @admin.register(PartnerReinstatement)
 class PartnerReinstatementAdmin(admin.ModelAdmin):
@@ -123,14 +221,27 @@ class PartnerReinstatementAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = (
+        "partner",
+        "reviewed_actions",
+        "approved_by",
+        "reason",
+        "evidence_snapshot",
         "reinstated_at",
     )
 
-    autocomplete_fields = (
-        "partner",
-        "approved_by",
-    )
+    def has_add_permission(self, request):
+        return False
 
-    filter_horizontal = (
-        "reviewed_actions",
-    )
+    def has_change_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False
+
+    def has_delete_permission(
+        self,
+        request,
+        obj=None,
+    ):
+        return False

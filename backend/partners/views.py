@@ -1,6 +1,7 @@
 from datetime import date, time
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
@@ -27,11 +28,25 @@ from introductions.models import ProtectedIntroduction
 from commissions.models import (
     CommissionSettlementParticipant,
 )
+from core.models import ActivityLog
+from governance.models import (
+    PartnerDisciplinaryAction,
+    PolicyRule,
+)
 from notifications.models import Notification
 from governance.services import (
+    confirm_partner_violation,
+    expire_disciplinary_action,
+    get_active_disciplinary_actions,
     get_current_tier,
     get_next_tier,
+    get_partner_restriction_summary,
     get_successful_three_party_deal_count,
+    impose_disciplinary_action,
+    reinstate_partner,
+    report_partner_violation,
+    revoke_disciplinary_action,
+    start_violation_review,
 )
 
 
@@ -430,6 +445,80 @@ def partner_viewing_complete(request, viewing_id):
     )
 
 
+def _governance_error_detail(exc):
+    message_dict = getattr(exc, "message_dict", None)
+    if message_dict is not None:
+        return message_dict
+
+    messages = getattr(exc, "messages", None)
+    if messages is not None:
+        return messages
+
+    return str(exc)
+
+
+def _admin_partner_governance_payload(partner):
+    restriction = get_partner_restriction_summary(partner)
+
+    history = (
+        PartnerDisciplinaryAction.objects
+        .select_related(
+            "violation",
+            "violation__policy",
+            "imposed_by",
+            "revoked_by",
+        )
+        .filter(partner=partner)
+        .order_by("-starts_at", "-id")[:20]
+    )
+
+    return {
+        **restriction,
+        "policy_options": [
+            {
+                "code": policy.code,
+                "title": policy.title,
+                "severity": policy.severity,
+                "severity_label": (
+                    policy.get_severity_display()
+                ),
+                "recommended_action": (
+                    policy.recommended_action
+                ),
+                "recommended_action_label": (
+                    policy.get_recommended_action_display()
+                ),
+            }
+            for policy in (
+                PolicyRule.objects
+                .filter(active=True)
+                .order_by("code")
+            )
+        ],
+        "history": [
+            {
+                "id": action.id,
+                "violation_id": action.violation_id,
+                "policy_code": action.violation.policy.code,
+                "policy_title": action.violation.policy.title,
+                "action_type": action.action_type,
+                "action_type_label": (
+                    action.get_action_type_display()
+                ),
+                "status": action.status,
+                "reason": action.reason,
+                "starts_at": action.starts_at,
+                "ends_at": action.ends_at,
+                "revoked_at": action.revoked_at,
+                "revocation_reason": (
+                    action.revocation_reason
+                ),
+            }
+            for action in history
+        ],
+    }
+
+
 class AdminPartnerListView(APIView):
     """
     Staff-only partner directory for Pata Hao operations.
@@ -704,9 +793,433 @@ class AdminPartnerDetailView(APIView):
                 ),
                 "created_at": partner.created_at,
                 "updated_at": partner.updated_at,
+                "governance": (
+                    _admin_partner_governance_payload(
+                        partner,
+                    )
+                ),
             },
             status=status.HTTP_200_OK,
         )
+
+
+class AdminPartnerDisciplinaryActionView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    @transaction.atomic
+    def post(self, request, partner_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "restrict partner access."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        partner = (
+            Partner.objects
+            .select_for_update()
+            .filter(pk=partner_id)
+            .first()
+        )
+
+        if partner is None:
+            return Response(
+                {"detail": "Partner not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        current_restriction = (
+            get_partner_restriction_summary(partner)
+        )
+
+        if current_restriction["restricted"]:
+            return Response(
+                {
+                    "detail": (
+                        "This partner already has an active "
+                        "access restriction."
+                    ),
+                    "governance": current_restriction,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        policy_code = str(
+            request.data.get("policy_code", "")
+        ).strip()
+        reason = str(
+            request.data.get("reason", "")
+        ).strip()
+        action_type = str(
+            request.data.get("action_type", "")
+        ).strip()
+
+        allowed_actions = {
+            (
+                PartnerDisciplinaryAction
+                .ActionType
+                .SHORT_SUSPENSION
+            ),
+            (
+                PartnerDisciplinaryAction
+                .ActionType
+                .LONG_SUSPENSION
+            ),
+            (
+                PartnerDisciplinaryAction
+                .ActionType
+                .PERMANENT_BAN
+            ),
+        }
+
+        if action_type not in allowed_actions:
+            return Response(
+                {
+                    "detail": (
+                        "Choose a temporary suspension or "
+                        "permanent ban."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(reason) < 10:
+            return Response(
+                {
+                    "detail": (
+                        "Provide a clear infringement and "
+                        "decision reason of at least 10 characters."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        policy = (
+            PolicyRule.objects
+            .filter(
+                code=policy_code,
+                active=True,
+            )
+            .first()
+        )
+
+        if policy is None:
+            return Response(
+                {
+                    "detail": (
+                        "Choose a valid active partner policy."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        duration_days = None
+
+        if action_type != (
+            PartnerDisciplinaryAction
+            .ActionType
+            .PERMANENT_BAN
+        ):
+            try:
+                duration_days = int(
+                    request.data.get("duration_days")
+                )
+            except (TypeError, ValueError):
+                return Response(
+                    {
+                        "detail": (
+                            "Choose a valid suspension duration."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if duration_days not in {7, 30, 90}:
+                return Response(
+                    {
+                        "detail": (
+                            "Suspension duration must be "
+                            "7, 30, or 90 days."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if (
+            action_type
+            == (
+                PartnerDisciplinaryAction
+                .ActionType
+                .PERMANENT_BAN
+            )
+            and request.data.get(
+                "confirm_permanent_ban"
+            )
+            is not True
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Permanent ban confirmation is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            violation = report_partner_violation(
+                partner=partner,
+                policy=policy,
+                summary=reason[:255],
+                details=reason,
+                evidence_snapshot={
+                    "source": (
+                        "staff_partner_access_control"
+                    ),
+                    "policy_code": policy.code,
+                    "requested_action": action_type,
+                    "duration_days": duration_days,
+                    "staff_user_id": request.user.id,
+                },
+                reported_by=request.user,
+            )
+            violation = start_violation_review(
+                violation=violation,
+                reviewer=request.user,
+            )
+            violation = confirm_partner_violation(
+                violation=violation,
+                reviewer=request.user,
+                decision_notes=reason,
+            )
+
+            override_reason = ""
+
+            if (
+                action_type
+                != policy.recommended_action
+            ):
+                override_reason = (
+                    "The administrator selected this access "
+                    f"action for the documented reason: {reason}"
+                )
+
+            action = impose_disciplinary_action(
+                violation=violation,
+                action_type=action_type,
+                imposed_by=request.user,
+                reason=reason,
+                duration_days=duration_days,
+                override_reason=override_reason,
+            )
+        except ValidationError as exc:
+            transaction.set_rollback(True)
+            return Response(
+                {
+                    "detail": (
+                        _governance_error_detail(exc)
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="partner_access_restricted",
+            entity_type="Partner",
+            entity_id=str(partner.id),
+            description=(
+                f"{request.user} imposed "
+                f"{action.get_action_type_display()} on "
+                f"{partner}. Reason: {reason}"
+            ),
+        )
+
+        partner.refresh_from_db()
+
+        return Response(
+            {
+                "detail": (
+                    "Partner access has been restricted."
+                ),
+                "partner_id": partner.id,
+                "verification_status": (
+                    partner.verification_status
+                ),
+                "is_active": partner.is_active,
+                "governance": (
+                    _admin_partner_governance_payload(
+                        partner,
+                    )
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminPartnerReinstatementView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    @transaction.atomic
+    def post(self, request, partner_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata Hao administrators may "
+                        "restore partner access."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        partner = (
+            Partner.objects
+            .select_for_update()
+            .filter(pk=partner_id)
+            .first()
+        )
+
+        if partner is None:
+            return Response(
+                {"detail": "Partner not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        reason = str(
+            request.data.get("reason", "")
+        ).strip()
+
+        if len(reason) < 10:
+            return Response(
+                {
+                    "detail": (
+                        "Provide a reinstatement reason of "
+                        "at least 10 characters."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        active_actions = [
+            action
+            for action in (
+                get_active_disciplinary_actions(
+                    partner,
+                )
+            )
+            if action.is_restrictive
+        ]
+
+        permanent_ban = next(
+            (
+                action
+                for action in active_actions
+                if action.is_permanent
+            ),
+            None,
+        )
+
+        if (
+            permanent_ban is not None
+            and request.data.get(
+                "confirm_permanent_ban_reversal"
+            )
+            is not True
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Explicit permanent-ban reversal "
+                        "confirmation is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if partner.is_active and not active_actions:
+            return Response(
+                {
+                    "detail": (
+                        "This partner already has active access."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            for action in active_actions:
+                if (
+                    not action.is_permanent
+                    and action.ends_at is not None
+                    and action.ends_at <= timezone.now()
+                ):
+                    expire_disciplinary_action(
+                        action=action,
+                    )
+                else:
+                    revoke_disciplinary_action(
+                        action=action,
+                        revoked_by=request.user,
+                        reason=reason,
+                    )
+
+            reinstate_partner(
+                partner=partner,
+                approved_by=request.user,
+                reason=reason,
+            )
+        except ValidationError as exc:
+            transaction.set_rollback(True)
+            return Response(
+                {
+                    "detail": (
+                        _governance_error_detail(exc)
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="partner_access_restored",
+            entity_type="Partner",
+            entity_id=str(partner.id),
+            description=(
+                f"{request.user} restored access for "
+                f"{partner}. Reason: {reason}"
+            ),
+        )
+
+        partner.refresh_from_db()
+
+        return Response(
+            {
+                "detail": (
+                    "Partner access has been restored."
+                ),
+                "partner_id": partner.id,
+                "verification_status": (
+                    partner.verification_status
+                ),
+                "is_active": partner.is_active,
+                "governance": (
+                    _admin_partner_governance_payload(
+                        partner,
+                    )
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class PartnerDashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -756,7 +1269,7 @@ class PartnerDashboardView(APIView):
             .order_by("-created_at")
         )
 
-        
+
         partner_commission_shares = (
             CommissionSettlementParticipant.objects
             .filter(partner=partner)
@@ -901,7 +1414,7 @@ class PartnerDashboardView(APIView):
         else:
             transactions_needed = 0
             tier_progress_percent = 100
-        
+
         today_viewings = viewings.filter(
             Q(confirmed_date=today)
             | Q(
@@ -923,7 +1436,7 @@ class PartnerDashboardView(APIView):
             completed_at__date=today,
         )
 
-        
+
         property_summary = properties.aggregate(
             total=Count("id"),
             published=Count(

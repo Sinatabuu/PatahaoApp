@@ -2,7 +2,9 @@ from django.urls import path
 
 from .views import (
     AdminPartnerDetailView,
+    AdminPartnerDisciplinaryActionView,
     AdminPartnerListView,
+    AdminPartnerReinstatementView,
     PartnerConfirmViewingView,
     PartnerDashboardView,
     PartnerDeclineViewingView,
@@ -82,5 +84,15 @@ urlpatterns = [
         "admin/partners/<int:partner_id>/",
         AdminPartnerDetailView.as_view(),
         name="admin-partner-detail",
+    ),
+    path(
+        "admin/partners/<int:partner_id>/disciplinary-action/",
+        AdminPartnerDisciplinaryActionView.as_view(),
+        name="admin-partner-disciplinary-action",
+    ),
+    path(
+        "admin/partners/<int:partner_id>/reinstate/",
+        AdminPartnerReinstatementView.as_view(),
+        name="admin-partner-reinstate",
     ),
 ]
