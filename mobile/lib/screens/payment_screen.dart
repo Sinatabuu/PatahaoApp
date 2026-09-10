@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/payment.dart';
@@ -234,6 +235,86 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
+  Future<void> _completeDevelopmentPayment() async {
+    FocusScope.of(context).unfocus();
+
+    if (_isProcessing) {
+      return;
+    }
+
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _paymentMessage = 'Preparing a safe development payment...';
+    });
+
+    try {
+      final createdPayment = await _paymentService.createPayment(
+        viewingId: widget.viewing.id,
+        phoneNumber: _phoneController.text.trim(),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _paymentMessage = 'Completing the development payment...';
+      });
+
+      final completedPayment =
+          await _paymentService.completeDevelopmentPayment(
+            paymentId: createdPayment.id,
+          );
+
+      Payment confirmedPayment = completedPayment;
+
+      try {
+        confirmedPayment = await _paymentService.getViewingReceipt(
+          viewingId: widget.viewing.id,
+        );
+      } catch (_) {
+        // The completed payment response is safe to display as a receipt.
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => PaymentSuccessScreen(
+            viewing: widget.viewing,
+            payment: confirmedPayment,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _paymentMessage = '';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
+    }
+  }
   String _paymentFailureMessage(Payment payment) {
     final failureReason = payment.failureReason.trim();
 
@@ -414,6 +495,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ),
                   ),
                 ),
+                if (kDebugMode) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _isProcessing
+                        ? null
+                        : _completeDevelopmentPayment,
+                    icon: const Icon(Icons.science_outlined),
+                    label: const Text('Complete Test Payment'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Development only — no M-Pesa request is sent.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

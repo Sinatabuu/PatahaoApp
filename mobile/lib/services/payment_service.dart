@@ -209,6 +209,49 @@ class PaymentService {
     );
   }
 
+  /// Completes a payment only in Flutter and Django development mode.
+  Future<Payment> completeDevelopmentPayment({
+    required int paymentId,
+  }) async {
+    if (!kDebugMode) {
+      throw Exception(
+        'Test payments are available only in development.',
+      );
+    }
+
+    final token = await _validAccessToken();
+
+    final response = await http
+        .post(
+          Uri.parse(
+            '${PropertyService.baseUrl}/api/payments/'
+            '$paymentId/mock-success/',
+          ),
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        )
+        .timeout(const Duration(seconds: 30));
+
+    final decoded = _decode(response.body);
+
+    debugPrint(
+      'DEVELOPMENT PAYMENT STATUS: ${response.statusCode}',
+    );
+
+    if (response.statusCode == 200 &&
+        decoded is Map<String, dynamic>) {
+      return Payment.fromJson(decoded);
+    }
+
+    throw Exception(
+      _extractError(
+        decoded,
+        fallback: 'Unable to complete the development payment.',
+      ),
+    );
+  }
   Future<String> _validAccessToken() async {
     final token = await AuthService.instance.getAccessToken();
 
