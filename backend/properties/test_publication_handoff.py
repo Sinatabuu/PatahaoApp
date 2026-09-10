@@ -31,7 +31,10 @@ from properties.photo_coverage import (
     PHOTO_TYPE_KITCHEN,
     PHOTO_TYPE_LIVING_AREA,
 )
-from viewings.models import Viewing
+from viewings.models import (
+    SALE_VIEWING_FEE,
+    Viewing,
+)
 
 
 class PropertyPublicationHandoffTests(APITestCase):
@@ -398,7 +401,7 @@ class PropertyPublicationHandoffTests(APITestCase):
         )
         self.assertEqual(
             viewing_response.data["fee_amount"],
-            "300.00",
+            str(SALE_VIEWING_FEE),
         )
         self.assertEqual(
             viewing_response.data["assigned_partner"],
