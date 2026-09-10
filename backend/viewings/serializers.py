@@ -146,6 +146,12 @@ class ViewingSerializer(serializers.ModelSerializer):
     completion_notes = serializers.SerializerMethodField()
     deal_id = serializers.SerializerMethodField()
     partner_outcome_submitted = serializers.SerializerMethodField()
+    fee_resolution_label = serializers.CharField(
+        source="get_fee_resolution_choice_display",
+        read_only=True,
+    )
+    remaining_reschedule_proposals = serializers.SerializerMethodField()
+    requires_fee_resolution = serializers.SerializerMethodField()
 
     class Meta:
         model = Viewing
@@ -174,6 +180,12 @@ class ViewingSerializer(serializers.ModelSerializer):
             "confirmed_date",
             "confirmed_time",
             "partner_responded_at",
+            "reschedule_decline_count",
+            "remaining_reschedule_proposals",
+            "fee_resolution_choice",
+            "fee_resolution_label",
+            "fee_resolution_requested_at",
+            "requires_fee_resolution",
             "completed_at",
             "partner_departed_at",
             "partner_arrived_at",
@@ -204,6 +216,12 @@ class ViewingSerializer(serializers.ModelSerializer):
             "confirmed_date",
             "confirmed_time",
             "partner_responded_at",
+            "reschedule_decline_count",
+            "remaining_reschedule_proposals",
+            "fee_resolution_choice",
+            "fee_resolution_label",
+            "fee_resolution_requested_at",
+            "requires_fee_resolution",
             "completed_at",
             "partner_departed_at",
             "partner_arrived_at",
@@ -241,6 +259,19 @@ class ViewingSerializer(serializers.ModelSerializer):
 
         else:
             return "unknown"
+
+    def get_remaining_reschedule_proposals(self, obj):
+        return max(
+            0,
+            Viewing.MAX_RESCHEDULE_DECLINES
+            - obj.reschedule_decline_count,
+        )
+
+    def get_requires_fee_resolution(self, obj):
+        return (
+            obj.status == Viewing.Status.SCHEDULING_FAILED
+            and not obj.fee_resolution_choice
+        )
 
     def _latest_event(self, obj, event_type):
         return (

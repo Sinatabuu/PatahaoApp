@@ -908,12 +908,13 @@ class _ActionCard extends StatelessWidget {
     final status = viewing.effectiveBookingStatus;
 
     final awaitingPartner = status == 'paid_pending_partner' ||
-        status == 'paid_awaiting_partner' ||
-        status == 'reschedule_proposed';
+        status == 'paid_awaiting_partner';
 
     final confirmed = status == 'confirmed';
     final completed = status == 'completed';
     final cancelled = status == 'cancelled' || status == 'declined';
+    final waitingForCustomer = status == 'reschedule_proposed';
+    final schedulingFailed = status == 'scheduling_failed';
 
     return _SectionCard(
       title: 'Available actions',
@@ -930,6 +931,20 @@ class _ActionCard extends StatelessWidget {
             icon: Icons.cancel_outlined,
             message: 'This viewing is no longer active.',
             color: Colors.red,
+          )
+        else if (waitingForCustomer)
+          const _FinishedMessage(
+            icon: Icons.hourglass_top_outlined,
+            message: 'Waiting for the customer to accept or decline the '
+                'proposed time.',
+            color: Color(0xFF6D28D9),
+          )
+        else if (schedulingFailed)
+          const _FinishedMessage(
+            icon: Icons.event_busy_outlined,
+            message: 'Scheduling ended after two declined proposals. '
+                'Pata HAO will handle the customer fee choice.',
+            color: Color(0xFFB45309),
           )
         else if (awaitingPartner) ...[
           _PrimaryActionButton(
@@ -1179,6 +1194,9 @@ Color _bookingStatusColor(String status) {
 
     case 'reschedule_proposed':
       return Colors.deepPurple.shade700;
+
+    case 'scheduling_failed':
+      return Colors.orange.shade900;
 
     case 'cancelled':
     case 'declined':

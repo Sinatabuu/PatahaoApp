@@ -9,12 +9,14 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from django.core.exceptions import (
+    ObjectDoesNotExist,
     ValidationError as DjangoValidationError,
 )
 from governance.services import (
     enforce_partner_operational_access,
 )
 from core.models import ActivityLog
+from notifications.models import Notification
 from introductions.services import (
     create_property_introduction_certificate,
 )
@@ -94,6 +96,9 @@ class ViewingViewSet(viewsets.ModelViewSet):
     - GET /api/viewings/
     - POST /api/viewings/
     - GET /api/viewings/{id}/
+    - POST /api/viewings/{id}/accept-reschedule/
+    - POST /api/viewings/{id}/decline-reschedule/
+    - POST /api/viewings/{id}/choose-fee-resolution/
 
     Partner endpoints:
     - GET /api/viewings/partner-inbox/
@@ -209,6 +214,30 @@ class ViewingViewSet(viewsets.ModelViewSet):
             assigned_partner=partner,
         )
 
+    def _get_customer_viewing(self, pk):
+        """Lock and return a viewing owned by the logged-in customer."""
+
+        queryset = self._base_queryset().select_for_update(
+            of=("self",),
+        )
+
+        return get_object_or_404(
+            queryset,
+            pk=pk,
+            customer=self.request.user,
+        )
+
+    def _notify_assigned_partner(self, viewing, *, title, message):
+        partner = viewing.assigned_partner
+
+        if partner and partner.user_id:
+            Notification.objects.create(
+                user=partner.user,
+                title=title,
+                message=message,
+                notification_type=Notification.TYPE_VIEWING,
+            )
+
     def _require_confirmed_viewing(self, viewing):
         if viewing.status != Viewing.Status.CONFIRMED:
             raise ValidationError(
@@ -276,6 +305,7 @@ class ViewingViewSet(viewsets.ModelViewSet):
             status__in=[
                 Viewing.Status.PAID_PENDING_PARTNER,
                 Viewing.Status.RESCHEDULE_PROPOSED,
+                Viewing.Status.SCHEDULING_FAILED,
                 Viewing.Status.CONFIRMED,
                 Viewing.Status.COMPLETED,
                 Viewing.Status.DECLINED,
@@ -402,16 +432,25 @@ class ViewingViewSet(viewsets.ModelViewSet):
 
         viewing = self._get_partner_viewing(pk)
 
-        allowed_statuses = {
-            Viewing.Status.PAID_PENDING_PARTNER,
-            Viewing.Status.RESCHEDULE_PROPOSED,
-        }
-
-        if viewing.status not in allowed_statuses:
+        if viewing.status != Viewing.Status.PAID_PENDING_PARTNER:
             raise ValidationError(
                 {
                     "status": (
-                        "This viewing cannot currently be rescheduled."
+                        "Wait for the customer to respond to the current "
+                        "proposal before proposing another time."
+                    )
+                }
+            )
+
+        if (
+            viewing.reschedule_decline_count
+            >= Viewing.MAX_RESCHEDULE_DECLINES
+        ):
+            raise ValidationError(
+                {
+                    "status": (
+                        "The two allowed revised-time attempts have "
+                        "already been used."
                     )
                 }
             )
@@ -515,6 +554,9 @@ class ViewingViewSet(viewsets.ModelViewSet):
             metadata={
                 "proposed_date": viewing.proposed_date.isoformat(),
                 "proposed_time": viewing.proposed_time.isoformat(),
+                "proposal_number": (
+                    viewing.reschedule_decline_count + 1
+                ),
             },
         )
 
@@ -533,6 +575,362 @@ class ViewingViewSet(viewsets.ModelViewSet):
 
         return Response(
             serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="accept-reschedule",
+    )
+    @transaction.atomic
+    def accept_reschedule(self, request, pk=None):
+        """Confirm the date and time proposed by the assigned partner."""
+
+        viewing = self._get_customer_viewing(pk)
+
+        if viewing.status != Viewing.Status.RESCHEDULE_PROPOSED:
+            raise ValidationError(
+                {
+                    "status": (
+                        "There is no partner schedule proposal awaiting "
+                        "your response."
+                    )
+                }
+            )
+
+        if viewing.proposed_date is None or viewing.proposed_time is None:
+            raise ValidationError(
+                {
+                    "schedule": (
+                        "The proposed viewing date and time are incomplete."
+                    )
+                }
+            )
+
+        confirmed_date = viewing.proposed_date
+        confirmed_time = viewing.proposed_time
+        partner_message = viewing.partner_response_message
+
+        viewing.status = Viewing.Status.CONFIRMED
+        viewing.confirmed_date = confirmed_date
+        viewing.confirmed_time = confirmed_time
+        viewing.proposed_date = None
+        viewing.proposed_time = None
+        viewing.partner_response_message = ""
+
+        viewing.save(
+            update_fields=[
+                "status",
+                "confirmed_date",
+                "confirmed_time",
+                "proposed_date",
+                "proposed_time",
+                "partner_response_message",
+                "updated_at",
+            ]
+        )
+
+        viewing.record_event(
+            event_type=(
+                ViewingEvent.EventType.CUSTOMER_ACCEPTED_RESCHEDULE
+            ),
+            actor=request.user,
+            notes="Customer accepted the partner's proposed viewing time.",
+            metadata={
+                "confirmed_date": confirmed_date.isoformat(),
+                "confirmed_time": confirmed_time.isoformat(),
+                "partner_message": partner_message,
+            },
+        )
+
+        self._notify_assigned_partner(
+            viewing,
+            title="Customer accepted viewing time",
+            message=(
+                f"The customer accepted the revised viewing time for "
+                f"{viewing.property.title}."
+            ),
+        )
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="viewing_customer_accepted_reschedule",
+            entity_type="Viewing",
+            entity_id=str(viewing.pk),
+            description=(
+                f"Customer accepted the revised viewing time for "
+                f"{viewing.property.title}"
+            ),
+        )
+
+        serializer = self.get_serializer(viewing)
+
+        return Response(
+            {
+                "detail": "The revised viewing time is confirmed.",
+                "viewing": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="decline-reschedule",
+    )
+    @transaction.atomic
+    def decline_reschedule(self, request, pk=None):
+        """Reject one partner proposal without forfeiting the paid fee."""
+
+        viewing = self._get_customer_viewing(pk)
+
+        if viewing.status != Viewing.Status.RESCHEDULE_PROPOSED:
+            raise ValidationError(
+                {
+                    "status": (
+                        "There is no partner schedule proposal awaiting "
+                        "your response."
+                    )
+                }
+            )
+
+        proposed_date = viewing.proposed_date
+        proposed_time = viewing.proposed_time
+        partner_message = viewing.partner_response_message
+        decline_count = viewing.reschedule_decline_count + 1
+
+        if decline_count >= Viewing.MAX_RESCHEDULE_DECLINES:
+            next_status = Viewing.Status.SCHEDULING_FAILED
+            detail = (
+                "The two revised-time attempts were declined. "
+                "Choose a viewing credit or a full refund."
+            )
+        else:
+            next_status = Viewing.Status.PAID_PENDING_PARTNER
+            detail = (
+                "The proposed time was declined. The partner may propose "
+                "one more revised time."
+            )
+
+        viewing.status = next_status
+        viewing.reschedule_decline_count = decline_count
+        viewing.proposed_date = None
+        viewing.proposed_time = None
+        viewing.partner_response_message = ""
+        viewing.confirmed_date = None
+        viewing.confirmed_time = None
+
+        viewing.save(
+            update_fields=[
+                "status",
+                "reschedule_decline_count",
+                "proposed_date",
+                "proposed_time",
+                "partner_response_message",
+                "confirmed_date",
+                "confirmed_time",
+                "updated_at",
+            ]
+        )
+
+        event_metadata = {
+            "decline_count": decline_count,
+            "maximum_declines": Viewing.MAX_RESCHEDULE_DECLINES,
+            "partner_message": partner_message,
+        }
+
+        if proposed_date is not None:
+            event_metadata["proposed_date"] = proposed_date.isoformat()
+
+        if proposed_time is not None:
+            event_metadata["proposed_time"] = proposed_time.isoformat()
+
+        viewing.record_event(
+            event_type=(
+                ViewingEvent.EventType.CUSTOMER_DECLINED_RESCHEDULE
+            ),
+            actor=request.user,
+            notes="Customer declined the partner's proposed viewing time.",
+            metadata=event_metadata,
+        )
+
+        if next_status == Viewing.Status.SCHEDULING_FAILED:
+            viewing.record_event(
+                event_type=ViewingEvent.EventType.SCHEDULING_FAILED,
+                actor=request.user,
+                notes=(
+                    "No viewing time was agreed after two revised-time "
+                    "attempts."
+                ),
+                metadata={
+                    "decline_count": decline_count,
+                },
+            )
+
+        self._notify_assigned_partner(
+            viewing,
+            title=(
+                "Viewing scheduling needs resolution"
+                if next_status == Viewing.Status.SCHEDULING_FAILED
+                else "Customer requested another viewing time"
+            ),
+            message=(
+                f"The customer declined the revised viewing time for "
+                f"{viewing.property.title}."
+            ),
+        )
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="viewing_customer_declined_reschedule",
+            entity_type="Viewing",
+            entity_id=str(viewing.pk),
+            description=(
+                f"Customer declined revised viewing time "
+                f"{decline_count} for {viewing.property.title}"
+            ),
+        )
+
+        serializer = self.get_serializer(viewing)
+
+        return Response(
+            {
+                "detail": detail,
+                "fee_resolution_required": (
+                    next_status == Viewing.Status.SCHEDULING_FAILED
+                ),
+                "viewing": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="choose-fee-resolution",
+    )
+    @transaction.atomic
+    def choose_fee_resolution(self, request, pk=None):
+        """Record the customer's credit-or-refund choice for staff action."""
+
+        viewing = self._get_customer_viewing(pk)
+        choice = str(request.data.get("choice", "")).strip().lower()
+        valid_choices = {
+            item.value
+            for item in Viewing.FeeResolutionChoice
+        }
+
+        if choice not in valid_choices:
+            raise ValidationError(
+                {
+                    "choice": (
+                        "Choose either viewing credit or a full refund."
+                    )
+                }
+            )
+
+        if viewing.status != Viewing.Status.SCHEDULING_FAILED:
+            raise ValidationError(
+                {
+                    "status": (
+                        "A fee resolution can be chosen only after the "
+                        "two scheduling attempts have failed."
+                    )
+                }
+            )
+
+        try:
+            payment = viewing.payment
+        except ObjectDoesNotExist:
+            payment = None
+
+        if payment is None or payment.status != payment.Status.SUCCESSFUL:
+            raise ValidationError(
+                {
+                    "payment": (
+                        "A successful viewing payment is required before "
+                        "choosing a credit or refund."
+                    )
+                }
+            )
+
+        if viewing.fee_resolution_choice:
+            if viewing.fee_resolution_choice != choice:
+                raise ValidationError(
+                    {
+                        "choice": (
+                            "A different fee resolution has already been "
+                            "recorded for this viewing."
+                        )
+                    }
+                )
+
+            serializer = self.get_serializer(viewing)
+
+            return Response(
+                {
+                    "detail": "Your fee resolution choice is already recorded.",
+                    "viewing": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        viewing.fee_resolution_choice = choice
+        viewing.fee_resolution_requested_at = timezone.now()
+        viewing.save(
+            update_fields=[
+                "fee_resolution_choice",
+                "fee_resolution_requested_at",
+                "updated_at",
+            ]
+        )
+
+        choice_label = viewing.get_fee_resolution_choice_display()
+
+        viewing.record_event(
+            event_type=ViewingEvent.EventType.FEE_RESOLUTION_CHOSEN,
+            actor=request.user,
+            notes=f"Customer chose: {choice_label}.",
+            metadata={
+                "choice": choice,
+                "amount": str(payment.amount),
+                "currency": payment.currency,
+                "payment_id": payment.id,
+            },
+        )
+
+        Notification.objects.create(
+            user=request.user,
+            title="Viewing fee choice recorded",
+            message=(
+                f"Your choice of {choice_label.lower()} for "
+                f"{viewing.property.title} was recorded for processing."
+            ),
+            notification_type=Notification.TYPE_PAYMENT,
+        )
+
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="viewing_fee_resolution_chosen",
+            entity_type="Viewing",
+            entity_id=str(viewing.pk),
+            description=(
+                f"Customer chose {choice} for the unused viewing fee on "
+                f"{viewing.property.title}"
+            ),
+        )
+
+        serializer = self.get_serializer(viewing)
+
+        return Response(
+            {
+                "detail": (
+                    f"Your {choice_label.lower()} choice was recorded "
+                    "for processing."
+                ),
+                "viewing": serializer.data,
+            },
             status=status.HTTP_200_OK,
         )
 

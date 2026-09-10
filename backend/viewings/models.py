@@ -36,6 +36,10 @@ class Viewing(models.Model):
             "reschedule_proposed",
             "Partner proposed another time",
         )
+        SCHEDULING_FAILED = (
+            "scheduling_failed",
+            "Viewing time could not be agreed",
+        )
         CONFIRMED = (
             "confirmed",
             "Confirmed",
@@ -64,6 +68,18 @@ class Viewing(models.Model):
             "disputed",
             "Disputed",
         )
+
+    class FeeResolutionChoice(models.TextChoices):
+        CREDIT = (
+            "credit",
+            "Transferable viewing credit",
+        )
+        REFUND = (
+            "refund",
+            "Full refund",
+        )
+
+    MAX_RESCHEDULE_DECLINES = 2
 
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -153,6 +169,25 @@ class Viewing(models.Model):
     partner_responded_at = models.DateTimeField(
         null=True,
         blank=True,
+    )
+
+    reschedule_decline_count = models.PositiveSmallIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    fee_resolution_choice = models.CharField(
+        max_length=20,
+        choices=FeeResolutionChoice.choices,
+        blank=True,
+        default="",
+        editable=False,
+    )
+
+    fee_resolution_requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
     )
 
     completed_at = models.DateTimeField(
@@ -319,6 +354,26 @@ class ViewingEvent(models.Model):
         RESCHEDULE_PROPOSED = (
             "reschedule_proposed",
             "Reschedule proposed",
+        )
+
+        CUSTOMER_ACCEPTED_RESCHEDULE = (
+            "customer_accepted_reschedule",
+            "Customer accepted reschedule",
+        )
+
+        CUSTOMER_DECLINED_RESCHEDULE = (
+            "customer_declined_reschedule",
+            "Customer declined reschedule",
+        )
+
+        SCHEDULING_FAILED = (
+            "scheduling_failed",
+            "Scheduling failed",
+        )
+
+        FEE_RESOLUTION_CHOSEN = (
+            "fee_resolution_chosen",
+            "Fee resolution chosen",
         )
 
         PARTNER_EN_ROUTE = (

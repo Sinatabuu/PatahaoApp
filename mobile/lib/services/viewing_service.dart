@@ -303,7 +303,7 @@ class ViewingService {
         decoded,
         fallback:
             'Unable to accept the proposed '
-            'viewing time.',
+            'viewing time. Server returned ${response.statusCode}.',
       ),
     );
   }
@@ -337,7 +337,48 @@ class ViewingService {
         decoded,
         fallback:
             'Unable to decline the proposed '
-            'viewing time.',
+            'viewing time. Server returned ${response.statusCode}.',
+      ),
+    );
+  }
+
+  Future<Viewing> chooseFeeResolution(
+    int viewingId, {
+    required String choice,
+  }) async {
+    if (!const <String>{'credit', 'refund'}.contains(choice)) {
+      throw Exception('Choose viewing credit or a full refund.');
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/viewings/'
+      '$viewingId/choose-fee-resolution/',
+    );
+
+    final response = await _authorizedPost(
+      uri,
+      body: jsonEncode(<String, dynamic>{'choice': choice}),
+    );
+
+    final dynamic decoded = _decodeResponse(
+      response.body,
+      fallback: <String, dynamic>{},
+    );
+
+    if (response.statusCode == 200 && decoded is Map) {
+      final dynamic viewingData = decoded['viewing'];
+
+      if (viewingData is Map) {
+        return Viewing.fromJson(Map<String, dynamic>.from(viewingData));
+      }
+    }
+
+    throw Exception(
+      _extractError(
+        decoded,
+        fallback:
+            'Unable to save your fee choice. '
+            'Server returned ${response.statusCode}.',
       ),
     );
   }

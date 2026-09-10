@@ -30,6 +30,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
   late Future<ViewingFeedback?> _feedbackFuture;
   bool _isLoadingReceipt = false;
   bool _isRespondingToProposal = false;
+  bool _isChoosingFeeResolution = false;
 
   @override
   void initState() {
@@ -173,19 +174,25 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
       return;
     }
 
+    final willAllowAnotherProposal =
+        viewing.remainingRescheduleProposals > 1;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Decline proposed schedule?'),
-          content: const Text(
-            'Declining this proposed date and time will cancel this viewing '
-            'request. This action cannot be undone.',
+          content: Text(
+            willAllowAnotherProposal
+                ? 'The partner will be asked to suggest one final date and '
+                    'time. Your paid viewing remains active.'
+                : 'This is the final proposal. Declining it will end '
+                    'scheduling, then you can choose viewing credit or a '
+                    'full refund.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Keep Viewing'),
+              child: const Text('Keep Proposal'),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -193,7 +200,11 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Decline and Cancel'),
+              child: Text(
+                willAllowAnotherProposal
+                    ? 'Request Another Time'
+                    : 'End Scheduling',
+              ),
             ),
           ],
         );
@@ -209,16 +220,20 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
     });
 
     try {
-      await _viewingService.declineReschedule(viewing.id);
+      final updatedViewing = await _viewingService.declineReschedule(
+        viewing.id,
+      );
 
       if (!mounted) {
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'The proposed schedule was declined and the viewing was cancelled.',
+            updatedViewing.requiresFeeResolution
+                ? 'Scheduling ended. Choose viewing credit or a full refund.'
+                : 'The partner can now propose one final viewing time.',
           ),
         ),
       );
@@ -240,6 +255,92 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
       if (mounted) {
         setState(() {
           _isRespondingToProposal = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _chooseFeeResolution(
+    Viewing viewing,
+    String choice,
+  ) async {
+    if (_isChoosingFeeResolution) {
+      return;
+    }
+
+    final isRefund = choice == 'refund';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            isRefund ? 'Request a full refund?' : 'Keep as viewing credit?',
+          ),
+          content: Text(
+            isRefund
+                ? 'Your refund request will be recorded for processing by '
+                    'the Pata HAO team.'
+                : 'Your paid fee will be recorded as transferable viewing '
+                    'credit for another property.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Not Yet'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(isRefund ? 'Request Refund' : 'Keep Credit'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isChoosingFeeResolution = true;
+    });
+
+    try {
+      final updatedViewing = await _viewingService.chooseFeeResolution(
+        viewing.id,
+        choice: choice,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${updatedViewing.feeResolutionLabel} recorded for processing.',
+          ),
+          backgroundColor: const Color(0xFF15803D),
+        ),
+      );
+
+      setState(_loadViewing);
+      await _viewingFuture;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: const Color(0xFFB91C1C),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isChoosingFeeResolution = false;
         });
       }
     }
@@ -326,6 +427,9 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
       case 'partner_reschedule':
         return const Color(0xFF7C3AED);
 
+      case 'scheduling_failed':
+        return const Color(0xFFB45309);
+
       case 'declined':
       case 'cancelled':
       case 'expired':
@@ -358,6 +462,9 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
       case 'reschedule_proposed':
       case 'partner_reschedule':
         return Icons.update_outlined;
+
+      case 'scheduling_failed':
+        return Icons.account_balance_wallet_outlined;
 
       case 'declined':
       case 'cancelled':
@@ -493,6 +600,20 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
                         : null,
                     onDecline: viewing.canRespondToReschedule
                         ? () => _declineReschedule(viewing)
+                        : null,
+                  ),
+                ],
+                if (viewing.effectiveBookingStatus ==
+                    'scheduling_failed') ...[
+                  const SizedBox(height: 16),
+                  _FeeResolutionCard(
+                    viewing: viewing,
+                    isSubmitting: _isChoosingFeeResolution,
+                    onCredit: viewing.requiresFeeResolution
+                        ? () => _chooseFeeResolution(viewing, 'credit')
+                        : null,
+                    onRefund: viewing.requiresFeeResolution
+                        ? () => _chooseFeeResolution(viewing, 'refund')
                         : null,
                   ),
                 ],
@@ -791,6 +912,100 @@ class _DetailRow extends StatelessWidget {
           const SizedBox(width: 12),
           Flexible(child: valueWidget),
         ],
+      ),
+    );
+  }
+}
+
+class _FeeResolutionCard extends StatelessWidget {
+  const _FeeResolutionCard({
+    required this.viewing,
+    required this.isSubmitting,
+    required this.onCredit,
+    required this.onRefund,
+  });
+
+  final Viewing viewing;
+  final bool isSubmitting;
+  final VoidCallback? onCredit;
+  final VoidCallback? onRefund;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasChoice = viewing.hasFeeResolutionChoice;
+    final choiceLabel = viewing.feeResolutionLabel.trim().isNotEmpty
+        ? viewing.feeResolutionLabel
+        : viewing.feeResolutionChoice == 'refund'
+        ? 'Full refund'
+        : 'Transferable viewing credit';
+
+    return Card(
+      elevation: 1.5,
+      color: const Color(0xFFFFFBEB),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(color: Color(0xFFFCD34D)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: Color(0xFFB45309),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Viewing Fee Resolution',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF78350F),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              hasChoice
+                  ? '$choiceLabel has been recorded for processing. The '
+                      'Pata HAO team will update you when it is completed.'
+                  : 'Two proposed times were declined. Choose what should '
+                      'happen to your paid viewing fee.',
+              style: const TextStyle(
+                color: Color(0xFF78350F),
+                height: 1.45,
+              ),
+            ),
+            if (!hasChoice) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: isSubmitting ? null : onCredit,
+                  icon: const Icon(Icons.swap_horiz_outlined),
+                  label: Text(
+                    isSubmitting ? 'Saving choice...' : 'Use as Viewing Credit',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: isSubmitting ? null : onRefund,
+                  icon: const Icon(Icons.currency_exchange_outlined),
+                  label: const Text('Request Full Refund'),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

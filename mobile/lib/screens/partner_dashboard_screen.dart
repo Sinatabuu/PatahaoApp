@@ -569,6 +569,10 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
     return viewing.status.trim().toLowerCase() == 'completed';
   }
 
+  bool _isSchedulingFailed(PartnerDashboardViewing viewing) {
+    return viewing.status.trim().toLowerCase() == 'scheduling_failed';
+  }
+
   bool _isActiveViewing(PartnerDashboardViewing viewing) {
     const activeStatuses = <String>{'confirmed', 'reschedule_proposed'};
 
@@ -735,6 +739,10 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
               allViewings.where(_isCompletedViewing).toList()
                 ..sort((first, second) => second.id.compareTo(first.id));
 
+          final schedulingFailedViewings =
+              allViewings.where(_isSchedulingFailed).toList()
+                ..sort((first, second) => second.id.compareTo(first.id));
+
           return RefreshIndicator(
             onRefresh: _refreshDashboard,
             child: ListView(
@@ -847,6 +855,15 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                   emptyIcon: Icons.event_available_outlined,
                   viewings: upcomingViewings,
                 ),
+                if (schedulingFailedViewings.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  _buildViewingSection(
+                    title: 'Scheduling Resolution',
+                    emptyMessage: 'No viewings need scheduling resolution.',
+                    emptyIcon: Icons.event_busy_outlined,
+                    viewings: schedulingFailedViewings,
+                  ),
+                ],
                 const SizedBox(height: 24),
                 _buildViewingSection(
                   title: 'Completed Viewings',
@@ -2050,6 +2067,9 @@ Color _statusBackground(String status) {
     case 'reschedule_proposed':
       return const Color(0xFFE8F2FF);
 
+    case 'scheduling_failed':
+      return const Color(0xFFFFF1CC);
+
     case 'rented':
     case 'sold':
       return const Color(0xFFE9E4F7);
@@ -2078,6 +2098,9 @@ Color _statusForeground(String status) {
     case 'reserved':
     case 'reschedule_proposed':
       return const Color(0xFF1C5D99);
+
+    case 'scheduling_failed':
+      return const Color(0xFF8A4B00);
 
     case 'rented':
     case 'sold':

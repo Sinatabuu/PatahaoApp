@@ -29,6 +29,12 @@ class Viewing {
     this.partnerDepartedAt,
     this.partnerArrivedAt,
     this.viewingStartedAt,
+    this.rescheduleDeclineCount = 0,
+    this.remainingRescheduleProposals = 2,
+    this.feeResolutionChoice = '',
+    this.feeResolutionLabel = '',
+    this.feeResolutionRequestedAt,
+    this.requiresFeeResolution = false,
   });
 
   final int id;
@@ -67,6 +73,13 @@ class Viewing {
   final String? partnerArrivedAt;
   final String? viewingStartedAt;
 
+  final int rescheduleDeclineCount;
+  final int remainingRescheduleProposals;
+  final String feeResolutionChoice;
+  final String feeResolutionLabel;
+  final String? feeResolutionRequestedAt;
+  final bool requiresFeeResolution;
+
   final String completionNotes;
   final List<ViewingEvent> events;
   final String createdAt;
@@ -103,6 +116,17 @@ class Viewing {
       partnerDepartedAt: _parseNullableString(json['partner_departed_at']),
       partnerArrivedAt: _parseNullableString(json['partner_arrived_at']),
       viewingStartedAt: _parseNullableString(json['viewing_started_at']),
+      rescheduleDeclineCount: _parseInt(json['reschedule_decline_count']),
+      remainingRescheduleProposals: _parseIntWithDefault(
+        json['remaining_reschedule_proposals'],
+        2,
+      ),
+      feeResolutionChoice: json['fee_resolution_choice']?.toString() ?? '',
+      feeResolutionLabel: json['fee_resolution_label']?.toString() ?? '',
+      feeResolutionRequestedAt: _parseNullableString(
+        json['fee_resolution_requested_at'],
+      ),
+      requiresFeeResolution: json['requires_fee_resolution'] == true,
       completionNotes: json['completion_notes']?.toString() ?? '',
       events: _parseEvents(json['events']),
       createdAt: json['created_at']?.toString() ?? '',
@@ -142,6 +166,11 @@ class Viewing {
       case 'reschedule_proposed':
         return 'New schedule proposed';
 
+      case 'scheduling_failed':
+        return hasFeeResolutionChoice
+            ? 'Fee resolution requested'
+            : 'Scheduling could not be agreed';
+
       case 'declined':
         return 'Declined';
 
@@ -167,6 +196,7 @@ class Viewing {
       'confirmed',
       'partner_reschedule',
       'reschedule_proposed',
+      'scheduling_failed',
       'completed',
     }.contains(effectiveBookingStatus);
   }
@@ -222,6 +252,14 @@ class Viewing {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  static int _parseIntWithDefault(dynamic value, int fallback) {
+    if (value is int) {
+      return value;
+    }
+
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
   static int? _parseNullableInt(dynamic value) {
     if (value == null) {
       return null;
@@ -255,6 +293,10 @@ class Viewing {
   bool get canRespondToReschedule {
     return effectiveBookingStatus == 'reschedule_proposed' ||
         effectiveBookingStatus == 'partner_reschedule';
+  }
+
+  bool get hasFeeResolutionChoice {
+    return feeResolutionChoice.trim().isNotEmpty;
   }
 
   List<ViewingEvent> get sortedEvents {

@@ -13,11 +13,14 @@ class ViewingAdmin(admin.ModelAdmin):
         "requested_time",
         "fee_amount",
         "status",
+        "reschedule_decline_count",
+        "fee_resolution_choice",
         "created_at",
     )
 
     list_filter = (
         "status",
+        "fee_resolution_choice",
         "requested_date",
         "created_at",
     )
@@ -30,6 +33,9 @@ class ViewingAdmin(admin.ModelAdmin):
 
     readonly_fields = (
         "fee_amount",
+        "reschedule_decline_count",
+        "fee_resolution_choice",
+        "fee_resolution_requested_at",
         "created_at",
         "updated_at",
     )
