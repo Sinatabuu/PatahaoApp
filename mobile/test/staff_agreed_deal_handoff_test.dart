@@ -103,4 +103,38 @@ void main() {
 
     expect(receiptRequested, isTrue);
   });
+
+  testWidgets('commission payout uses cash-free payment choices', (
+    tester,
+  ) async {
+    var selectedMethod = 'mpesa';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StaffCommissionPayoutMethodField(
+            initialValue: selectedMethod,
+            onChanged: (value) {
+              selectedMethod = value;
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('M-Pesa'), findsOneWidget);
+
+    await tester.tap(find.text('M-Pesa'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Airtel Money'), findsOneWidget);
+    expect(find.text('Bank transfer'), findsOneWidget);
+    expect(find.text('Other traceable method'), findsOneWidget);
+    expect(find.text('Cash'), findsNothing);
+
+    await tester.tap(find.text('Airtel Money'));
+    await tester.pumpAndSettle();
+
+    expect(selectedMethod, 'airtel_money');
+  });
 }

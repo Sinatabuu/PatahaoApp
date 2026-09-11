@@ -423,7 +423,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
     final isSale = _text(deal, 'listing_type') == 'sale';
     final transactionLabel = isSale ? 'sale' : 'rental';
     final completedPropertyStatus = isSale ? 'sold' : 'rented';
-    final notesController = TextEditingController();
+    var notesText = '';
 
     final notes = await showDialog<String>(
       context: context,
@@ -451,9 +451,11 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                 ),
                 const SizedBox(height: 16),
                 TextField(
-                  controller: notesController,
                   maxLength: 2000,
                   maxLines: 3,
+                  onChanged: (value) {
+                    notesText = value;
+                  },
                   decoration: const InputDecoration(
                     labelText: 'Verification notes (optional)',
                     border: OutlineInputBorder(),
@@ -469,7 +471,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
             ),
             FilledButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop(notesController.text.trim());
+                Navigator.of(dialogContext).pop(notesText.trim());
               },
               child: const Text('Verify Transaction'),
             ),
@@ -477,8 +479,6 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
         );
       },
     );
-
-    notesController.dispose();
 
     if (notes == null || !mounted) {
       return;
@@ -547,9 +547,9 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
     final outstandingText = _text(invoice, 'outstanding_amount');
     final outstanding = double.tryParse(outstandingText);
     final formKey = GlobalKey<FormState>();
-    final amountController = TextEditingController(text: outstandingText);
-    final referenceController = TextEditingController();
-    final notesController = TextEditingController();
+    var amountText = outstandingText;
+    var referenceText = '';
+    var notesText = '';
     var paymentMethod = 'mpesa';
 
     final receiptData = await showDialog<Map<String, String>>(
@@ -580,7 +580,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
-                        controller: amountController,
+                        initialValue: outstandingText,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
@@ -591,6 +591,9 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                           labelText: 'Amount received (KES)',
                           border: OutlineInputBorder(),
                         ),
+                        onChanged: (value) {
+                          amountText = value;
+                        },
                         validator: (value) {
                           final amount = double.tryParse(value?.trim() ?? '');
 
@@ -642,8 +645,10 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
-                        controller: referenceController,
                         maxLength: 150,
+                        onChanged: (value) {
+                          referenceText = value;
+                        },
                         decoration: const InputDecoration(
                           labelText: 'Payment reference',
                           hintText: 'Provider or bank transaction reference',
@@ -659,9 +664,11 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
-                        controller: notesController,
                         maxLength: 2000,
                         maxLines: 3,
+                        onChanged: (value) {
+                          notesText = value;
+                        },
                         decoration: const InputDecoration(
                           labelText: 'Receipt notes (optional)',
                           border: OutlineInputBorder(),
@@ -683,10 +690,10 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                     }
 
                     Navigator.of(dialogContext).pop({
-                      'amount': amountController.text.trim(),
+                      'amount': amountText.trim(),
                       'payment_method': paymentMethod,
-                      'payment_reference': referenceController.text.trim(),
-                      'notes': notesController.text.trim(),
+                      'payment_reference': referenceText.trim(),
+                      'notes': notesText.trim(),
                     });
                   },
                   child: const Text('Record Receipt'),
@@ -697,10 +704,6 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
         );
       },
     );
-
-    amountController.dispose();
-    referenceController.dispose();
-    notesController.dispose();
 
     if (receiptData == null || !mounted) {
       return;
@@ -971,9 +974,9 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
       return;
     }
 
-    final notesController = TextEditingController();
+    var notesText = '';
 
-    final confirmed = await showDialog<bool>(
+    final notes = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
@@ -1001,8 +1004,11 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                 const SizedBox(height: 16),
 
                 TextField(
-                  controller: notesController,
                   maxLines: 3,
+                  maxLength: 2000,
+                  onChanged: (value) {
+                    notesText = value;
+                  },
                   decoration: const InputDecoration(
                     labelText: 'Closure notes (optional)',
                     border: OutlineInputBorder(),
@@ -1014,13 +1020,13 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop(false);
+                Navigator.of(dialogContext).pop();
               },
               child: const Text('Cancel'),
             ),
             FilledButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop(true);
+                Navigator.of(dialogContext).pop(notesText.trim());
               },
               child: const Text('Close Deal'),
             ),
@@ -1029,11 +1035,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
       },
     );
 
-    final notes = notesController.text.trim();
-
-    notesController.dispose();
-
-    if (confirmed != true || !mounted) {
+    if (notes == null || !mounted) {
       return;
     }
 
@@ -1186,76 +1188,89 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
       fallback: 'Commission participant',
     );
 
-    final paymentMethodController = TextEditingController();
-
-    final paymentReferenceController = TextEditingController();
-
-    final notesController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    var paymentMethod = 'mpesa';
+    var paymentReference = '';
+    var notesText = '';
 
     final confirmed = await showDialog<Map<String, String>>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Authorize Commission Payout'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  recipientName,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-
-                const SizedBox(height: 6),
-
-                Text(
-                  'Backend-calculated outstanding: '
-                  '${_formatMoney(outstanding)}',
-                ),
-
-                const SizedBox(height: 10),
-
-                const Text(
-                  'The payout amount is controlled by '
-                  'Pata Hao accounting and cannot be '
-                  'edited here.',
-                  style: TextStyle(color: Colors.black54, fontSize: 13),
-                ),
-
-                const SizedBox(height: 18),
-
-                TextField(
-                  controller: paymentMethodController,
-                  decoration: const InputDecoration(
-                    labelText: 'Payment method',
-                    hintText: 'e.g. mpesa or bank_transfer',
-                    border: OutlineInputBorder(),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    recipientName,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                ),
 
-                const SizedBox(height: 12),
+                  const SizedBox(height: 6),
 
-                TextField(
-                  controller: paymentReferenceController,
-                  decoration: const InputDecoration(
-                    labelText: 'Payment reference',
-                    hintText: 'Transaction/reference number',
-                    border: OutlineInputBorder(),
+                  Text(
+                    'Backend-calculated outstanding: '
+                    '${_formatMoney(outstanding)}',
                   ),
-                ),
 
-                const SizedBox(height: 12),
+                  const SizedBox(height: 10),
 
-                TextField(
-                  controller: notesController,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes (optional)',
-                    border: OutlineInputBorder(),
+                  const Text(
+                    'The payout amount is controlled by '
+                    'Pata Hao accounting and cannot be '
+                    'edited here.',
+                    style: TextStyle(color: Colors.black54, fontSize: 13),
                   ),
-                ),
-              ],
+
+                  const SizedBox(height: 18),
+
+                  StaffCommissionPayoutMethodField(
+                    initialValue: paymentMethod,
+                    onChanged: (value) {
+                      paymentMethod = value;
+                    },
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  TextFormField(
+                    maxLength: 150,
+                    onChanged: (value) {
+                      paymentReference = value;
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Payment reference',
+                      hintText: 'Transaction/reference number',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Payment reference is required.';
+                      }
+
+                      return null;
+                    },
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  TextField(
+                    maxLength: 2000,
+                    maxLines: 3,
+                    onChanged: (value) {
+                      notesText = value;
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Notes (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -1267,18 +1282,14 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
             ),
             FilledButton(
               onPressed: () {
-                final method = paymentMethodController.text.trim();
-
-                final reference = paymentReferenceController.text.trim();
-
-                if (method.isEmpty || reference.isEmpty) {
+                if (formKey.currentState?.validate() != true) {
                   return;
                 }
 
                 Navigator.of(dialogContext).pop({
-                  'payment_method': method,
-                  'payment_reference': reference,
-                  'notes': notesController.text.trim(),
+                  'payment_method': paymentMethod,
+                  'payment_reference': paymentReference.trim(),
+                  'notes': notesText.trim(),
                 });
               },
               child: const Text('Authorize Payout'),
@@ -1287,10 +1298,6 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
         );
       },
     );
-
-    paymentMethodController.dispose();
-    paymentReferenceController.dispose();
-    notesController.dispose();
 
     if (confirmed == null || !mounted) {
       return;
@@ -2474,6 +2481,51 @@ class StaffCommissionReceiptAction extends StatelessWidget {
           isSubmitting ? 'Recording...' : 'Record Commission Payment',
         ),
       ),
+    );
+  }
+}
+
+class StaffCommissionPayoutMethodField extends StatelessWidget {
+  const StaffCommissionPayoutMethodField({
+    super.key,
+    required this.initialValue,
+    required this.onChanged,
+  });
+
+  final String initialValue;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      initialValue: initialValue,
+      decoration: const InputDecoration(
+        labelText: 'Payment method',
+        border: OutlineInputBorder(),
+      ),
+      items: const [
+        DropdownMenuItem(
+          value: 'mpesa',
+          child: Text('M-Pesa'),
+        ),
+        DropdownMenuItem(
+          value: 'airtel_money',
+          child: Text('Airtel Money'),
+        ),
+        DropdownMenuItem(
+          value: 'bank_transfer',
+          child: Text('Bank transfer'),
+        ),
+        DropdownMenuItem(
+          value: 'other',
+          child: Text('Other traceable method'),
+        ),
+      ],
+      onChanged: (value) {
+        if (value != null) {
+          onChanged(value);
+        }
+      },
     );
   }
 }
