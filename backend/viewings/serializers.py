@@ -152,6 +152,7 @@ class ViewingSerializer(serializers.ModelSerializer):
     )
     remaining_reschedule_proposals = serializers.SerializerMethodField()
     requires_fee_resolution = serializers.SerializerMethodField()
+    fee_resolution_processed = serializers.SerializerMethodField()
 
     class Meta:
         model = Viewing
@@ -185,6 +186,11 @@ class ViewingSerializer(serializers.ModelSerializer):
             "fee_resolution_choice",
             "fee_resolution_label",
             "fee_resolution_requested_at",
+            "fee_resolution_reference",
+            "fee_resolution_notes",
+            "fee_resolution_processed_at",
+            "fee_resolution_processed_by",
+            "fee_resolution_processed",
             "requires_fee_resolution",
             "completed_at",
             "partner_departed_at",
@@ -221,6 +227,11 @@ class ViewingSerializer(serializers.ModelSerializer):
             "fee_resolution_choice",
             "fee_resolution_label",
             "fee_resolution_requested_at",
+            "fee_resolution_reference",
+            "fee_resolution_notes",
+            "fee_resolution_processed_at",
+            "fee_resolution_processed_by",
+            "fee_resolution_processed",
             "requires_fee_resolution",
             "completed_at",
             "partner_departed_at",
@@ -271,6 +282,12 @@ class ViewingSerializer(serializers.ModelSerializer):
         return (
             obj.status == Viewing.Status.SCHEDULING_FAILED
             and not obj.fee_resolution_choice
+        )
+
+    def get_fee_resolution_processed(self, obj):
+        return (
+            obj.fee_resolution_processed_at is not None
+            and obj.fee_resolution_processed_by_id is not None
         )
 
     def _latest_event(self, obj, event_type):

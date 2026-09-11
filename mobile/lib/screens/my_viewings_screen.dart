@@ -106,6 +106,8 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
         return 'New time proposed';
       case 'scheduling_failed':
         return 'Scheduling not agreed';
+      case 'credit_issued':
+        return 'Viewing credit issued';
       case 'confirmed':
         return 'Confirmed';
       case 'partner_en_route':
@@ -157,6 +159,8 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
         return const Color(0xFF7C3AED);
       case 'scheduling_failed':
         return const Color(0xFFB45309);
+      case 'credit_issued':
+        return const Color(0xFF15803D);
       case 'confirmed':
       case 'partner_en_route':
       case 'partner_arrived':
@@ -195,6 +199,8 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
         return Icons.update_outlined;
       case 'scheduling_failed':
         return Icons.account_balance_wallet_outlined;
+      case 'credit_issued':
+        return Icons.card_giftcard_outlined;
       case 'confirmed':
         return Icons.event_available_outlined;
       case 'partner_en_route':
@@ -306,6 +312,7 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
         status == 'declined' ||
         status == 'expired' ||
         status == 'scheduling_failed' ||
+        status == 'credit_issued' ||
         status == 'refunded';
   }
 
@@ -682,6 +689,8 @@ class _ViewingCardState extends State<_ViewingCard> {
           return 'Next: Choose viewing credit or request a full refund.';
         }
         return '${widget.viewing.feeResolutionLabel} is recorded for processing.';
+      case 'credit_issued':
+        return 'Your transferable viewing credit has been issued.';
       case 'confirmed':
         return 'Next: Attend your viewing at the confirmed date and time.';
       case 'partner_en_route':
@@ -718,8 +727,7 @@ class _ViewingCardState extends State<_ViewingCard> {
         .trim()
         .isNotEmpty;
 
-    final hasSuccessfulReceipt =
-        widget.payment != null && widget.payment!.isSuccessful;
+    final hasReceipt = widget.payment != null && widget.payment!.hasReceipt;
 
     final deal = widget.deal;
     final status = widget.viewing.status.trim().toLowerCase();
@@ -860,7 +868,7 @@ class _ViewingCardState extends State<_ViewingCard> {
                   ],
                 ),
               ),
-              if (hasSuccessfulReceipt) ...[
+              if (hasReceipt) ...[
                 const SizedBox(height: 18),
                 SizedBox(
                   width: double.infinity,

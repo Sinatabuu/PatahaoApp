@@ -522,7 +522,10 @@ class PaymentViewSet(viewsets.ModelViewSet):
             self.get_queryset()
             .filter(
                 viewing_id=viewing_id,
-                status=Payment.Status.SUCCESSFUL,
+                status__in={
+                    Payment.Status.SUCCESSFUL,
+                    Payment.Status.REFUNDED,
+                },
             )
             .order_by(
                 "-paid_at",

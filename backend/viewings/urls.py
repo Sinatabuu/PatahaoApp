@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdminViewingDetailView,
+    AdminViewingFeeResolutionView,
     AdminViewingListView,
     ViewingBookingViewSet,
     ViewingFeedbackView,
@@ -34,6 +35,11 @@ urlpatterns = [
         "admin/viewings/<int:viewing_id>/",
         AdminViewingDetailView.as_view(),
         name="admin-viewing-detail",
+    ),
+    path(
+        "admin/viewings/<int:viewing_id>/process-fee-resolution/",
+        AdminViewingFeeResolutionView.as_view(),
+        name="admin-viewing-process-fee-resolution",
     ),
 
     path(

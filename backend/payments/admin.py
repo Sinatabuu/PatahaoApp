@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 from .views import _complete_payment
 
-from .models import Payment
+from .models import Payment, ViewingCredit
 
 
 @admin.action(description="DEV ONLY: Mark selected payments successful")
@@ -101,6 +101,8 @@ class PaymentAdmin(admin.ModelAdmin):
         "payment_method",
         "status",
         "receipt_number",
+        "refund_reference",
+        "refunded_at",
         "paid_at",
         "created_at",
     )
@@ -126,6 +128,10 @@ class PaymentAdmin(admin.ModelAdmin):
         "payment_reference",
         "receipt_number",
         "paid_at",
+        "refund_reference",
+        "refund_notes",
+        "refunded_at",
+        "refunded_by",
         "created_at",
         "updated_at",
     )
@@ -141,3 +147,52 @@ class PaymentAdmin(admin.ModelAdmin):
             actions.pop("mark_payments_successful", None)
 
         return actions
+
+
+@admin.register(ViewingCredit)
+class ViewingCreditAdmin(admin.ModelAdmin):
+    list_display = (
+        "credit_reference",
+        "customer",
+        "source_viewing",
+        "amount",
+        "remaining_amount",
+        "currency",
+        "status",
+        "issued_by",
+        "issued_at",
+    )
+
+    list_filter = (
+        "status",
+        "currency",
+        "issued_at",
+    )
+
+    search_fields = (
+        "credit_reference",
+        "customer__username",
+        "customer__email",
+        "source_payment__payment_reference",
+        "source_viewing__property__title",
+    )
+
+    readonly_fields = (
+        "customer",
+        "source_payment",
+        "source_viewing",
+        "credit_reference",
+        "amount",
+        "remaining_amount",
+        "currency",
+        "status",
+        "issued_by",
+        "issued_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

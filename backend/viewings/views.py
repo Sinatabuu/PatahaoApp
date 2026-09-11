@@ -17,6 +17,8 @@ from governance.services import (
 )
 from core.models import ActivityLog
 from notifications.models import Notification
+from payments.serializers import PaymentSerializer, ViewingCreditSerializer
+from payments.services import fulfill_viewing_fee_resolution
 from introductions.services import (
     create_property_introduction_certificate,
 )
@@ -1710,6 +1712,85 @@ class AdminViewingDetailView(APIView):
             {
                 "viewing": viewing_data,
                 "events": event_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminViewingFeeResolutionView(APIView):
+    """Staff-only fulfillment of a customer's selected fee resolution."""
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def post(self, request, viewing_id):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata HAO administrators may process viewing "
+                        "fee resolutions."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            result = fulfill_viewing_fee_resolution(
+                viewing_id=viewing_id,
+                processed_by=request.user,
+                provider_reference=request.data.get(
+                    "provider_reference",
+                    "",
+                ),
+                notes=request.data.get("notes", ""),
+            )
+        except Viewing.DoesNotExist:
+            return Response(
+                {"detail": "Viewing not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                error_data = exc.message_dict
+            else:
+                error_data = {"detail": exc.messages}
+
+            return Response(
+                error_data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        viewing = result["viewing"]
+        payment = result["payment"]
+        credit = result["credit"]
+        already_processed = result["already_processed"]
+
+        return Response(
+            {
+                "detail": (
+                    "This fee resolution was already processed."
+                    if already_processed
+                    else "The fee resolution was processed successfully."
+                ),
+                "already_processed": already_processed,
+                "viewing": ViewingSerializer(
+                    viewing,
+                    context={"request": request},
+                ).data,
+                "payment": PaymentSerializer(
+                    payment,
+                    context={"request": request},
+                ).data,
+                "credit": (
+                    ViewingCreditSerializer(
+                        credit,
+                        context={"request": request},
+                    ).data
+                    if credit is not None
+                    else None
+                ),
             },
             status=status.HTTP_200_OK,
         )

@@ -40,6 +40,10 @@ class Viewing(models.Model):
             "scheduling_failed",
             "Viewing time could not be agreed",
         )
+        CREDIT_ISSUED = (
+            "credit_issued",
+            "Viewing credit issued",
+        )
         CONFIRMED = (
             "confirmed",
             "Confirmed",
@@ -185,6 +189,32 @@ class Viewing(models.Model):
     )
 
     fee_resolution_requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    fee_resolution_reference = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
+
+    fee_resolution_notes = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    fee_resolution_processed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    fee_resolution_processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="processed_viewing_fee_resolutions",
         null=True,
         blank=True,
         editable=False,
@@ -374,6 +404,11 @@ class ViewingEvent(models.Model):
         FEE_RESOLUTION_CHOSEN = (
             "fee_resolution_chosen",
             "Fee resolution chosen",
+        )
+
+        CREDIT_ISSUED = (
+            "credit_issued",
+            "Viewing credit issued",
         )
 
         PARTNER_EN_ROUTE = (

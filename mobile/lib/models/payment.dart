@@ -17,6 +17,10 @@ class Payment {
     required this.paidAt,
     required this.createdAt,
     required this.updatedAt,
+    this.refundReference = '',
+    this.refundNotes = '',
+    this.refundedAt = '',
+    this.refundedBy,
   });
 
   final int id;
@@ -42,6 +46,12 @@ class Payment {
   /// The confirmed payment timestamp returned by Django.
   final String paidAt;
 
+  /// Evidence recorded after an external refund has completed.
+  final String refundReference;
+  final String refundNotes;
+  final String refundedAt;
+  final int? refundedBy;
+
   final String createdAt;
   final String updatedAt;
 
@@ -66,6 +76,10 @@ class Payment {
       paidAt: json['paid_at']?.toString() ?? '',
       createdAt: json['created_at']?.toString() ?? '',
       updatedAt: json['updated_at']?.toString() ?? '',
+      refundReference: json['refund_reference']?.toString() ?? '',
+      refundNotes: json['refund_notes']?.toString() ?? '',
+      refundedAt: json['refunded_at']?.toString() ?? '',
+      refundedBy: _parseNullableInt(json['refunded_by']),
     );
   }
 
@@ -76,6 +90,14 @@ class Payment {
         normalizedStatus == 'success' ||
         normalizedStatus == 'paid' ||
         normalizedStatus == 'completed';
+  }
+
+  bool get isRefunded {
+    return status.trim().toLowerCase() == 'refunded';
+  }
+
+  bool get hasReceipt {
+    return isSuccessful || isRefunded;
   }
 
   String get displayReceiptNumber {
@@ -104,6 +126,22 @@ class Payment {
     }
 
     return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static int? _parseNullableInt(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return int.tryParse(value.toString());
   }
 
   static double _parseDouble(dynamic value) {

@@ -34,6 +34,11 @@ class Viewing {
     this.feeResolutionChoice = '',
     this.feeResolutionLabel = '',
     this.feeResolutionRequestedAt,
+    this.feeResolutionReference = '',
+    this.feeResolutionNotes = '',
+    this.feeResolutionProcessedAt,
+    this.feeResolutionProcessedBy,
+    this.feeResolutionProcessed = false,
     this.requiresFeeResolution = false,
   });
 
@@ -78,6 +83,11 @@ class Viewing {
   final String feeResolutionChoice;
   final String feeResolutionLabel;
   final String? feeResolutionRequestedAt;
+  final String feeResolutionReference;
+  final String feeResolutionNotes;
+  final String? feeResolutionProcessedAt;
+  final int? feeResolutionProcessedBy;
+  final bool feeResolutionProcessed;
   final bool requiresFeeResolution;
 
   final String completionNotes;
@@ -126,6 +136,16 @@ class Viewing {
       feeResolutionRequestedAt: _parseNullableString(
         json['fee_resolution_requested_at'],
       ),
+      feeResolutionReference:
+          json['fee_resolution_reference']?.toString() ?? '',
+      feeResolutionNotes: json['fee_resolution_notes']?.toString() ?? '',
+      feeResolutionProcessedAt: _parseNullableString(
+        json['fee_resolution_processed_at'],
+      ),
+      feeResolutionProcessedBy: _parseNullableInt(
+        json['fee_resolution_processed_by'],
+      ),
+      feeResolutionProcessed: json['fee_resolution_processed'] == true,
       requiresFeeResolution: json['requires_fee_resolution'] == true,
       completionNotes: json['completion_notes']?.toString() ?? '',
       events: _parseEvents(json['events']),
@@ -170,6 +190,12 @@ class Viewing {
         return hasFeeResolutionChoice
             ? 'Fee resolution requested'
             : 'Scheduling could not be agreed';
+
+      case 'credit_issued':
+        return 'Viewing credit issued';
+
+      case 'refunded':
+        return 'Refunded';
 
       case 'declined':
         return 'Declined';

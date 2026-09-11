@@ -430,6 +430,12 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
       case 'scheduling_failed':
         return const Color(0xFFB45309);
 
+      case 'credit_issued':
+        return const Color(0xFF15803D);
+
+      case 'refunded':
+        return const Color(0xFF0369A1);
+
       case 'declined':
       case 'cancelled':
       case 'expired':
@@ -465,6 +471,12 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
 
       case 'scheduling_failed':
         return Icons.account_balance_wallet_outlined;
+
+      case 'credit_issued':
+        return Icons.card_giftcard_outlined;
+
+      case 'refunded':
+        return Icons.currency_exchange_outlined;
 
       case 'declined':
       case 'cancelled':
@@ -603,8 +615,11 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
                         : null,
                   ),
                 ],
-                if (viewing.effectiveBookingStatus ==
-                    'scheduling_failed') ...[
+                if (const {
+                  'scheduling_failed',
+                  'credit_issued',
+                  'refunded',
+                }.contains(viewing.effectiveBookingStatus)) ...[
                   const SizedBox(height: 16),
                   _FeeResolutionCard(
                     viewing: viewing,
@@ -933,11 +948,16 @@ class _FeeResolutionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasChoice = viewing.hasFeeResolutionChoice;
+    final isProcessed = viewing.feeResolutionProcessed ||
+        viewing.feeResolutionProcessedAt != null;
     final choiceLabel = viewing.feeResolutionLabel.trim().isNotEmpty
         ? viewing.feeResolutionLabel
         : viewing.feeResolutionChoice == 'refund'
         ? 'Full refund'
         : 'Transferable viewing credit';
+    final processedMessage = viewing.feeResolutionChoice == 'refund'
+        ? 'Your full refund has been completed.'
+        : 'Your transferable viewing credit has been issued.';
 
     return Card(
       elevation: 1.5,
@@ -972,7 +992,9 @@ class _FeeResolutionCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              hasChoice
+              isProcessed
+                  ? processedMessage
+                  : hasChoice
                   ? '$choiceLabel has been recorded for processing. The '
                       'Pata HAO team will update you when it is completed.'
                   : 'Two proposed times were declined. Choose what should '
@@ -982,7 +1004,26 @@ class _FeeResolutionCard extends StatelessWidget {
                 height: 1.45,
               ),
             ),
-            if (!hasChoice) ...[
+            if (isProcessed &&
+                viewing.feeResolutionReference.trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Text(
+                'Resolution reference',
+                style: TextStyle(
+                  color: Color(0xFF78350F),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                viewing.feeResolutionReference,
+                style: const TextStyle(
+                  color: Color(0xFF78350F),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+            if (!hasChoice && !isProcessed) ...[
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,

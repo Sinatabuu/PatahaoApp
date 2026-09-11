@@ -167,6 +167,35 @@ class Payment(models.Model):
         blank=True,
     )
 
+    refund_reference = models.CharField(
+        max_length=120,
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+    )
+
+    refund_notes = models.TextField(
+        blank=True,
+        default="",
+        editable=False,
+    )
+
+    refunded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    refunded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="processed_viewing_refunds",
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
@@ -229,4 +258,112 @@ class Payment(models.Model):
         return (
             f"{reference} - "
             f"{self.amount} {self.currency}"
+        )
+
+
+class ViewingCredit(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        CONSUMED = "consumed", "Consumed"
+        VOID = "void", "Void"
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="viewing_credits",
+    )
+
+    source_payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="viewing_credit",
+    )
+
+    source_viewing = models.OneToOneField(
+        "viewings.Viewing",
+        on_delete=models.PROTECT,
+        related_name="issued_credit",
+    )
+
+    credit_reference = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        editable=False,
+    )
+
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        editable=False,
+    )
+
+    remaining_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        editable=False,
+    )
+
+    currency = models.CharField(
+        max_length=3,
+        default="KES",
+        editable=False,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+        editable=False,
+    )
+
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="issued_viewing_credits",
+    )
+
+    issued_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["-issued_at", "-id"]
+
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=Decimal("0.00")),
+                name="viewcredit_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(remaining_amount__gte=Decimal("0.00"))
+                    & models.Q(remaining_amount__lte=models.F("amount"))
+                ),
+                name="viewcredit_remaining_valid",
+            ),
+        ]
+
+    @staticmethod
+    def generate_credit_reference():
+        year = timezone.localdate().year
+        random_part = uuid.uuid4().hex[:10].upper()
+
+        return f"PHC-{year}-{random_part}"
+
+    def save(self, *args, **kwargs):
+        if not self.credit_reference:
+            self.credit_reference = self.generate_credit_reference()
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"{self.credit_reference} - "
+            f"{self.remaining_amount} {self.currency}"
         )

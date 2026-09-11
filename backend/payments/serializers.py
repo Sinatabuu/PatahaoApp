@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from viewings.models import Viewing
 
-from .models import Payment
+from .models import Payment, ViewingCredit
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -54,6 +54,10 @@ class PaymentSerializer(serializers.ModelSerializer):
             "initiated_at",
             "paid_at",
             "failed_at",
+            "refund_reference",
+            "refund_notes",
+            "refunded_at",
+            "refunded_by",
             "created_at",
             "updated_at",
         ]
@@ -72,6 +76,10 @@ class PaymentSerializer(serializers.ModelSerializer):
             "initiated_at",
             "paid_at",
             "failed_at",
+            "refund_reference",
+            "refund_notes",
+            "refunded_at",
+            "refunded_by",
             "created_at",
             "updated_at",
         ]
@@ -150,3 +158,29 @@ class PaymentSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+
+class ViewingCreditSerializer(serializers.ModelSerializer):
+    property_title = serializers.CharField(
+        source="source_viewing.property.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ViewingCredit
+        fields = [
+            "id",
+            "customer",
+            "source_payment",
+            "source_viewing",
+            "property_title",
+            "credit_reference",
+            "amount",
+            "remaining_amount",
+            "currency",
+            "status",
+            "issued_by",
+            "issued_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
