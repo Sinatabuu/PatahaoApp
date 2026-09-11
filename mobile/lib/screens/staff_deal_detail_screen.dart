@@ -19,6 +19,8 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   bool _isIssuingOwnerConfirmation = false;
+  bool _isCompletingDeal = false;
+  bool _isRecordingCommissionReceipt = false;
   int? _payingCommissionParticipantId;
   bool _isApprovingCommissionSettlement = false;
   bool _isClosingDeal = false;
@@ -411,6 +413,353 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
     return 'Not set';
   }
 
+  Future<void> _completeTransaction() async {
+    final deal = _deal;
+
+    if (deal == null || _text(deal, 'status') != 'agreed') {
+      return;
+    }
+
+    final isSale = _text(deal, 'listing_type') == 'sale';
+    final transactionLabel = isSale ? 'sale' : 'rental';
+    final completedPropertyStatus = isSale ? 'sold' : 'rented';
+    final notesController = TextEditingController();
+
+    final notes = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Verify completed $transactionLabel?'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isSale
+                      ? 'Continue only after Pata HAO has verified that the '
+                            'property purchase was completed.'
+                      : 'Continue only after Pata HAO has verified that the '
+                            'tenant took possession of the property.',
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'This will mark the property $completedPropertyStatus, '
+                  'create the commission invoice, and activate the locked '
+                  'commission obligation.',
+                  style: const TextStyle(color: Colors.black54, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: notesController,
+                  maxLength: 2000,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Verification notes (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(notesController.text.trim());
+              },
+              child: const Text('Verify Transaction'),
+            ),
+          ],
+        );
+      },
+    );
+
+    notesController.dispose();
+
+    if (notes == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isCompletingDeal = true;
+    });
+
+    try {
+      await StaffDealAdminService.instance.completeDeal(
+        dealId: widget.dealId,
+        notes: notes,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${isSale ? 'Sale' : 'Rental'} verified. The property is now '
+            '$completedPropertyStatus and the commission is due.',
+          ),
+          backgroundColor: const Color(0xFF15803D),
+        ),
+      );
+
+      await _loadDeal();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+          backgroundColor: const Color(0xFFB91C1C),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCompletingDeal = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _recordCommissionPayment(
+    Map<String, dynamic> invoice,
+  ) async {
+    final deal = _deal;
+
+    if (deal == null || _text(deal, 'status') != 'commission_due') {
+      return;
+    }
+
+    final invoiceStatus = _text(invoice, 'status');
+
+    if (invoiceStatus != 'pending' && invoiceStatus != 'partially_paid') {
+      return;
+    }
+
+    final outstandingText = _text(invoice, 'outstanding_amount');
+    final outstanding = double.tryParse(outstandingText);
+    final formKey = GlobalKey<FormState>();
+    final amountController = TextEditingController(text: outstandingText);
+    final referenceController = TextEditingController();
+    final notesController = TextEditingController();
+    var paymentMethod = 'mpesa';
+
+    final receiptData = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Record Commission Payment'),
+              content: Form(
+                key: formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Outstanding commission: '
+                        '${_formatMoney(invoice['outstanding_amount'])}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Record this only after Pata HAO has actually received '
+                        'the money. The receipt evidence cannot be edited or '
+                        'deleted later.',
+                        style: TextStyle(color: Colors.black54, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: amountController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Amount received (KES)',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          final amount = double.tryParse(value?.trim() ?? '');
+
+                          if (amount == null || amount <= 0) {
+                            return 'Enter a valid amount greater than zero.';
+                          }
+
+                          if (outstanding != null && amount > outstanding) {
+                            return 'Amount cannot exceed the outstanding balance.';
+                          }
+
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: paymentMethod,
+                        decoration: const InputDecoration(
+                          labelText: 'Payment method',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'mpesa',
+                            child: Text('M-Pesa'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'airtel_money',
+                            child: Text('Airtel Money'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'bank_transfer',
+                            child: Text('Bank transfer'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'other',
+                            child: Text('Other traceable method'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+
+                          setDialogState(() {
+                            paymentMethod = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: referenceController,
+                        maxLength: 150,
+                        decoration: const InputDecoration(
+                          labelText: 'Payment reference',
+                          hintText: 'Provider or bank transaction reference',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if ((value ?? '').trim().isEmpty) {
+                            return 'Payment reference is required.';
+                          }
+
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: notesController,
+                        maxLength: 2000,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Receipt notes (optional)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (formKey.currentState?.validate() != true) {
+                      return;
+                    }
+
+                    Navigator.of(dialogContext).pop({
+                      'amount': amountController.text.trim(),
+                      'payment_method': paymentMethod,
+                      'payment_reference': referenceController.text.trim(),
+                      'notes': notesController.text.trim(),
+                    });
+                  },
+                  child: const Text('Record Receipt'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    amountController.dispose();
+    referenceController.dispose();
+    notesController.dispose();
+
+    if (receiptData == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isRecordingCommissionReceipt = true;
+    });
+
+    try {
+      final result = await StaffDealAdminService.instance
+          .recordCommissionReceipt(
+            dealId: widget.dealId,
+            amount: receiptData['amount']!,
+            paymentMethod: receiptData['payment_method']!,
+            paymentReference: receiptData['payment_reference']!,
+            notes: receiptData['notes'] ?? '',
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      final rawReceipt = result['receipt'];
+      final receipt = rawReceipt is Map
+          ? Map<String, dynamic>.from(rawReceipt)
+          : <String, dynamic>{};
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Commission receipt recorded: '
+            '${_formatMoney(receipt['amount'])}.',
+          ),
+          backgroundColor: const Color(0xFF15803D),
+        ),
+      );
+
+      await _loadDeal();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+          backgroundColor: const Color(0xFFB91C1C),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRecordingCommissionReceipt = false;
+        });
+      }
+    }
+  }
+
   Widget _buildCommissionReceivable(Map<String, dynamic> deal) {
     final rawInvoice = deal['commission_invoice'];
 
@@ -439,6 +788,9 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
     final invoiceStatus = _text(invoice, 'status');
 
     final dealStatus = _text(deal, 'status');
+
+    final canRecordReceipt = dealStatus == 'commission_due' &&
+        (invoiceStatus == 'pending' || invoiceStatus == 'partially_paid');
 
     final receipts = <Map<String, dynamic>>[];
 
@@ -510,6 +862,14 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                 label: 'Liable owner',
                 value: _text(invoice, 'owner_name'),
               ),
+
+            if (canRecordReceipt) ...[
+              const SizedBox(height: 12),
+              StaffCommissionReceiptAction(
+                isSubmitting: _isRecordingCommissionReceipt,
+                onPressed: () => _recordCommissionPayment(invoice),
+              ),
+            ],
 
             if (receipts.isNotEmpty) ...[
               const SizedBox(height: 14),
@@ -1014,8 +1374,15 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
 
     final settlementStatus = _text(settlement, 'status');
 
+    final dealStatus = _deal == null ? '' : _text(_deal!, 'status');
+
+    final collectionComplete =
+        dealStatus == 'commission_paid' || dealStatus == 'completed';
+
     final payoutAuthorizedBySettlement =
-        settlementStatus == 'approved' || settlementStatus == 'partially_paid';
+        collectionComplete &&
+        (settlementStatus == 'approved' ||
+            settlementStatus == 'partially_paid');
 
     final participants = <Map<String, dynamic>>[];
 
@@ -1068,7 +1435,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
               value: _statusLabel(_text(settlement, 'status')),
             ),
 
-            if (settlementStatus == 'allocated') ...[
+            if (settlementStatus == 'allocated' && collectionComplete) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -1089,6 +1456,15 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                         : 'Approve Distribution',
                   ),
                 ),
+              ),
+            ],
+
+            if (settlementStatus == 'allocated' && !collectionComplete) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Distribution approval remains locked until the full '
+                'commission has been received and recorded.',
+                style: TextStyle(color: Colors.black54, fontSize: 13),
               ),
             ],
 
@@ -1716,6 +2092,19 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
 
           const SizedBox(height: 12),
 
+          if (status == 'agreed' ||
+              _text(deal, 'completed_at').isNotEmpty) ...[
+            StaffDealTransactionCompletionCard(
+              dealStatus: status,
+              isSale: _text(deal, 'listing_type') == 'sale',
+              completedAt: _formatDateTime(_text(deal, 'completed_at')),
+              isSubmitting: _isCompletingDeal,
+              onComplete: _completeTransaction,
+            ),
+
+            const SizedBox(height: 12),
+          ],
+
           _buildCommissionReceivable(deal),
 
           const SizedBox(height: 12),
@@ -1943,6 +2332,146 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class StaffDealTransactionCompletionCard extends StatelessWidget {
+  const StaffDealTransactionCompletionCard({
+    super.key,
+    required this.dealStatus,
+    required this.isSale,
+    required this.completedAt,
+    required this.isSubmitting,
+    required this.onComplete,
+  });
+
+  final String dealStatus;
+  final bool isSale;
+  final String completedAt;
+  final bool isSubmitting;
+  final VoidCallback onComplete;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAgreed = dealStatus == 'agreed';
+    final transactionLabel = isSale ? 'sale' : 'rental';
+    final propertyStatus = isSale ? 'sold' : 'rented';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.fact_check_outlined, color: Color(0xFF14532D)),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Transaction Verification',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (isAgreed) ...[
+              Text(
+                'All three parties confirmed this $transactionLabel. Pata HAO '
+                'must now verify the real transaction before the property is '
+                'marked $propertyStatus and commission becomes due.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'This administrative step is separate from the three-party '
+                'confirmations and creates immutable completion evidence.',
+                style: TextStyle(color: Colors.black54, fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: isSubmitting ? null : onComplete,
+                  icon: isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.verified_outlined),
+                  label: Text(
+                    isSubmitting
+                        ? 'Verifying...'
+                        : 'Verify ${isSale ? 'Sale' : 'Rental'} Completed',
+                  ),
+                ),
+              ),
+            ] else ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.check_circle_outline,
+                    color: Color(0xFF15803D),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Pata HAO verified this $transactionLabel. The property '
+                      'was marked $propertyStatus and the commission '
+                      'obligation was activated.',
+                      style: const TextStyle(
+                        color: Color(0xFF14532D),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (completedAt != 'Not recorded') ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Verified: $completedAt',
+                  style: const TextStyle(color: Colors.black54, fontSize: 13),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class StaffCommissionReceiptAction extends StatelessWidget {
+  const StaffCommissionReceiptAction({
+    super.key,
+    required this.isSubmitting,
+    required this.onPressed,
+  });
+
+  final bool isSubmitting;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: isSubmitting ? null : onPressed,
+        icon: isSubmitting
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.add_card_outlined),
+        label: Text(
+          isSubmitting ? 'Recording...' : 'Record Commission Payment',
         ),
       ),
     );

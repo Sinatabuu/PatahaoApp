@@ -2721,6 +2721,40 @@ def record_commission_receipt(
             }
         )
 
+    clean_payment_method = str(
+        payment_method or ""
+    ).strip()
+    clean_payment_reference = str(
+        payment_reference or ""
+    ).strip()
+
+    existing_receipt = (
+        CommissionReceipt.objects
+        .select_for_update()
+        .filter(
+            payment_method=clean_payment_method,
+            payment_reference=clean_payment_reference,
+        )
+        .first()
+    )
+
+    if existing_receipt is not None:
+        if (
+            existing_receipt.invoice_id == invoice.id
+            and existing_receipt.amount == amount
+            and existing_receipt.currency == invoice.currency
+        ):
+            return existing_receipt, invoice
+
+        raise ValidationError(
+            {
+                "payment_reference": (
+                    "This commission payment reference is already attached "
+                    "to different receipt evidence."
+                )
+            }
+        )
+
     if invoice.status == CommissionInvoice.Status.PAID:
         raise ValidationError(
             {
@@ -2734,8 +2768,8 @@ def record_commission_receipt(
         invoice=invoice,
         amount=amount,
         currency=invoice.currency,
-        payment_method=payment_method,
-        payment_reference=payment_reference,
+        payment_method=clean_payment_method,
+        payment_reference=clean_payment_reference,
         received_at=(
             received_at
             or timezone.now()

@@ -223,6 +223,140 @@ class StaffDealAdminService {
     return Map<String, dynamic>.from(decoded);
   }
 
+  Future<Map<String, dynamic>> completeDeal({
+    required int dealId,
+    String notes = '',
+  }) async {
+    if (dealId <= 0) {
+      throw ArgumentError.value(
+        dealId,
+        'dealId',
+        'Deal ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/deals/$dealId/complete/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'notes': notes.trim()}),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to verify this completed transaction.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The transaction completion API returned invalid data.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> recordCommissionReceipt({
+    required int dealId,
+    required String amount,
+    required String paymentMethod,
+    required String paymentReference,
+    String? receivedAt,
+    String notes = '',
+  }) async {
+    if (dealId <= 0) {
+      throw ArgumentError.value(
+        dealId,
+        'dealId',
+        'Deal ID must be greater than zero.',
+      );
+    }
+
+    final cleanAmount = amount.trim();
+    final parsedAmount = double.tryParse(cleanAmount);
+    final cleanMethod = paymentMethod.trim();
+    final cleanReference = paymentReference.trim();
+    final cleanReceivedAt = receivedAt?.trim() ?? '';
+
+    if (parsedAmount == null || parsedAmount <= 0) {
+      throw ArgumentError(
+        'Enter a valid commission amount greater than zero.',
+      );
+    }
+
+    if (cleanMethod.isEmpty) {
+      throw ArgumentError('Payment method is required.');
+    }
+
+    if (cleanReference.isEmpty) {
+      throw ArgumentError('Payment reference is required.');
+    }
+
+    final body = <String, dynamic>{
+      'amount': cleanAmount,
+      'payment_method': cleanMethod,
+      'payment_reference': cleanReference,
+      'notes': notes.trim(),
+    };
+
+    if (cleanReceivedAt.isNotEmpty) {
+      body['received_at'] = cleanReceivedAt;
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}'
+      '/api/deals/$dealId/record-commission-receipt/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: {
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to record this commission payment.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The commission receipt API returned invalid data.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
   Future<Map<String, dynamic>> authorizeCommissionPayout({
     required int participantId,
     required String paymentMethod,
@@ -479,28 +613,52 @@ class StaffDealAdminService {
   }
 
   String _extractErrorMessage(dynamic decoded, {required String fallback}) {
-    if (decoded is Map) {
-      final detail = decoded['detail'];
+    final message = _firstErrorMessage(decoded);
 
-      if (detail is String && detail.trim().isNotEmpty) {
-        return detail.trim();
+    if (message != null) {
+      return message;
+    }
+
+    return fallback;
+  }
+
+  String? _firstErrorMessage(dynamic value) {
+    if (value is String) {
+      final text = value.trim();
+      return text.isEmpty ? null : text;
+    }
+
+    if (value is List) {
+      final messages = value
+          .map(_firstErrorMessage)
+          .whereType<String>()
+          .toList(growable: false);
+
+      return messages.isEmpty ? null : messages.join(' ');
+    }
+
+    if (value is Map) {
+      if (value.containsKey('detail')) {
+        final detail = _firstErrorMessage(value['detail']);
+
+        if (detail != null) {
+          return detail;
+        }
       }
 
-      if (detail is List && detail.isNotEmpty) {
-        return detail.join(' ');
-      }
-
-      for (final value in decoded.values) {
-        if (value is String && value.trim().isNotEmpty) {
-          return value.trim();
+      for (final entry in value.entries) {
+        if (entry.key == 'detail') {
+          continue;
         }
 
-        if (value is List && value.isNotEmpty) {
-          return value.join(' ');
+        final message = _firstErrorMessage(entry.value);
+
+        if (message != null) {
+          return message;
         }
       }
     }
 
-    return fallback;
+    return null;
   }
 }

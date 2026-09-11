@@ -566,20 +566,24 @@ class _StaffDealsScreenState extends State<StaffDealsScreen> {
                   customerConfirmed: deal['customer_confirmed'] == true,
                   partnerConfirmed: deal['partner_confirmed'] == true,
                   ownerConfirmed: deal['owner_confirmed'] == true,
-                  onTap: () {
+                  onTap: () async {
                     final dealId = _parseInt(deal['id']);
 
                     if (dealId <= 0) {
                       return;
                     }
 
-                    Navigator.of(context).push(
+                    await Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) {
                           return StaffDealDetailScreen(dealId: dealId);
                         },
                       ),
                     );
+
+                    if (mounted) {
+                      await _loadDeals();
+                    }
                   },
                 ),
               );

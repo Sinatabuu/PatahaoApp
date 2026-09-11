@@ -1989,6 +1989,54 @@ class CommissionReceiptServiceTests(
             receipt.received_at,
         )
 
+    def test_exact_partial_receipt_retry_is_idempotent(self):
+        first_receipt, first_invoice = record_commission_receipt(
+            invoice_id=self.invoice.id,
+            actor=self.staff_user,
+            amount=Decimal("4000.00"),
+            payment_method=CommissionReceipt.PaymentMethod.MPESA,
+            payment_reference="SERVICE-IDEMPOTENT-001",
+        )
+
+        second_receipt, second_invoice = record_commission_receipt(
+            invoice_id=self.invoice.id,
+            actor=self.staff_user,
+            amount=Decimal("4000.00"),
+            payment_method=CommissionReceipt.PaymentMethod.MPESA,
+            payment_reference="SERVICE-IDEMPOTENT-001",
+        )
+
+        self.assertEqual(second_receipt.id, first_receipt.id)
+        self.assertEqual(second_invoice.id, first_invoice.id)
+        self.assertEqual(self.invoice.receipts.count(), 1)
+        self.assertEqual(
+            DealEvent.objects.filter(
+                deal=self.completed_deal,
+                action="commission_partially_received",
+            ).count(),
+            1,
+        )
+
+    def test_receipt_reference_cannot_be_reused_with_another_amount(self):
+        record_commission_receipt(
+            invoice_id=self.invoice.id,
+            actor=self.staff_user,
+            amount=Decimal("4000.00"),
+            payment_method=CommissionReceipt.PaymentMethod.MPESA,
+            payment_reference="SERVICE-CONFLICT-001",
+        )
+
+        with self.assertRaises(ValidationError):
+            record_commission_receipt(
+                invoice_id=self.invoice.id,
+                actor=self.staff_user,
+                amount=Decimal("5000.00"),
+                payment_method=CommissionReceipt.PaymentMethod.MPESA,
+                payment_reference="SERVICE-CONFLICT-001",
+            )
+
+        self.assertEqual(self.invoice.receipts.count(), 1)
+
     def test_non_staff_cannot_record_commission_receipt(self):
         with self.assertRaises(ValidationError):
             record_commission_receipt(
@@ -2513,6 +2561,43 @@ class CommissionReceiptAPITests(
             ),
             self.invoice.amount - Decimal("4000.00"),
         )
+
+    def test_exact_commission_receipt_api_retry_is_idempotent(self):
+        self.client.force_authenticate(
+            user=self.staff_user,
+        )
+
+        payload = {
+            "amount": "4000.00",
+            "payment_method": "mpesa",
+            "payment_reference": "API-COMM-IDEMPOTENT-001",
+            "notes": "Partial owner commission payment.",
+        }
+
+        first_response = self.client.post(
+            self.receipt_url,
+            payload,
+            format="json",
+        )
+        second_response = self.client.post(
+            self.receipt_url,
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(
+            second_response.data["receipt"]["id"],
+            first_response.data["receipt"]["id"],
+        )
+        self.assertEqual(self.invoice.receipts.count(), 1)
 
     def test_full_commission_receipt_marks_deal_commission_paid(self):
         self.client.force_authenticate(
