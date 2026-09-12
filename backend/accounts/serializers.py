@@ -1,4 +1,7 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+
 from .models import User
 
 
@@ -33,6 +36,12 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class CustomerRegistrationSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(
+        max_length=255,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
     password = serializers.CharField(
         write_only=True,
         min_length=8,
@@ -107,6 +116,23 @@ class CustomerRegistrationSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+
+        candidate_user = User(
+            username=attrs.get("username", ""),
+            email=attrs.get("email", ""),
+            full_name=attrs.get("full_name", ""),
+            role=User.ROLE_CUSTOMER,
+        )
+
+        try:
+            validate_password(
+                attrs["password"],
+                user=candidate_user,
+            )
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(
+                {"password": list(error.messages)}
+            ) from error
 
         return attrs
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:mobile/screens/login_screen.dart';
 import 'package:mobile/screens/property_list_screen.dart';
+import 'package:mobile/screens/register_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key, required this.onLoginSuccess});
@@ -75,11 +76,10 @@ class WelcomeScreen extends StatelessWidget {
                 height: 54,
                 child: OutlinedButton(
                   onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Account registration is coming next.',
-                        ),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const RegisterScreen(),
                       ),
                     );
                   },
