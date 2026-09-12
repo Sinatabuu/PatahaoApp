@@ -1,10 +1,14 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path, include
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.http import JsonResponse
 from django.urls import include, path
+
+from accounts.views import (
+    FlexibleTokenObtainPairView,
+    PasswordAwareTokenRefreshView,
+)
+
 
 def home(request):
     return JsonResponse(
@@ -22,14 +26,21 @@ def home(request):
     )
 
 urlpatterns = [
-     
     path("", home, name="home"),
     path("", include("deals.public_urls")),
     path("admin/", admin.site.urls),
 
     # Auth
-    path("api/auth/login/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path(
+        "api/auth/login/",
+        FlexibleTokenObtainPairView.as_view(),
+        name="token_obtain_pair",
+    ),
+    path(
+        "api/auth/refresh/",
+        PasswordAwareTokenRefreshView.as_view(),
+        name="token_refresh",
+    ),
 
     # App APIs
     path("api/", include("properties.urls")),
@@ -48,5 +59,3 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
-

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
-import 'package:mobile/screens/register_screen.dart';
+import 'forgot_password_screen.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.onLoginSuccess});
@@ -130,13 +131,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           enabled: !_isLoading,
                           textInputAction: TextInputAction.next,
                           decoration: const InputDecoration(
-                            labelText: 'Username',
+                            labelText: 'Username, email or phone',
                             prefixIcon: Icon(Icons.person_outline),
                             border: OutlineInputBorder(),
                           ),
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
-                              return 'Enter your username.';
+                              return 'Enter your username, email or phone.';
                             }
 
                             return null;
@@ -183,7 +184,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           },
                         ),
 
-                        const SizedBox(height: 22),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _isLoading
+                                ? null
+                                : () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            const ForgotPasswordScreen(),
+                                      ),
+                                    );
+                                  },
+                            child: const Text('Forgot password?'),
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
 
                         SizedBox(
                           height: 54,

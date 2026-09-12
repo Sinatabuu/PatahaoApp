@@ -1,8 +1,16 @@
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.settings import api_settings
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenRefreshSerializer,
+)
+from rest_framework_simplejwt.utils import get_md5_hash_password
 
 from .models import User
+from .services import find_active_user
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -33,6 +41,42 @@ class UserSerializer(serializers.ModelSerializer):
             "is_staff",
             "is_superuser",
         ]
+
+
+class FlexibleTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        identifier = attrs.get(self.username_field, "")
+        user = find_active_user(identifier)
+
+        if user is not None:
+            attrs[self.username_field] = user.get_username()
+
+        return super().validate(attrs)
+
+
+class PasswordAwareTokenRefreshSerializer(TokenRefreshSerializer):
+    def validate(self, attrs):
+        refresh = self.token_class(attrs["refresh"])
+        user_id = refresh.payload.get(api_settings.USER_ID_CLAIM)
+        user = User.objects.filter(pk=user_id).first() if user_id else None
+
+        if user is None or not api_settings.USER_AUTHENTICATION_RULE(user):
+            raise AuthenticationFailed(
+                "No active account was found for this session.",
+                code="no_active_account",
+            )
+
+        if api_settings.CHECK_REVOKE_TOKEN:
+            token_password_hash = refresh.payload.get(
+                api_settings.REVOKE_TOKEN_CLAIM
+            )
+            if token_password_hash != get_md5_hash_password(user.password):
+                raise AuthenticationFailed(
+                    "This session ended because the account password changed.",
+                    code="password_changed",
+                )
+
+        return super().validate(attrs)
 
 
 class CustomerRegistrationSerializer(serializers.ModelSerializer):
@@ -184,3 +228,47 @@ class CustomerPhoneSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    identifier = serializers.CharField(
+        max_length=254,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    identifier = serializers.CharField(
+        max_length=254,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+    code = serializers.RegexField(
+        regex=r"^\d{8}$",
+        error_messages={
+            "invalid": "Enter the 8-digit reset code.",
+        },
+    )
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        style={"input_type": "password"},
+    )
+    new_password_confirm = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        style={"input_type": "password"},
+    )
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password_confirm"]:
+            raise serializers.ValidationError(
+                {
+                    "new_password_confirm": (
+                        "The passwords do not match."
+                    )
+                }
+            )
+
+        return attrs

@@ -125,6 +125,72 @@ class AuthService {
     return AuthUser.fromJson(Map<String, dynamic>.from(userData));
   }
 
+  Future<void> requestPasswordReset({required String identifier}) async {
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/auth/password-reset/request/',
+    );
+
+    final response = await http
+        .post(
+          uri,
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'identifier': identifier.trim()}),
+        )
+        .timeout(_timeout);
+
+    final dynamic decoded = _decodeResponse(response.body);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to send a password reset code.',
+        ),
+      );
+    }
+  }
+
+  Future<void> confirmPasswordReset({
+    required String identifier,
+    required String code,
+    required String newPassword,
+    required String newPasswordConfirm,
+  }) async {
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/auth/password-reset/confirm/',
+    );
+
+    final response = await http
+        .post(
+          uri,
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'identifier': identifier.trim(),
+            'code': code.trim(),
+            'new_password': newPassword,
+            'new_password_confirm': newPasswordConfirm,
+          }),
+        )
+        .timeout(_timeout);
+
+    final dynamic decoded = _decodeResponse(response.body);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to reset your password.',
+        ),
+      );
+    }
+  }
+
   Future<AuthUser> getCurrentUser() async {
     var accessToken = await getAccessToken();
 

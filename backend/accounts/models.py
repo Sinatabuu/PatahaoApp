@@ -27,3 +27,29 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.full_name or self.username or self.email
+
+
+class PasswordResetChallenge(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="password_reset_challenges",
+    )
+    code_digest = models.CharField(max_length=64)
+    request_ip = models.GenericIPAddressField(null=True, blank=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(
+                fields=("user", "used_at", "created_at"),
+                name="acct_reset_active_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Password reset for user {self.user_id}"

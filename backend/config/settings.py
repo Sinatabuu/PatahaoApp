@@ -183,6 +183,70 @@ MPESA_TRANSACTION_TYPE = os.environ.get(
 )
 MPESA_HTTP_TIMEOUT = env_int("MPESA_HTTP_TIMEOUT", 30)
 
+DEFAULT_EMAIL_BACKEND = (
+    "django.core.mail.backends.console.EmailBackend"
+    if IS_DEVELOPMENT
+    else "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_BACKEND = (
+    os.environ.get("DJANGO_EMAIL_BACKEND", "").strip()
+    or DEFAULT_EMAIL_BACKEND
+)
+EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "").strip()
+EMAIL_PORT = env_int("DJANGO_EMAIL_PORT", 587)
+EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("DJANGO_EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = env_bool("DJANGO_EMAIL_USE_SSL", False)
+EMAIL_TIMEOUT = env_int("DJANGO_EMAIL_TIMEOUT", 20)
+DEFAULT_FROM_EMAIL = (
+    os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "").strip()
+    or "Pata HAO <no-reply@localhost>"
+)
+
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured(
+        "DJANGO_EMAIL_USE_TLS and DJANGO_EMAIL_USE_SSL cannot both be enabled."
+    )
+
+if IS_DEPLOYED_ENVIRONMENT and EMAIL_BACKEND.endswith("smtp.EmailBackend"):
+    required_email_settings = {
+        "DJANGO_EMAIL_HOST": EMAIL_HOST,
+        "DJANGO_EMAIL_HOST_USER": EMAIL_HOST_USER,
+        "DJANGO_EMAIL_HOST_PASSWORD": EMAIL_HOST_PASSWORD,
+        "DJANGO_DEFAULT_FROM_EMAIL": os.environ.get(
+            "DJANGO_DEFAULT_FROM_EMAIL",
+            "",
+        ).strip(),
+    }
+    missing_email_settings = [
+        name for name, value in required_email_settings.items() if not value
+    ]
+    if missing_email_settings:
+        raise ImproperlyConfigured(
+            "Password recovery email requires: "
+            + ", ".join(missing_email_settings)
+            + "."
+        )
+
+PASSWORD_RESET_CODE_TTL_MINUTES = env_int(
+    "PASSWORD_RESET_CODE_TTL_MINUTES",
+    15,
+)
+PASSWORD_RESET_MAX_ATTEMPTS = env_int(
+    "PASSWORD_RESET_MAX_ATTEMPTS",
+    5,
+)
+
+if PASSWORD_RESET_CODE_TTL_MINUTES <= 0:
+    raise ImproperlyConfigured(
+        "PASSWORD_RESET_CODE_TTL_MINUTES must be greater than zero."
+    )
+if PASSWORD_RESET_MAX_ATTEMPTS <= 0:
+    raise ImproperlyConfigured(
+        "PASSWORD_RESET_MAX_ATTEMPTS must be greater than zero."
+    )
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
@@ -208,6 +272,15 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticatedOrReadOnly",
     ),
+    "DEFAULT_THROTTLE_RATES": {
+        "password_reset_request": "10/hour",
+        "password_reset_confirm": "30/hour",
+    },
+}
+
+SIMPLE_JWT = {
+    # Password changes immediately invalidate previously issued JWTs.
+    "CHECK_REVOKE_TOKEN": True,
 }
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

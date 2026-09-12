@@ -1,5 +1,10 @@
 from django.urls import path
-from .views import CustomerRegistrationView, MeView
+from .views import (
+    CustomerRegistrationView,
+    MeView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+)
 
 urlpatterns = [
     path(
@@ -11,5 +16,15 @@ urlpatterns = [
         "auth/me/",
         MeView.as_view(),
         name="auth_me",
+    ),
+    path(
+        "auth/password-reset/request/",
+        PasswordResetRequestView.as_view(),
+        name="auth_password_reset_request",
+    ),
+    path(
+        "auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="auth_password_reset_confirm",
     ),
 ]
