@@ -10,21 +10,60 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+
+from config.environment import (
+    development_payment_handoff_enabled,
+    env_bool,
+    env_int,
+    env_list,
+    get_allowed_hosts,
+    get_database_config,
+    get_environment,
+    get_secret_key,
+)
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-0!zprp7&^bmv9q-zxodjqvk(n5*5rpk_gfaz$r+ey$sj)*gf(e'
+ENVIRONMENT = get_environment()
+IS_DEVELOPMENT = ENVIRONMENT == "development"
+IS_STAGING = ENVIRONMENT == "staging"
+IS_PRODUCTION = ENVIRONMENT == "production"
+IS_DEPLOYED_ENVIRONMENT = IS_STAGING or IS_PRODUCTION
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env_bool(
+    "DJANGO_DEBUG",
+    default=IS_DEVELOPMENT,
+)
+if IS_DEPLOYED_ENVIRONMENT and DEBUG:
+    raise ImproperlyConfigured(
+        "DJANGO_DEBUG cannot be enabled in staging or production."
+    )
+
+SECRET_KEY = get_secret_key(ENVIRONMENT)
+ALLOWED_HOSTS = get_allowed_hosts(ENVIRONMENT)
+CSRF_TRUSTED_ORIGINS = env_list(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    default=(
+        ("https://patahao-api.roysafi.com",)
+        if IS_DEVELOPMENT
+        else ()
+    ),
+)
+
+ENABLE_DEVELOPMENT_PAYMENT_HANDOFF = (
+    development_payment_handoff_enabled(
+        ENVIRONMENT,
+        DEBUG,
+    )
+)
 
 
 # Application definition
@@ -95,10 +134,10 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    "default": get_database_config(
+        ENVIRONMENT,
+        BASE_DIR,
+    )
 }
 
 
@@ -132,16 +171,6 @@ USE_I18N = True
 
 USE_TZ = True
 
-ALLOWED_HOSTS = [
-       'localhost',
-       '127.0.0.1',
-       '10.0.0.175',  # Your WSL IP address
-       '0.0.0.0',     # Accept all interfaces (dev only)
-       '.trycloudflare.com',  # Accept all subdomains of trycloudflare.com
-       "patahao-api.roysafi.com",
-   ]
-
-
 MPESA_ENVIRONMENT = os.environ.get("MPESA_ENVIRONMENT", "sandbox")
 MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
 MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
@@ -152,16 +181,23 @@ MPESA_TRANSACTION_TYPE = os.environ.get(
     "MPESA_TRANSACTION_TYPE",
     "CustomerPayBillOnline",
 )
-MPESA_HTTP_TIMEOUT = int(os.environ.get("MPESA_HTTP_TIMEOUT", "30"))
+MPESA_HTTP_TIMEOUT = env_int("MPESA_HTTP_TIMEOUT", 30)
 
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATIC_ROOT = Path(
+    os.environ.get("DJANGO_STATIC_ROOT", "").strip()
+    or BASE_DIR / "staticfiles"
+)
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path(
+    os.environ.get("DJANGO_MEDIA_ROOT", "").strip()
+    or BASE_DIR / "media"
+)
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -174,8 +210,21 @@ REST_FRAMEWORK = {
     ),
 }
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://patahao-api.roysafi.com",
-]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
+
+SECURE_SSL_REDIRECT = IS_DEPLOYED_ENVIRONMENT
+SESSION_COOKIE_SECURE = IS_DEPLOYED_ENVIRONMENT
+CSRF_COOKIE_SECURE = IS_DEPLOYED_ENVIRONMENT
+SECURE_HSTS_SECONDS = env_int(
+    "DJANGO_SECURE_HSTS_SECONDS",
+    3600 if IS_PRODUCTION else 0,
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
+    "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    False,
+)
+SECURE_HSTS_PRELOAD = env_bool(
+    "DJANGO_SECURE_HSTS_PRELOAD",
+    False,
+)

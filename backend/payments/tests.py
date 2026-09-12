@@ -233,6 +233,36 @@ class PaidViewingHandoffTests(APITestCase):
         self._complete_mock_payment(payment, viewing)
         return viewing
 
+    @override_settings(
+        ENABLE_DEVELOPMENT_PAYMENT_HANDOFF=False,
+    )
+    def test_mock_payment_handoff_is_hidden_when_disabled(self):
+        viewing = self._create_viewing()
+        payment = self._create_payment(viewing)
+
+        response = self.client.post(
+            f"/api/payments/{payment.id}/mock-success/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+            response.data,
+        )
+
+        payment.refresh_from_db()
+        viewing.refresh_from_db()
+        self.assertNotEqual(
+            payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+        self.assertEqual(
+            viewing.status,
+            Viewing.Status.PAYMENT_PROCESSING,
+        )
+
     def test_unpaid_viewing_is_hidden_then_paid_viewing_can_be_accepted(self):
         viewing = self._create_viewing()
 

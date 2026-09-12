@@ -440,7 +440,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
         request,
         pk=None,
     ):
-        if not settings.DEBUG:
+        if not settings.ENABLE_DEVELOPMENT_PAYMENT_HANDOFF:
             return Response(
                 {
                     "detail": (

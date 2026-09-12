@@ -11,10 +11,10 @@ from .models import Payment, ViewingCredit
 
 @admin.action(description="DEV ONLY: Mark selected payments successful")
 def mark_payments_successful(modeladmin, request, queryset):
-    if not settings.DEBUG:
+    if not settings.ENABLE_DEVELOPMENT_PAYMENT_HANDOFF:
         modeladmin.message_user(
             request,
-            "Development payment simulation is disabled outside DEBUG mode.",
+            "Development payment simulation is disabled in this environment.",
             level=messages.ERROR,
         )
         return
@@ -143,7 +143,7 @@ class PaymentAdmin(admin.ModelAdmin):
     def get_actions(self, request):
         actions = super().get_actions(request)
 
-        if not settings.DEBUG:
+        if not settings.ENABLE_DEVELOPMENT_PAYMENT_HANDOFF:
             actions.pop("mark_payments_successful", None)
 
         return actions
