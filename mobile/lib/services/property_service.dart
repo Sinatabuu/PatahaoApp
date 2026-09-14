@@ -6,13 +6,111 @@ import 'package:http/http.dart' as http;
 import '../models/property.dart';
 import '../models/property_type_option.dart';
 
+class PropertyFeedPage {
+  const PropertyFeedPage({
+    required this.properties,
+    required this.recentSuccesses,
+    required this.count,
+    required this.hasNext,
+  });
+
+  final List<Property> properties;
+  final List<Property> recentSuccesses;
+  final int count;
+  final bool hasNext;
+
+  factory PropertyFeedPage.fromJson(dynamic decoded) {
+    if (decoded is List) {
+      final properties = _parseProperties(decoded);
+
+      return PropertyFeedPage(
+        properties: properties
+            .where((property) => !property.isSuccessBroadcastActive)
+            .toList(),
+        recentSuccesses: properties
+            .where((property) => property.isSuccessBroadcastActive)
+            .toList(),
+        count: properties
+            .where((property) => !property.isSuccessBroadcastActive)
+            .length,
+        hasNext: false,
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException('Properties API returned invalid feed data.');
+    }
+
+    final payload = Map<String, dynamic>.from(decoded);
+    final results = payload['results'];
+    final recentSuccesses = payload['recent_successes'] ?? const <dynamic>[];
+
+    if (results is! List || recentSuccesses is! List) {
+      throw const FormatException(
+        'Properties API returned an invalid paginated feed.',
+      );
+    }
+
+    final parsedProperties = _parseProperties(results);
+    final parsedSuccesses = _parseProperties(recentSuccesses);
+
+    return PropertyFeedPage(
+      properties: parsedProperties,
+      recentSuccesses: parsedSuccesses,
+      count: _parseCount(payload['count'], parsedProperties.length),
+      hasNext: payload['next'] != null,
+    );
+  }
+
+  static int _parseCount(dynamic value, int fallback) {
+    if (value is int) {
+      return value;
+    }
+
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  static List<Property> _parseProperties(List<dynamic> items) {
+    return items.map<Property>((dynamic item) {
+      if (item is! Map) {
+        throw const FormatException('Invalid property information received.');
+      }
+
+      return Property.fromJson(Map<String, dynamic>.from(item));
+    }).toList();
+  }
+}
+
 class PropertyService {
   static const String baseUrl = 'https://patahao-api.roysafi.com';
 
   static const Duration _timeout = Duration(seconds: 30);
 
-  Future<List<Property>> fetchProperties() async {
-    final uri = Uri.parse('$baseUrl/api/properties/');
+  Future<PropertyFeedPage> fetchPropertyFeed({
+    int page = 1,
+    String search = '',
+    String listingType = 'all',
+    String propertyType = 'all',
+    int? bedrooms,
+    double? minimumPrice,
+    double? maximumPrice,
+    bool verifiedOnly = false,
+  }) async {
+    final queryParameters = <String, String>{
+      'feed': 'compact',
+      if (page > 1) 'page': '$page',
+      if (search.trim().isNotEmpty) 'search': search.trim(),
+      if (listingType != 'all') 'listing_type': listingType,
+      if (propertyType != 'all') 'property_type': propertyType,
+      if (bedrooms != null) 'bedrooms': '$bedrooms',
+      if (minimumPrice != null) 'min_price': '$minimumPrice',
+      if (maximumPrice != null) 'max_price': '$maximumPrice',
+      if (verifiedOnly) 'verified_only': 'true',
+    };
+
+    final uri = Uri.parse(
+      '$baseUrl/api/properties/',
+    ).replace(queryParameters: queryParameters);
 
     debugPrint('PROPERTY REQUEST: $uri');
 
@@ -22,8 +120,6 @@ class PropertyService {
           .timeout(_timeout);
 
       debugPrint('PROPERTY STATUS: ${response.statusCode}');
-
-      debugPrint('PROPERTY BODY: ${response.body}');
 
       if (response.statusCode != 200) {
         throw Exception(
@@ -35,19 +131,7 @@ class PropertyService {
 
       final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
 
-      if (decoded is! List) {
-        throw const FormatException(
-          'Properties API did not return a JSON list.',
-        );
-      }
-
-      return decoded.map<Property>((dynamic item) {
-        if (item is! Map) {
-          throw const FormatException('Invalid property information received.');
-        }
-
-        return Property.fromJson(Map<String, dynamic>.from(item));
-      }).toList();
+      return PropertyFeedPage.fromJson(decoded);
     } catch (error, stackTrace) {
       debugPrint('PROPERTY ERROR TYPE: ${error.runtimeType}');
 
@@ -56,6 +140,12 @@ class PropertyService {
 
       rethrow;
     }
+  }
+
+  Future<List<Property>> fetchProperties() async {
+    final feed = await fetchPropertyFeed();
+
+    return [...feed.properties, ...feed.recentSuccesses];
   }
 
   Future<Property> fetchProperty(int propertyId) async {

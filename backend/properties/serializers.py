@@ -413,6 +413,101 @@ class PropertySerializer(serializers.ModelSerializer):
 
         return favorite.id
 
+
+class PropertyCardSerializer(PropertySerializer):
+    """
+    Compact representation used by the paginated public property feed.
+
+    The full serializer remains available on the detail endpoint. Keeping
+    feed cards small avoids returning every photo, video, amenity, partner,
+    and long description for properties that the customer has not opened.
+    """
+
+    photos = serializers.SerializerMethodField()
+    videos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Property
+        fields = (
+            "id",
+            "title",
+            "property_type",
+            "listing_type",
+            "price",
+            "county",
+            "town",
+            "estate",
+            "bedrooms",
+            "bathrooms",
+            "status",
+            "is_available",
+            "is_success_broadcast_active",
+            "success_badge",
+            "transaction_completed_at",
+            "success_broadcast_until",
+            "is_favorite",
+            "favorite_id",
+            "trust_badge",
+            "photos",
+            "videos",
+        )
+
+    def _favorite_ids(self):
+        return self.context.get(
+            "favorite_id_by_property_id",
+        )
+
+    def get_is_favorite(self, obj):
+        favorite_ids = self._favorite_ids()
+
+        if favorite_ids is None:
+            return super().get_is_favorite(obj)
+
+        return obj.pk in favorite_ids
+
+    def get_favorite_id(self, obj):
+        favorite_ids = self._favorite_ids()
+
+        if favorite_ids is None:
+            return super().get_favorite_id(obj)
+
+        return favorite_ids.get(obj.pk)
+
+    def get_photos(self, obj):
+        photos = list(obj.photos.all())
+
+        if not photos:
+            return []
+
+        cover = next(
+            (
+                photo
+                for photo in photos
+                if photo.is_cover
+            ),
+            photos[0],
+        )
+
+        return [
+            PropertyPhotoSerializer(
+                cover,
+                context=self.context,
+            ).data
+        ]
+
+    def get_videos(self, obj):
+        video = next(iter(obj.videos.all()), None)
+
+        if video is None:
+            return []
+
+        return [
+            PropertyVideoSerializer(
+                video,
+                context=self.context,
+            ).data
+        ]
+
 class PropertyAmenitiesUpdateSerializer(serializers.Serializer):
     amenities = serializers.SlugRelatedField(
         many=True,

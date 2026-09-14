@@ -213,22 +213,22 @@ class PublicPropertySuccessBroadcastTests(
             status=Property.STATUS_RESERVED,
         )
 
-    def response_items(self, response):
-        payload = response.json()
+    def publish(self, property_obj):
+        Property.objects.filter(
+            pk=property_obj.pk,
+        ).update(
+            status=Property.STATUS_PUBLISHED,
+        )
 
-        if isinstance(payload, dict):
-            return payload.get(
-                "results",
-                [],
-            )
+        property_obj.refresh_from_db()
 
-        return payload
+        return property_obj
 
     def test_public_list_contains_only_available_and_active_broadcasts(
         self,
     ):
         response = self.client.get(
-            "/api/properties/",
+            "/api/properties/?feed=compact",
         )
 
         self.assertEqual(
@@ -236,7 +236,11 @@ class PublicPropertySuccessBroadcastTests(
             status.HTTP_200_OK,
         )
 
-        items = self.response_items(response)
+        payload = response.json()
+        items = payload["results"]
+        recent_successes = payload[
+            "recent_successes"
+        ]
 
         returned_ids = {
             item["id"]
@@ -247,14 +251,28 @@ class PublicPropertySuccessBroadcastTests(
             returned_ids,
             {
                 self.published_property.id,
+            },
+        )
+
+        success_ids = {
+            item["id"]
+            for item in recent_successes
+        }
+
+        self.assertEqual(
+            success_ids,
+            {
                 self.sold_property.id,
                 self.rented_property.id,
             },
         )
+        self.assertEqual(payload["count"], 1)
+        self.assertIsNone(payload["next"])
+        self.assertIsNone(payload["previous"])
 
         sold_item = next(
             item
-            for item in items
+            for item in recent_successes
             if item["id"] == self.sold_property.id
         )
 
@@ -280,6 +298,155 @@ class PublicPropertySuccessBroadcastTests(
         self.assertIsNotNone(
             sold_item["success_broadcast_until"],
         )
+
+        self.assertNotIn("description", items[0])
+        self.assertNotIn("amenities", items[0])
+        self.assertNotIn("partner", items[0])
+        self.assertLessEqual(len(items[0]["photos"]), 1)
+        self.assertLessEqual(len(items[0]["videos"]), 1)
+
+    def test_public_feed_paginates_available_properties(self):
+        for index in range(24):
+            self.publish(
+                self.create_property(
+                    title=f"Available Property {index}",
+                    listing_type=Property.LISTING_RENT,
+                )
+            )
+
+        for index in range(5):
+            completed_property = self.create_property(
+                title=f"Completed Property {index}",
+                listing_type=Property.LISTING_RENT,
+            )
+            completed_property.mark_transaction_completed()
+
+        first_response = self.client.get(
+            "/api/properties/?feed=compact",
+        )
+        first_payload = first_response.json()
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(first_payload["count"], 25)
+        self.assertEqual(len(first_payload["results"]), 20)
+        self.assertIsNotNone(first_payload["next"])
+        self.assertEqual(
+            len(first_payload["recent_successes"]),
+            6,
+        )
+
+        second_response = self.client.get(
+            "/api/properties/?feed=compact&page=2",
+        )
+        second_payload = second_response.json()
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(second_payload["count"], 25)
+        self.assertEqual(len(second_payload["results"]), 5)
+        self.assertIsNone(second_payload["next"])
+        self.assertIsNotNone(second_payload["previous"])
+        self.assertEqual(
+            second_payload["recent_successes"],
+            [],
+        )
+
+    def test_public_feed_search_and_filters_run_on_server(self):
+        matching_property = self.create_property(
+            title="Westlands Gold House",
+            listing_type=Property.LISTING_SALE,
+        )
+        Property.objects.filter(
+            pk=matching_property.pk,
+        ).update(
+            status=Property.STATUS_PUBLISHED,
+            property_type=Property.TYPE_HOUSE,
+            bedrooms=4,
+            price=Decimal("500000.00"),
+            county="Nairobi",
+            town="Westlands",
+            trust_badge="gold",
+        )
+
+        response = self.client.get(
+            "/api/properties/",
+            {
+                "feed": "compact",
+                "search": "Westlands",
+                "listing_type": Property.LISTING_SALE,
+                "property_type": Property.TYPE_HOUSE,
+                "bedrooms": "4",
+                "min_price": "400000",
+                "max_price": "600000",
+                "verified_only": "true",
+            },
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(
+            [item["id"] for item in payload["results"]],
+            [matching_property.id],
+        )
+
+        invalid_price_response = self.client.get(
+            "/api/properties/",
+            {
+                "feed": "compact",
+                "min_price": "NaN",
+                "max_price": "Infinity",
+            },
+        )
+        self.assertEqual(
+            invalid_price_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_legacy_public_list_remains_available_during_rollout(self):
+        response = self.client.get(
+            "/api/properties/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        payload = response.json()
+        self.assertIsInstance(payload, list)
+        self.assertEqual(
+            {item["id"] for item in payload},
+            {
+                self.published_property.id,
+                self.sold_property.id,
+                self.rented_property.id,
+            },
+        )
+
+    def test_public_detail_still_returns_full_property(self):
+        response = self.client.get(
+            (
+                "/api/properties/"
+                f"{self.published_property.id}/"
+            ),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        payload = response.json()
+        self.assertIn("description", payload)
+        self.assertIn("amenities", payload)
+        self.assertIn("partner", payload)
 
     def test_expired_broadcast_cannot_be_retrieved_publicly(
         self,

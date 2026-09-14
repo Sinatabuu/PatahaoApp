@@ -9,10 +9,104 @@ import 'package:mobile/services/auth_service.dart';
 import 'package:mobile/screens/add_phone_number_screen.dart';
 import 'package:mobile/screens/property_photo_viewer_screen.dart';
 
-class PropertyDetailScreen extends StatelessWidget {
+class PropertyDetailScreen extends StatefulWidget {
   final Property property;
 
   const PropertyDetailScreen({super.key, required this.property});
+
+  @override
+  State<PropertyDetailScreen> createState() => _PropertyDetailScreenState();
+}
+
+class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
+  final PropertyService _propertyService = PropertyService();
+  late Future<Property> _propertyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProperty();
+  }
+
+  void _loadProperty() {
+    if (widget.property.description.trim().isNotEmpty) {
+      _propertyFuture = Future<Property>.value(widget.property);
+      return;
+    }
+
+    _propertyFuture = _propertyService.fetchProperty(widget.property.id);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Property>(
+      future: _propertyFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Property Details'),
+              backgroundColor: const Color(0xFF14532D),
+              foregroundColor: Colors.white,
+            ),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Property Details'),
+              backgroundColor: const Color(0xFF14532D),
+              foregroundColor: Colors.white,
+            ),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off_outlined, size: 52),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Could not load this property',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Check your connection and try again.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      onPressed: () {
+                        setState(_loadProperty);
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return _PropertyDetailContent(
+          property: snapshot.data ?? widget.property,
+        );
+      },
+    );
+  }
+}
+
+class _PropertyDetailContent extends StatelessWidget {
+  final Property property;
+
+  const _PropertyDetailContent({required this.property});
 
   String get formattedPrice {
     final amount = double.tryParse(property.price);

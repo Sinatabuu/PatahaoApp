@@ -1,6 +1,9 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from math import asin, cos, radians, sin, sqrt
@@ -20,6 +23,7 @@ from .serializers import (
     PartnerPropertyPhotoSerializer,
     PropertyAmenitiesUpdateSerializer,
     PropertyAmenitySerializer,
+    PropertyCardSerializer,
     PropertyPhotoSerializer,
     PropertyPhotoUploadSerializer,
     PropertySerializer,
@@ -195,8 +199,11 @@ class PropertyViewSet(viewsets.ModelViewSet):
         permissions.IsAuthenticatedOrReadOnly,
     ]
 
-    def get_queryset(self):
-        queryset = (
+    class PublicFeedPagination(PageNumberPagination):
+        page_size = 20
+
+    def _base_queryset(self):
+        return (
             Property.objects
             .select_related("partner")
             .prefetch_related(
@@ -206,6 +213,15 @@ class PropertyViewSet(viewsets.ModelViewSet):
             )
             .order_by("-created_at")
         )
+
+    def _is_staff_request(self):
+        return (
+            self.request.user.is_authenticated
+            and self.request.user.is_staff
+        )
+
+    def get_queryset(self):
+        queryset = self._base_queryset()
         listing_type = self.request.query_params.get(
             "listing_type",
         )
@@ -226,14 +242,13 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 town__icontains=town,
             )
 
-        if self.request.user.is_authenticated:
-            if self.request.user.is_staff:
-                if requested_status:
-                    queryset = queryset.filter(
-                        status=requested_status,
-                    )
+        if self._is_staff_request():
+            if requested_status:
+                queryset = queryset.filter(
+                    status=requested_status,
+                )
 
-                return queryset
+            return queryset
 
         # Public users and normal customers see available listings
         # plus recent Pata Hao successes for their controlled period.
@@ -251,6 +266,198 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 success_broadcast_until__gt=now,
             )
         )
+
+    def _apply_public_feed_filters(self, queryset):
+        params = self.request.query_params
+
+        listing_type = params.get("listing_type", "").strip()
+        property_type = params.get("property_type", "").strip()
+        town = params.get("town", "").strip()
+        search = params.get("search", "").strip()
+        bedrooms = params.get("bedrooms", "").strip()
+        minimum_price = params.get("min_price", "").strip()
+        maximum_price = params.get("max_price", "").strip()
+        verified_only = params.get(
+            "verified_only",
+            "",
+        ).lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+        if listing_type:
+            queryset = queryset.filter(
+                listing_type=listing_type,
+            )
+
+        if property_type:
+            queryset = queryset.filter(
+                property_type=property_type,
+            )
+
+        if town:
+            queryset = queryset.filter(
+                town__icontains=town,
+            )
+
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search)
+                | Q(estate__icontains=search)
+                | Q(town__icontains=search)
+                | Q(county__icontains=search)
+            )
+
+        try:
+            bedroom_count = int(bedrooms)
+        except (TypeError, ValueError):
+            bedroom_count = None
+
+        if bedroom_count is not None:
+            if bedroom_count >= 4:
+                queryset = queryset.filter(
+                    bedrooms__gte=4,
+                )
+            else:
+                queryset = queryset.filter(
+                    bedrooms=bedroom_count,
+                )
+
+        try:
+            minimum = Decimal(minimum_price)
+        except (InvalidOperation, TypeError, ValueError):
+            minimum = None
+
+        if minimum is not None and not minimum.is_finite():
+            minimum = None
+
+        if minimum is not None:
+            queryset = queryset.filter(
+                price__gte=minimum,
+            )
+
+        try:
+            maximum = Decimal(maximum_price)
+        except (InvalidOperation, TypeError, ValueError):
+            maximum = None
+
+        if maximum is not None and not maximum.is_finite():
+            maximum = None
+
+        if maximum is not None:
+            queryset = queryset.filter(
+                price__lte=maximum,
+            )
+
+        if verified_only:
+            queryset = queryset.exclude(
+                trust_badge="none",
+            )
+
+        return queryset
+
+    def _favorite_id_map(self, properties):
+        if not self.request.user.is_authenticated:
+            return {}
+
+        property_ids = [
+            property_obj.pk
+            for property_obj in properties
+        ]
+
+        return dict(
+            PropertyFavorite.objects.filter(
+                customer=self.request.user,
+                property_id__in=property_ids,
+            ).values_list(
+                "property_id",
+                "id",
+            )
+        )
+
+    def list(self, request, *args, **kwargs):
+        compact_feed_requested = (
+            request.query_params.get("feed", "")
+            == "compact"
+        )
+
+        if (
+            self._is_staff_request()
+            or not compact_feed_requested
+        ):
+            return super().list(
+                request,
+                *args,
+                **kwargs,
+            )
+
+        available_queryset = self._apply_public_feed_filters(
+            self._base_queryset().filter(
+                status=Property.STATUS_PUBLISHED,
+            )
+        )
+
+        paginator = self.PublicFeedPagination()
+        page = paginator.paginate_queryset(
+            available_queryset,
+            request,
+            view=self,
+        )
+
+        recent_successes = []
+
+        if paginator.page.number == 1:
+            now = timezone.now()
+            success_queryset = self._base_queryset().filter(
+                status__in=[
+                    Property.STATUS_SOLD,
+                    Property.STATUS_RENTED,
+                ],
+                success_broadcast_until__gt=now,
+            ).order_by(
+                "-transaction_completed_at",
+                "-created_at",
+            )
+
+            listing_type = request.query_params.get(
+                "listing_type",
+                "",
+            ).strip()
+
+            if listing_type:
+                success_queryset = success_queryset.filter(
+                    listing_type=listing_type,
+                )
+
+            recent_successes = list(success_queryset[:6])
+
+        all_properties = [
+            *page,
+            *recent_successes,
+        ]
+        serializer_context = {
+            **self.get_serializer_context(),
+            "favorite_id_by_property_id": (
+                self._favorite_id_map(all_properties)
+            ),
+        }
+
+        results = PropertyCardSerializer(
+            page,
+            many=True,
+            context=serializer_context,
+        ).data
+        success_data = PropertyCardSerializer(
+            recent_successes,
+            many=True,
+            context=serializer_context,
+        ).data
+
+        response = paginator.get_paginated_response(results)
+        response.data["recent_successes"] = success_data
+
+        return response
 
     def perform_create(self, serializer):
         property_obj = serializer.save()

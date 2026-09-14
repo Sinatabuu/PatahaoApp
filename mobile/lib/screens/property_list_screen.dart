@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:mobile/models/property.dart';
@@ -24,6 +26,7 @@ class PropertyListScreen extends StatefulWidget {
 class _PropertyListScreenState extends State<PropertyListScreen> {
   final PropertyService _propertyService = PropertyService();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   String _selectedListingType = 'all';
   String _selectedPropertyType = 'all';
@@ -32,7 +35,15 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
   double? _maximumPrice;
   bool _verifiedOnly = false;
   bool _hasPendingViewingOutcome = false;
-  late Future<List<Property>> _propertiesFuture;
+  bool _isLoadingMore = false;
+  bool _hasNextPage = false;
+  int _nextPage = 2;
+  int _totalPropertyCount = 0;
+  int _feedGeneration = 0;
+  Timer? _searchDebounce;
+  List<Property> _properties = <Property>[];
+  List<Property> _recentSuccesses = <Property>[];
+  late Future<PropertyFeedPage> _propertiesFuture;
   late Future<List<PropertyTypeOption>> _propertyTypesFuture;
 
   @override
@@ -41,6 +52,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
 
     _loadProperties();
     _loadPropertyTypes();
+    _scrollController.addListener(_handleScroll);
 
     if (widget.onLogout != null) {
       _loadPendingViewingOutcome();
@@ -49,12 +61,42 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
     _searchController.dispose();
     super.dispose();
   }
 
   void _loadProperties() {
-    _propertiesFuture = _propertyService.fetchProperties();
+    final generation = ++_feedGeneration;
+
+    _propertiesFuture = _fetchFeedPage(1).then((feed) {
+      if (generation == _feedGeneration) {
+        _properties = List<Property>.from(feed.properties);
+        _recentSuccesses = List<Property>.from(feed.recentSuccesses);
+        _totalPropertyCount = feed.count;
+        _hasNextPage = feed.hasNext;
+        _nextPage = 2;
+        _isLoadingMore = false;
+      }
+
+      return feed;
+    });
+  }
+
+  Future<PropertyFeedPage> _fetchFeedPage(int page) {
+    return _propertyService.fetchPropertyFeed(
+      page: page,
+      search: _searchController.text,
+      listingType: _selectedListingType,
+      propertyType: _selectedPropertyType,
+      bedrooms: _selectedBedrooms,
+      minimumPrice: _minimumPrice,
+      maximumPrice: _maximumPrice,
+      verifiedOnly: _verifiedOnly,
+    );
   }
 
   void _loadPropertyTypes() {
@@ -96,83 +138,75 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
     await _propertiesFuture;
   }
 
-  String _normalizePropertyType(String value) {
-    final normalized = value
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
+  void _reloadProperties() {
+    setState(_loadProperties);
+  }
 
-    switch (normalized) {
-      case 'studio':
-      case 'bedsitter':
-      case 'studio_bedsitter':
-      case 'bedsitter_studio':
-        return 'studio';
+  void _handleSearchChanged(String _) {
+    setState(() {});
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 400),
+      _reloadProperties,
+    );
+  }
 
-      case 'flat':
-      case 'apartment':
-        return 'apartment';
+  void _handleScroll() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
 
-      default:
-        return normalized;
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 500) {
+      _loadNextPage();
     }
   }
 
-  List<Property> _filterProperties(List<Property> properties) {
-    final query = _searchController.text.trim().toLowerCase();
+  Future<void> _loadNextPage() async {
+    if (_isLoadingMore || !_hasNextPage) {
+      return;
+    }
 
-    return properties.where((property) {
-      final locationMatches =
-          query.isEmpty ||
-          property.title.toLowerCase().contains(query) ||
-          property.estate.toLowerCase().contains(query) ||
-          property.town.toLowerCase().contains(query) ||
-          property.county.toLowerCase().contains(query);
+    final generation = _feedGeneration;
 
-      final listingTypeMatches =
-          _selectedListingType == 'all' ||
-          property.listingType.trim().toLowerCase() ==
-              _selectedListingType.trim().toLowerCase();
-      final normalizedPropertyType = _normalizePropertyType(
-        property.propertyType,
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final feed = await _fetchFeedPage(_nextPage);
+
+      if (!mounted || generation != _feedGeneration) {
+        return;
+      }
+
+      final loadedIds = _properties.map((property) => property.id).toSet();
+
+      setState(() {
+        _properties.addAll(
+          feed.properties.where((property) => loadedIds.add(property.id)),
+        );
+        _totalPropertyCount = feed.count;
+        _hasNextPage = feed.hasNext;
+        _nextPage++;
+      });
+    } catch (_) {
+      if (!mounted || generation != _feedGeneration) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load more homes. Scroll down to try again.'),
+        ),
       );
-
-      final normalizedSelectedPropertyType = _normalizePropertyType(
-        _selectedPropertyType,
-      );
-
-      final propertyTypeMatches =
-          normalizedSelectedPropertyType == 'all' ||
-          normalizedPropertyType == normalizedSelectedPropertyType;
-      // Bedroom filtering does not apply to studios/bedsitters.
-      final bedroomsMatch =
-          normalizedSelectedPropertyType == 'studio' ||
-          _selectedBedrooms == null ||
-          (_selectedBedrooms == 4
-              ? property.bedrooms >= 4
-              : property.bedrooms == _selectedBedrooms);
-
-      final numericPrice = double.tryParse(property.price);
-
-      final minimumPriceMatches =
-          _minimumPrice == null ||
-          (numericPrice != null && numericPrice >= _minimumPrice!);
-
-      final maximumPriceMatches =
-          _maximumPrice == null ||
-          (numericPrice != null && numericPrice <= _maximumPrice!);
-
-      final verifiedMatches = !_verifiedOnly || property.isVerified;
-
-      return locationMatches &&
-          listingTypeMatches &&
-          propertyTypeMatches &&
-          bedroomsMatch &&
-          minimumPriceMatches &&
-          maximumPriceMatches &&
-          verifiedMatches;
-    }).toList();
+    } finally {
+      if (mounted && generation == _feedGeneration) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+      }
+    }
   }
 
   int get _activeFilterCount {
@@ -198,6 +232,8 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
   }
 
   void _clearFilters() {
+    _searchDebounce?.cancel();
+
     setState(() {
       _searchController.clear();
       _selectedListingType = 'all';
@@ -206,6 +242,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
       _minimumPrice = null;
       _maximumPrice = null;
       _verifiedOnly = false;
+      _loadProperties();
     });
   }
 
@@ -576,6 +613,8 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
         _maximumPrice = double.tryParse(
           maximumPriceController.text.replaceAll(',', '').trim(),
         );
+
+        _loadProperties();
       });
     }
 
@@ -587,7 +626,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Pata Hao')),
-      body: FutureBuilder<List<Property>>(
+      body: FutureBuilder<PropertyFeedPage>(
         future: _propertiesFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -629,53 +668,10 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
             );
           }
 
-          final properties = snapshot.data ?? <Property>[];
-
-          final filteredProperties = _filterProperties(properties);
-
-          final availableProperties = filteredProperties
-              .where((property) => !property.isSuccessBroadcastActive)
-              .toList();
-
-          final successBroadcastProperties =
-              filteredProperties
-                  .where((property) => property.isSuccessBroadcastActive)
-                  .toList()
-                ..sort((first, second) {
-                  final firstCompletedAt =
-                      first.transactionCompletedAt ??
-                      DateTime.fromMillisecondsSinceEpoch(0);
-
-                  final secondCompletedAt =
-                      second.transactionCompletedAt ??
-                      DateTime.fromMillisecondsSinceEpoch(0);
-
-                  return secondCompletedAt.compareTo(firstCompletedAt);
-                });
-
-          if (properties.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: _refreshProperties,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: const [
-                  SizedBox(height: 180),
-                  Icon(Icons.home_work_outlined, size: 60),
-                  SizedBox(height: 16),
-                  Center(
-                    child: Text(
-                      'No properties are available yet.',
-                      style: TextStyle(fontSize: 18),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-
           return RefreshIndicator(
             onRefresh: _refreshProperties,
             child: CustomScrollView(
+              controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 SliverToBoxAdapter(
@@ -683,13 +679,12 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                     controller: _searchController,
                     selectedListingType: _selectedListingType,
                     activeFilterCount: _activeFilterCount,
-                    resultCount: filteredProperties.length,
-                    onSearchChanged: (_) {
-                      setState(() {});
-                    },
+                    resultCount: _totalPropertyCount,
+                    onSearchChanged: _handleSearchChanged,
                     onListingTypeChanged: (value) {
                       setState(() {
                         _selectedListingType = value;
+                        _loadProperties();
                       });
                     },
                     onOpenFilters: _openFilters,
@@ -697,18 +692,23 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                   ),
                 ),
 
-                if (filteredProperties.isEmpty)
+                if (_recentSuccesses.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: _RecentSuccessStrip(properties: _recentSuccesses),
+                  ),
+
+                if (_properties.isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
                     child: _NoMatchingProperties(onClearFilters: _clearFilters),
                   ),
 
-                if (availableProperties.isNotEmpty)
+                if (_properties.isNotEmpty)
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate((context, index) {
-                        final property = availableProperties[index];
+                        final property = _properties[index];
 
                         return _PropertyCard(
                           property: property,
@@ -716,77 +716,21 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                           location: _location(property),
                           price: _formatPrice(property),
                         );
-                      }, childCount: availableProperties.length),
+                      }, childCount: _properties.length),
                     ),
                   ),
 
-                if (successBroadcastProperties.isNotEmpty)
+                if (_isLoadingMore)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        availableProperties.isEmpty ? 0 : 4,
-                        16,
-                        14,
-                      ),
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFFBEB),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFFFDE68A)),
-                        ),
-                        child: const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.emoji_events_outlined,
-                                  color: Color(0xFFD97706),
-                                ),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Recently Sold & Rented',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF92400E),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              'Successful property transactions '
-                              'completed through Pata Hao.',
-                              style: TextStyle(
-                                color: Color(0xFF78350F),
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: Center(
+                        child: SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(strokeWidth: 3),
                         ),
                       ),
-                    ),
-                  ),
-
-                if (successBroadcastProperties.isNotEmpty)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        final property = successBroadcastProperties[index];
-
-                        return _PropertyCard(
-                          property: property,
-                          mediaUrl: _mediaUrl(property),
-                          location: _location(property),
-                          price: _formatPrice(property),
-                        );
-                      }, childCount: successBroadcastProperties.length),
                     ),
                   ),
               ],
@@ -984,6 +928,160 @@ class _PropertySearchHeader extends StatelessWidget {
                   child: const Text('Clear all'),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentSuccessStrip extends StatelessWidget {
+  const _RecentSuccessStrip({required this.properties});
+
+  final List<Property> properties;
+
+  String _mediaUrl(Property property) {
+    final media = property.coverMediaUrl?.trim() ?? '';
+
+    if (media.isEmpty || media.startsWith('http')) {
+      return media;
+    }
+
+    return '${PropertyService.baseUrl}$media';
+  }
+
+  String _location(Property property) {
+    return [
+      property.estate,
+      property.town,
+    ].where((value) => value.trim().isNotEmpty).join(', ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 0, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.verified_outlined, size: 18, color: Color(0xFFD97706)),
+              SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Recently completed through Pata Hao',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF78350F),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          SizedBox(
+            height: 112,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: properties.length,
+              padding: const EdgeInsets.only(right: 16),
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final property = properties[index];
+                final isSold = property.status.trim().toLowerCase() == 'sold';
+
+                return SizedBox(
+                  width: 232,
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    elevation: 0,
+                    clipBehavior: Clip.antiAlias,
+                    shape: RoundedRectangleBorder(
+                      side: const BorderSide(color: Color(0xFFFDE68A)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                PropertyDetailScreen(property: property),
+                          ),
+                        );
+                      },
+                      child: Row(
+                        children: [
+                          PataHaoNetworkImage(
+                            imageUrl: _mediaUrl(property).isEmpty
+                                ? null
+                                : _mediaUrl(property),
+                            width: 88,
+                            height: 112,
+                            fit: BoxFit.cover,
+                            cacheWidth: 360,
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isSold
+                                          ? const Color(0xFFFEE2E2)
+                                          : const Color(0xFFFEF3C7),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      isSold ? 'SOLD' : 'RENTED',
+                                      style: TextStyle(
+                                        color: isSold
+                                            ? const Color(0xFF991B1B)
+                                            : const Color(0xFF92400E),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 7),
+                                  Text(
+                                    property.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.15,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    _location(property),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
