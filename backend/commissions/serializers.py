@@ -493,7 +493,7 @@ class StaffCommissionPayoutSerializer(serializers.Serializer):
         return attrs
 
     def validate_payment_reference(self, value):
-        value = value.strip()
+        value = value.strip().upper()
 
         if not value:
             raise serializers.ValidationError(

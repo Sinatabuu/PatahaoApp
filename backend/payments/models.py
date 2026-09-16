@@ -3,6 +3,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -222,6 +223,24 @@ class Payment(models.Model):
             ),
         ]
 
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment_reference"],
+                condition=~models.Q(payment_reference=""),
+                name="payment_reference_unique",
+            ),
+            models.UniqueConstraint(
+                Lower("provider_receipt_number"),
+                condition=~models.Q(provider_receipt_number=""),
+                name="pay_provider_receipt_ci_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["checkout_request_id"],
+                condition=~models.Q(checkout_request_id=""),
+                name="pay_checkout_request_uniq",
+            ),
+        ]
+
     @staticmethod
     def generate_payment_reference():
         year = timezone.localdate().year
@@ -259,6 +278,206 @@ class Payment(models.Model):
             f"{reference} - "
             f"{self.amount} {self.currency}"
         )
+
+
+class PaymentAttempt(models.Model):
+    """Append-only provider-attempt history for one payment intent."""
+
+    class Status(models.TextChoices):
+        PROCESSING = "processing", "Processing"
+        SUCCESSFUL = "successful", "Successful"
+        FAILED = "failed", "Failed"
+        REVIEW_REQUIRED = "review_required", "Review required"
+
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="attempts",
+    )
+
+    attempt_reference = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        editable=False,
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PROCESSING,
+        db_index=True,
+        editable=False,
+    )
+
+    merchant_request_id = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+    )
+
+    checkout_request_id = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+    )
+
+    provider_receipt_number = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+    )
+
+    requested_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        editable=False,
+    )
+
+    callback_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        editable=False,
+    )
+
+    provider_response_code = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        editable=False,
+    )
+
+    provider_response_description = models.TextField(
+        blank=True,
+        default="",
+        editable=False,
+    )
+
+    failure_reason = models.TextField(
+        blank=True,
+        default="",
+        editable=False,
+    )
+
+    provider_request_payload = models.JSONField(
+        blank=True,
+        default=dict,
+        editable=False,
+    )
+
+    provider_response_payload = models.JSONField(
+        blank=True,
+        default=dict,
+        editable=False,
+    )
+
+    provider_callback_payload = models.JSONField(
+        blank=True,
+        default=dict,
+        editable=False,
+    )
+
+    provider_query_payload = models.JSONField(
+        blank=True,
+        default=dict,
+        editable=False,
+    )
+
+    initiated_at = models.DateTimeField(
+        default=timezone.now,
+        editable=False,
+    )
+
+    callback_received_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    reconciled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    failed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+        indexes = [
+            models.Index(
+                fields=["payment", "status", "-created_at"],
+                name="payattempt_payment_status_idx",
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["checkout_request_id"],
+                condition=~models.Q(checkout_request_id=""),
+                name="payattempt_checkout_uniq",
+            ),
+            models.UniqueConstraint(
+                Lower("provider_receipt_number"),
+                condition=~models.Q(provider_receipt_number=""),
+                name="payattempt_receipt_ci_uniq",
+            ),
+        ]
+
+    @staticmethod
+    def generate_attempt_reference():
+        year = timezone.localdate().year
+        random_part = uuid.uuid4().hex[:12].upper()
+
+        return f"PHA-{year}-{random_part}"
+
+    def save(self, *args, **kwargs):
+        if not self.attempt_reference:
+            self.attempt_reference = self.generate_attempt_reference()
+
+        self.provider_receipt_number = (
+            self.provider_receipt_number.strip().upper()
+        )
+        self.phone_number = self.phone_number.strip()
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.attempt_reference} - {self.status}"
 
 
 class ViewingCredit(models.Model):

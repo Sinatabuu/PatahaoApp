@@ -1501,6 +1501,104 @@ class BackendDerivedCommissionPayoutTests(
             1,
         )
 
+    def test_repeated_identical_payout_request_is_idempotent(self):
+        first_payment, first_settlement = (
+            pay_commission_participant_outstanding(
+                participant_id=self.partner_share.id,
+                actor=self.admin_user,
+                payment_method=(
+                    CommissionSettlementPayment
+                    .PaymentMethod
+                    .MPESA
+                ),
+                payment_reference="MPESA-IDEMPOTENT-001",
+            )
+        )
+
+        repeated_payment, repeated_settlement = (
+            pay_commission_participant_outstanding(
+                participant_id=self.partner_share.id,
+                actor=self.admin_user,
+                payment_method=(
+                    CommissionSettlementPayment
+                    .PaymentMethod
+                    .MPESA
+                ),
+                payment_reference="mpesa-idempotent-001",
+            )
+        )
+
+        self.assertEqual(
+            repeated_payment.id,
+            first_payment.id,
+        )
+        self.assertEqual(
+            repeated_settlement.id,
+            first_settlement.id,
+        )
+        self.assertEqual(
+            self.partner_share.payments.count(),
+            1,
+        )
+
+    def test_payout_reference_cannot_be_reused_for_other_method(self):
+        pay_commission_participant_outstanding(
+            participant_id=self.partner_share.id,
+            actor=self.admin_user,
+            payment_method=(
+                CommissionSettlementPayment
+                .PaymentMethod
+                .MPESA
+            ),
+            payment_reference="METHOD-CONFLICT-001",
+        )
+
+        with self.assertRaises(ValidationError):
+            pay_commission_participant_outstanding(
+                participant_id=self.partner_share.id,
+                actor=self.admin_user,
+                payment_method=(
+                    CommissionSettlementPayment
+                    .PaymentMethod
+                    .BANK_TRANSFER
+                ),
+                payment_reference="METHOD-CONFLICT-001",
+            )
+
+        self.assertEqual(
+            self.partner_share.payments.count(),
+            1,
+        )
+
+    def test_payout_reference_cannot_be_reused_for_other_recipient(self):
+        pay_commission_participant_outstanding(
+            participant_id=self.partner_share.id,
+            actor=self.admin_user,
+            payment_method=(
+                CommissionSettlementPayment
+                .PaymentMethod
+                .MPESA
+            ),
+            payment_reference="RECIPIENT-CONFLICT-001",
+        )
+
+        with self.assertRaises(ValidationError):
+            pay_commission_participant_outstanding(
+                participant_id=self.other_partner_share.id,
+                actor=self.admin_user,
+                payment_method=(
+                    CommissionSettlementPayment
+                    .PaymentMethod
+                    .MPESA
+                ),
+                payment_reference="RECIPIENT-CONFLICT-001",
+            )
+
+        self.assertEqual(
+            self.other_partner_share.payments.count(),
+            0,
+        )
+
     def test_platform_retained_revenue_cannot_be_paid_out(self):
         with self.assertRaises(ValidationError):
             pay_commission_participant_outstanding(

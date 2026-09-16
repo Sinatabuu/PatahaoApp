@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+import re
 from uuid import uuid4
 
 from django.conf import settings
@@ -11,7 +13,7 @@ from rest_framework.response import Response
 from viewings.models import Viewing, ViewingEvent
 from notifications.models import Notification
 
-from .models import Payment
+from .models import Payment, PaymentAttempt
 from .serializers import PaymentSerializer
 from .services import MpesaAPIError, MpesaClient
 
@@ -19,12 +21,20 @@ from .services import MpesaAPIError, MpesaClient
 def _callback_metadata(callback):
     result = {}
 
-    items = (
-        callback.get("CallbackMetadata", {})
-        .get("Item", [])
-    )
+    metadata = callback.get("CallbackMetadata", {})
+
+    if not isinstance(metadata, dict):
+        return result
+
+    items = metadata.get("Item", [])
+
+    if not isinstance(items, list):
+        return result
 
     for item in items:
+        if not isinstance(item, dict):
+            continue
+
         name = item.get("Name")
 
         if name:
@@ -33,12 +43,139 @@ def _callback_metadata(callback):
     return result
 
 
+def _callback_response(*, accepted=True, description=None):
+    if description is None:
+        description = "Accepted" if accepted else "Rejected"
+
+    return Response(
+        {
+            "ResultCode": 0 if accepted else 1,
+            "ResultDesc": description,
+        },
+        status=(
+            status.HTTP_200_OK
+            if accepted
+            else status.HTTP_400_BAD_REQUEST
+        ),
+    )
+
+
+def _parse_callback_amount(value):
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+    if not amount.is_finite() or amount <= Decimal("0.00"):
+        return None
+
+    try:
+        normalized_amount = amount.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        return None
+
+    if amount != normalized_amount:
+        return None
+
+    return normalized_amount
+
+
+def _legacy_payment_attempt(payment):
+    """Create an attempt record for a pre-ledger in-flight payment."""
+
+    defaults = {
+        "status": PaymentAttempt.Status.PROCESSING,
+        "merchant_request_id": payment.merchant_request_id,
+        "requested_amount": payment.amount,
+        "phone_number": payment.phone_number,
+        "provider_response_code": payment.provider_response_code,
+        "provider_response_description": (
+            payment.provider_response_description
+        ),
+        "provider_request_payload": payment.provider_request_payload,
+        "initiated_at": payment.initiated_at or payment.created_at,
+    }
+
+    try:
+        attempt, _ = PaymentAttempt.objects.get_or_create(
+            checkout_request_id=payment.checkout_request_id,
+            defaults={
+                "payment": payment,
+                **defaults,
+            },
+        )
+    except IntegrityError:
+        attempt = PaymentAttempt.objects.get(
+            checkout_request_id=payment.checkout_request_id,
+        )
+
+    return attempt
+
+
+def _mark_attempt_for_review(
+    attempt,
+    payment,
+    *,
+    reason,
+    callback_payload=None,
+    query_payload=None,
+):
+    now = timezone.now()
+
+    attempt.status = PaymentAttempt.Status.REVIEW_REQUIRED
+    attempt.failure_reason = reason
+
+    update_fields = [
+        "status",
+        "failure_reason",
+        "updated_at",
+    ]
+
+    if callback_payload is not None:
+        attempt.provider_callback_payload = callback_payload
+        attempt.callback_received_at = now
+        update_fields.extend(
+            [
+                "provider_callback_payload",
+                "callback_received_at",
+            ]
+        )
+
+    if query_payload is not None:
+        attempt.provider_query_payload = query_payload
+        attempt.reconciled_at = now
+        update_fields.extend(
+            [
+                "provider_query_payload",
+                "reconciled_at",
+            ]
+        )
+
+    attempt.save(update_fields=update_fields)
+
+    if (
+        payment.status != Payment.Status.SUCCESSFUL
+        and payment.checkout_request_id
+        == attempt.checkout_request_id
+    ):
+        payment.status = Payment.Status.PROCESSING
+        payment.failure_reason = reason
+        payment.save(
+            update_fields=[
+                "status",
+                "failure_reason",
+                "updated_at",
+            ]
+        )
+
+
 def _complete_payment(
     payment,
     viewing,
     *,
     provider_receipt,
     transaction_date,
+    provider_transaction_id=None,
     actor=None,
 ):
     if payment.status == Payment.Status.SUCCESSFUL:
@@ -47,7 +184,10 @@ def _complete_payment(
     now = timezone.now()
 
     payment.status = Payment.Status.SUCCESSFUL
-    payment.provider_transaction_id = payment.checkout_request_id
+    payment.provider_transaction_id = (
+        provider_transaction_id
+        or payment.checkout_request_id
+    )
     payment.provider_receipt_number = str(provider_receipt)
 
     if not payment.receipt_number:
@@ -266,6 +406,20 @@ class PaymentViewSet(viewsets.ModelViewSet):
     )
     @transaction.atomic
     def initiate(self, request, pk=None):
+        if (
+            getattr(settings, "IS_PRODUCTION", False)
+            and not settings.MPESA_LIVE_PAYMENTS_ENABLED
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Live M-Pesa payments are not enabled "
+                        "for this deployment."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
         payment = (
             self.get_queryset()
             .select_for_update()
@@ -363,6 +517,103 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        merchant_request_id = provider_response.get(
+            "MerchantRequestID",
+            "",
+        )
+        checkout_request_id = provider_response.get(
+            "CheckoutRequestID",
+            "",
+        )
+
+        if not merchant_request_id or not checkout_request_id:
+            payment.status = Payment.Status.FAILED
+            payment.failure_reason = (
+                "M-Pesa accepted the request without returning "
+                "its required request identifiers."
+            )
+            payment.failed_at = timezone.now()
+            payment.provider_request_payload = request_payload
+
+            payment.save(
+                update_fields=[
+                    "status",
+                    "failure_reason",
+                    "failed_at",
+                    "provider_request_payload",
+                    "updated_at",
+                ]
+            )
+
+            return Response(
+                {
+                    "detail": payment.failure_reason,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        try:
+            with transaction.atomic():
+                attempt = PaymentAttempt.objects.create(
+                    payment=payment,
+                    status=PaymentAttempt.Status.PROCESSING,
+                    merchant_request_id=merchant_request_id,
+                    checkout_request_id=checkout_request_id,
+                    requested_amount=payment.amount,
+                    phone_number=payment.phone_number,
+                    provider_response_code=str(
+                        provider_response.get(
+                            "ResponseCode",
+                            "",
+                        )
+                    ),
+                    provider_response_description=(
+                        provider_response.get(
+                            "ResponseDescription",
+                            "",
+                        )
+                    ),
+                    provider_request_payload=request_payload,
+                    provider_response_payload=provider_response,
+                    initiated_at=timezone.now(),
+                )
+
+        except IntegrityError:
+            existing_attempt = (
+                PaymentAttempt.objects.filter(
+                    checkout_request_id=checkout_request_id,
+                )
+                .first()
+            )
+
+            if (
+                existing_attempt is None
+                or existing_attempt.payment_id != payment.id
+            ):
+                payment.status = Payment.Status.FAILED
+                payment.failure_reason = (
+                    "M-Pesa returned a duplicate checkout identifier. "
+                    "The payment requires staff review."
+                )
+                payment.failed_at = timezone.now()
+                payment.save(
+                    update_fields=[
+                        "status",
+                        "failure_reason",
+                        "failed_at",
+                        "updated_at",
+                    ]
+                )
+
+                return Response(
+                    {
+                        "detail": payment.failure_reason,
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            attempt = existing_attempt
+
         payment.status = Payment.Status.PROCESSING
         payment.initiated_at = timezone.now()
         payment.failure_reason = ""
@@ -371,19 +622,9 @@ class PaymentViewSet(viewsets.ModelViewSet):
             request_payload
         )
 
-        payment.merchant_request_id = (
-            provider_response.get(
-                "MerchantRequestID",
-                "",
-            )
-        )
+        payment.merchant_request_id = merchant_request_id
 
-        payment.checkout_request_id = (
-            provider_response.get(
-                "CheckoutRequestID",
-                "",
-            )
-        )
+        payment.checkout_request_id = checkout_request_id
 
         payment.provider_response_code = str(
             provider_response.get(
@@ -426,6 +667,9 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 "payment": self.get_serializer(
                     payment
                 ).data,
+                "attempt_reference": (
+                    attempt.attempt_reference
+                ),
             }
         )
 
@@ -488,13 +732,63 @@ class PaymentViewSet(viewsets.ModelViewSet):
             ]
         )
 
+        now = timezone.now()
+        mock_receipt = f"RCT-{uuid4().hex[:10].upper()}"
+
+        attempt, _ = PaymentAttempt.objects.get_or_create(
+            checkout_request_id=payment.checkout_request_id,
+            defaults={
+                "payment": payment,
+                "status": PaymentAttempt.Status.PROCESSING,
+                "requested_amount": payment.amount,
+                "phone_number": payment.phone_number,
+                "provider_request_payload": {
+                    "development_simulation": True,
+                },
+                "initiated_at": now,
+            },
+        )
+
+        attempt.status = PaymentAttempt.Status.SUCCESSFUL
+        attempt.provider_receipt_number = mock_receipt
+        attempt.callback_amount = payment.amount
+        attempt.phone_number = payment.phone_number
+        attempt.provider_response_code = "0"
+        attempt.provider_response_description = (
+            "Development payment simulation completed successfully."
+        )
+        attempt.provider_callback_payload = {
+            "development_simulation": True,
+            "simulated_by_user_id": request.user.pk,
+            "simulated_at": now.isoformat(),
+        }
+        attempt.callback_received_at = now
+        attempt.completed_at = now
+        attempt.failure_reason = ""
+        attempt.save(
+            update_fields=[
+                "status",
+                "provider_receipt_number",
+                "callback_amount",
+                "phone_number",
+                "provider_response_code",
+                "provider_response_description",
+                "provider_callback_payload",
+                "callback_received_at",
+                "completed_at",
+                "failure_reason",
+                "updated_at",
+            ]
+        )
+
         _complete_payment(
             payment,
             viewing,
-            provider_receipt=(
-                f"RCT-{uuid4().hex[:10].upper()}"
+            provider_receipt=mock_receipt,
+            transaction_date=now,
+            provider_transaction_id=(
+                attempt.checkout_request_id
             ),
-            transaction_date=timezone.now(),
             actor=request.user,
         )
 
@@ -502,6 +796,211 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
         return Response(
             self.get_serializer(payment).data
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="reconcile",
+    )
+    def reconcile(self, request, pk=None):
+        if not request.user.is_staff:
+            return Response(
+                {
+                    "detail": (
+                        "Only Pata HAO staff may reconcile "
+                        "M-Pesa payments."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payment = self.get_queryset().get(pk=pk)
+
+        attempt = (
+            payment.attempts
+            .exclude(checkout_request_id="")
+            .order_by("-created_at", "-id")
+            .first()
+        )
+
+        if attempt is None and payment.checkout_request_id:
+            with transaction.atomic():
+                locked_payment = (
+                    Payment.objects.select_for_update()
+                    .get(pk=payment.pk)
+                )
+                attempt = _legacy_payment_attempt(
+                    locked_payment
+                )
+
+        if attempt is None:
+            return Response(
+                {
+                    "detail": (
+                        "This payment has no M-Pesa checkout "
+                        "attempt to reconcile."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            query_request, provider_response = (
+                MpesaClient().query_stk_push(
+                    checkout_request_id=(
+                        attempt.checkout_request_id
+                    ),
+                )
+            )
+        except MpesaAPIError as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "attempt_reference": (
+                        attempt.attempt_reference
+                    ),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        query_audit = {
+            "request": query_request,
+            "response": provider_response,
+        }
+
+        raw_result_code = provider_response.get(
+            "ResultCode"
+        )
+
+        try:
+            result_code = int(str(raw_result_code))
+        except (TypeError, ValueError):
+            result_code = None
+
+        with transaction.atomic():
+            attempt = (
+                PaymentAttempt.objects.select_for_update()
+                .get(pk=attempt.pk)
+            )
+            payment = (
+                Payment.objects.select_for_update()
+                .get(pk=payment.pk)
+            )
+
+            attempt.provider_query_payload = query_audit
+            attempt.reconciled_at = timezone.now()
+            attempt.provider_response_code = str(
+                raw_result_code
+                if raw_result_code is not None
+                else ""
+            )
+            attempt.provider_response_description = (
+                provider_response.get(
+                    "ResultDesc",
+                    provider_response.get(
+                        "ResponseDescription",
+                        "",
+                    ),
+                )
+            )
+
+            attempt.save(
+                update_fields=[
+                    "provider_query_payload",
+                    "reconciled_at",
+                    "provider_response_code",
+                    "provider_response_description",
+                    "updated_at",
+                ]
+            )
+
+            if attempt.status == PaymentAttempt.Status.SUCCESSFUL:
+                # Reconciliation is supplemental audit evidence. It must
+                # never downgrade a receipt already verified by callback.
+                pass
+
+            elif result_code is None:
+                _mark_attempt_for_review(
+                    attempt,
+                    payment,
+                    reason=(
+                        "M-Pesa reconciliation returned an invalid "
+                        "result code."
+                    ),
+                    query_payload=query_audit,
+                )
+
+            elif result_code == 0:
+                if payment.status != Payment.Status.SUCCESSFUL:
+                    _mark_attempt_for_review(
+                        attempt,
+                        payment,
+                        reason=(
+                            "M-Pesa reports a successful request, "
+                            "but a verified receipt callback is still "
+                            "required before crediting the payment."
+                        ),
+                        query_payload=query_audit,
+                    )
+
+            else:
+                now = timezone.now()
+                attempt.status = PaymentAttempt.Status.FAILED
+                attempt.failure_reason = (
+                    attempt.provider_response_description
+                    or "M-Pesa reports that the payment failed."
+                )
+                attempt.failed_at = now
+                attempt.save(
+                    update_fields=[
+                        "status",
+                        "failure_reason",
+                        "failed_at",
+                        "updated_at",
+                    ]
+                )
+
+                if (
+                    payment.status != Payment.Status.SUCCESSFUL
+                    and payment.checkout_request_id
+                    == attempt.checkout_request_id
+                ):
+                    payment.status = Payment.Status.FAILED
+                    payment.failure_reason = attempt.failure_reason
+                    payment.failed_at = now
+                    payment.save(
+                        update_fields=[
+                            "status",
+                            "failure_reason",
+                            "failed_at",
+                            "updated_at",
+                        ]
+                    )
+
+        payment.refresh_from_db()
+        attempt.refresh_from_db()
+
+        return Response(
+            {
+                "payment": self.get_serializer(payment).data,
+                "attempt": {
+                    "attempt_reference": (
+                        attempt.attempt_reference
+                    ),
+                    "status": attempt.status,
+                    "checkout_request_id": (
+                        attempt.checkout_request_id
+                    ),
+                    "provider_response_code": (
+                        attempt.provider_response_code
+                    ),
+                    "provider_response_description": (
+                        attempt.provider_response_description
+                    ),
+                    "reconciled_at": attempt.reconciled_at,
+                },
+            }
         )
 
     @action(
@@ -557,122 +1056,170 @@ class PaymentViewSet(viewsets.ModelViewSet):
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def mpesa_callback(request):
+    if not isinstance(request.data, dict):
+        return _callback_response(
+            accepted=False,
+            description="Invalid callback payload",
+        )
+
     body = request.data.get(
         "Body",
         {},
     )
+
+    if not isinstance(body, dict):
+        return _callback_response(
+            accepted=False,
+            description="Invalid callback body",
+        )
 
     callback = body.get(
         "stkCallback",
         {},
     )
 
-    checkout_request_id = callback.get(
-        "CheckoutRequestID",
-        "",
-    )
+    if not isinstance(callback, dict):
+        return _callback_response(
+            accepted=False,
+            description="Invalid STK callback",
+        )
+
+    checkout_request_id = str(
+        callback.get(
+            "CheckoutRequestID",
+            "",
+        )
+    ).strip()
 
     if not checkout_request_id:
-        return Response(
-            {
-                "ResultCode": 1,
-                "ResultDesc": (
-                    "Missing CheckoutRequestID"
-                ),
-            },
-            status=400,
+        return _callback_response(
+            accepted=False,
+            description="Missing CheckoutRequestID",
         )
 
     with transaction.atomic():
         try:
-            payment = (
-                Payment.objects.select_for_update()
-                .select_related("viewing")
+            attempt = (
+                PaymentAttempt.objects.select_for_update()
                 .get(
-                    checkout_request_id=(
-                        checkout_request_id
-                    )
+                    checkout_request_id=checkout_request_id,
                 )
             )
 
-        except Payment.DoesNotExist:
-            return Response(
-                {
-                    "ResultCode": 0,
-                    "ResultDesc": "Accepted",
-                }
+        except PaymentAttempt.DoesNotExist:
+            try:
+                legacy_payment = (
+                    Payment.objects.select_for_update()
+                    .get(
+                        checkout_request_id=(
+                            checkout_request_id
+                        )
+                    )
+                )
+            except Payment.DoesNotExist:
+                return _callback_response()
+
+            attempt = _legacy_payment_attempt(
+                legacy_payment
             )
 
-        payment.provider_callback_payload = (
-            request.data
+            attempt = (
+                PaymentAttempt.objects.select_for_update()
+                .get(pk=attempt.pk)
+            )
+
+        payment = (
+            Payment.objects.select_for_update()
+            .select_related("viewing")
+            .get(pk=attempt.payment_id)
         )
 
-        payment.callback_received_at = (
-            timezone.now()
-        )
+        if attempt.status == PaymentAttempt.Status.SUCCESSFUL:
+            return _callback_response()
 
-        payment.merchant_request_id = (
+        callback_received_at = timezone.now()
+        callback_merchant_request_id = str(
             callback.get(
                 "MerchantRequestID",
-                payment.merchant_request_id,
+                "",
             )
+        ).strip()
+
+        raw_result_code = callback.get(
+            "ResultCode"
         )
 
-        result_code = int(
+        try:
+            result_code = int(str(raw_result_code))
+        except (TypeError, ValueError):
+            result_code = None
+
+        result_description = str(
             callback.get(
-                "ResultCode",
-                1,
+                "ResultDesc",
+                "",
             )
+            or ""
         )
 
-        result_description = callback.get(
-            "ResultDesc",
-            "",
+        attempt.provider_callback_payload = request.data
+        attempt.callback_received_at = callback_received_at
+        attempt.provider_response_code = str(
+            raw_result_code
+            if raw_result_code is not None
+            else ""
         )
-
-        payment.provider_response_code = str(
-            result_code
-        )
-
-        payment.provider_response_description = (
+        attempt.provider_response_description = (
             result_description
         )
 
-        payment.save(
+        attempt.save(
             update_fields=[
                 "provider_callback_payload",
                 "callback_received_at",
-                "merchant_request_id",
                 "provider_response_code",
                 "provider_response_description",
                 "updated_at",
             ]
         )
 
-        if (
-            payment.status
-            == Payment.Status.SUCCESSFUL
-        ):
-            return Response(
-                {
-                    "ResultCode": 0,
-                    "ResultDesc": "Accepted",
-                }
+        if result_code is None:
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa callback contained an invalid result code."
+                ),
+                callback_payload=request.data,
             )
+
+            return _callback_response()
+
+        if (
+            attempt.merchant_request_id
+            and callback_merchant_request_id
+            != attempt.merchant_request_id
+        ):
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa callback merchant request identifier "
+                    "did not match the payment attempt."
+                ),
+                callback_payload=request.data,
+            )
+
+            return _callback_response()
 
         if result_code != 0:
-            payment.status = (
-                Payment.Status.FAILED
-            )
-
-            payment.failure_reason = (
+            attempt.status = PaymentAttempt.Status.FAILED
+            attempt.failure_reason = (
                 result_description
                 or "M-Pesa payment failed."
             )
-
-            payment.failed_at = timezone.now()
-
-            payment.save(
+            attempt.failed_at = callback_received_at
+            attempt.save(
                 update_fields=[
                     "status",
                     "failure_reason",
@@ -681,12 +1228,34 @@ def mpesa_callback(request):
                 ]
             )
 
-            return Response(
-                {
-                    "ResultCode": 0,
-                    "ResultDesc": "Accepted",
-                }
-            )
+            if (
+                payment.status != Payment.Status.SUCCESSFUL
+                and payment.checkout_request_id
+                == attempt.checkout_request_id
+            ):
+                payment.status = Payment.Status.FAILED
+                payment.failure_reason = attempt.failure_reason
+                payment.failed_at = callback_received_at
+                payment.provider_callback_payload = request.data
+                payment.callback_received_at = callback_received_at
+                payment.provider_response_code = str(result_code)
+                payment.provider_response_description = (
+                    result_description
+                )
+                payment.save(
+                    update_fields=[
+                        "status",
+                        "failure_reason",
+                        "failed_at",
+                        "provider_callback_payload",
+                        "callback_received_at",
+                        "provider_response_code",
+                        "provider_response_description",
+                        "updated_at",
+                    ]
+                )
+
+            return _callback_response()
 
         metadata = _callback_metadata(
             callback
@@ -700,128 +1269,208 @@ def mpesa_callback(request):
             "MpesaReceiptNumber"
         )
 
-        phone = str(
-            metadata.get(
-                "PhoneNumber",
-                "",
-            )
+        receipt = str(receipt or "").strip().upper()
+
+        phone = re.sub(
+            r"[^0-9]",
+            "",
+            str(
+                metadata.get(
+                    "PhoneNumber",
+                    "",
+                )
+            ),
         )
 
         if (
             amount is None
-            or receipt is None
+            or not receipt
+            or not phone
         ):
-            payment.status = (
-                Payment.Status.FAILED
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa success callback omitted "
+                    "amount, receipt, or phone evidence."
+                ),
+                callback_payload=request.data,
             )
 
-            payment.failure_reason = (
-                "M-Pesa success callback omitted "
-                "amount or receipt."
-            )
+            return _callback_response()
 
-            payment.failed_at = timezone.now()
-
-            payment.save(
-                update_fields=[
-                    "status",
-                    "failure_reason",
-                    "failed_at",
-                    "updated_at",
-                ]
-            )
-
-            return Response(
-                {
-                    "ResultCode": 0,
-                    "ResultDesc": "Accepted",
-                }
-            )
+        callback_amount = _parse_callback_amount(amount)
 
         if (
-            str(int(float(amount)))
-            != str(int(payment.amount))
+            callback_amount is None
+            or callback_amount != payment.amount
         ):
-            payment.status = (
-                Payment.Status.FAILED
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa amount did not exactly match "
+                    "the payment intent."
+                ),
+                callback_payload=request.data,
             )
 
-            payment.failure_reason = (
-                "M-Pesa amount did not match "
-                "the payment intent."
+            return _callback_response()
+
+        if phone != payment.phone_number:
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa phone number did not "
+                    "match the payment intent."
+                ),
+                callback_payload=request.data,
             )
 
-            payment.failed_at = timezone.now()
-
-            payment.save(
-                update_fields=[
-                    "status",
-                    "failure_reason",
-                    "failed_at",
-                    "updated_at",
-                ]
-            )
-
-            return Response(
-                {
-                    "ResultCode": 0,
-                    "ResultDesc": "Accepted",
-                }
-            )
-
-        if (
-            phone
-            and phone
-            != payment.phone_number
-        ):
-            payment.status = (
-                Payment.Status.FAILED
-            )
-
-            payment.failure_reason = (
-                "M-Pesa phone number did not "
-                "match the payment intent."
-            )
-
-            payment.failed_at = timezone.now()
-
-            payment.save(
-                update_fields=[
-                    "status",
-                    "failure_reason",
-                    "failed_at",
-                    "updated_at",
-                ]
-            )
-
-            return Response(
-                {
-                    "ResultCode": 0,
-                    "ResultDesc": "Accepted",
-                }
-            )
-
-        transaction_date = None
+            return _callback_response()
 
         raw_date = metadata.get(
             "TransactionDate"
         )
 
-        if raw_date:
-            try:
-                transaction_date = (
-                    timezone.make_aware(
-                        timezone.datetime.strptime(
-                            str(raw_date),
-                            "%Y%m%d%H%M%S",
-                        )
-                    )
+        try:
+            transaction_date = timezone.make_aware(
+                timezone.datetime.strptime(
+                    str(raw_date),
+                    "%Y%m%d%H%M%S",
+                ),
+                timezone.get_current_timezone(),
+            )
+        except (TypeError, ValueError):
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa success callback omitted a valid "
+                    "transaction timestamp."
+                ),
+                callback_payload=request.data,
+            )
+
+            return _callback_response()
+
+        duplicate_attempt = (
+            PaymentAttempt.objects.filter(
+                provider_receipt_number__iexact=receipt,
+            )
+            .exclude(pk=attempt.pk)
+            .first()
+        )
+        duplicate_payment = (
+            Payment.objects.filter(
+                provider_receipt_number__iexact=receipt,
+            )
+            .exclude(pk=payment.pk)
+            .first()
+        )
+
+        if duplicate_attempt or duplicate_payment:
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "M-Pesa receipt was already attached to "
+                    "a different payment attempt."
+                ),
+                callback_payload=request.data,
+            )
+
+            return _callback_response()
+
+        if payment.status == Payment.Status.SUCCESSFUL:
+            if (
+                payment.provider_receipt_number.upper()
+                == receipt
+            ):
+                attempt.status = PaymentAttempt.Status.SUCCESSFUL
+                attempt.provider_receipt_number = receipt
+                attempt.callback_amount = callback_amount
+                attempt.phone_number = phone
+                attempt.failure_reason = ""
+                attempt.completed_at = (
+                    payment.paid_at
+                    or callback_received_at
+                )
+                attempt.save(
+                    update_fields=[
+                        "status",
+                        "provider_receipt_number",
+                        "callback_amount",
+                        "phone_number",
+                        "failure_reason",
+                        "completed_at",
+                        "updated_at",
+                    ]
                 )
 
-            except (TypeError, ValueError):
-                transaction_date = (
-                    timezone.now()
-                )
+                return _callback_response()
+
+            attempt.provider_receipt_number = receipt
+            attempt.callback_amount = callback_amount
+            attempt.phone_number = phone
+            attempt.save(
+                update_fields=[
+                    "provider_receipt_number",
+                    "callback_amount",
+                    "phone_number",
+                    "updated_at",
+                ]
+            )
+            _mark_attempt_for_review(
+                attempt,
+                payment,
+                reason=(
+                    "A second successful M-Pesa charge was received "
+                    "for an already-paid viewing."
+                ),
+                callback_payload=request.data,
+            )
+
+            return _callback_response()
+
+        attempt.status = PaymentAttempt.Status.SUCCESSFUL
+        attempt.provider_receipt_number = receipt
+        attempt.callback_amount = callback_amount
+        attempt.phone_number = phone
+        attempt.failure_reason = ""
+        attempt.failed_at = None
+        attempt.completed_at = transaction_date
+        attempt.save(
+            update_fields=[
+                "status",
+                "provider_receipt_number",
+                "callback_amount",
+                "phone_number",
+                "failure_reason",
+                "failed_at",
+                "completed_at",
+                "updated_at",
+            ]
+        )
+
+        payment.checkout_request_id = attempt.checkout_request_id
+        payment.merchant_request_id = attempt.merchant_request_id
+        payment.provider_callback_payload = request.data
+        payment.callback_received_at = callback_received_at
+        payment.provider_response_code = str(result_code)
+        payment.provider_response_description = result_description
+        payment.save(
+            update_fields=[
+                "checkout_request_id",
+                "merchant_request_id",
+                "provider_callback_payload",
+                "callback_received_at",
+                "provider_response_code",
+                "provider_response_description",
+                "updated_at",
+            ]
+        )
 
         viewing = (
             Viewing.objects.select_for_update()
@@ -835,12 +1484,10 @@ def mpesa_callback(request):
             viewing,
             provider_receipt=receipt,
             transaction_date=transaction_date,
+            provider_transaction_id=(
+                attempt.checkout_request_id
+            ),
             actor=None,
         )
 
-    return Response(
-        {
-            "ResultCode": 0,
-            "ResultDesc": "Accepted",
-        }
-    )
+    return _callback_response()

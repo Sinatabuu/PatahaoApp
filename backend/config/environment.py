@@ -209,3 +209,84 @@ def development_payment_handoff_enabled(environment, debug, environ=None):
             environ=environ,
         )
     )
+
+
+def validate_mpesa_configuration(
+    application_environment,
+    development_handoff_enabled,
+    *,
+    mpesa_environment,
+    live_payments_enabled,
+    consumer_key,
+    consumer_secret,
+    shortcode,
+    passkey,
+    callback_url,
+    transaction_type,
+):
+    """Fail closed when live Daraja settings are incomplete or unsafe."""
+
+    if mpesa_environment not in {"sandbox", "production"}:
+        raise ImproperlyConfigured(
+            "MPESA_ENVIRONMENT must be either sandbox or production."
+        )
+
+    if transaction_type not in {
+        "CustomerPayBillOnline",
+        "CustomerBuyGoodsOnline",
+    }:
+        raise ImproperlyConfigured(
+            "MPESA_TRANSACTION_TYPE must be CustomerPayBillOnline "
+            "or CustomerBuyGoodsOnline."
+        )
+
+    if mpesa_environment == "production" and not live_payments_enabled:
+        raise ImproperlyConfigured(
+            "MPESA_ENVIRONMENT=production requires "
+            "MPESA_LIVE_PAYMENTS_ENABLED=true."
+        )
+
+    if not live_payments_enabled:
+        return
+
+    if application_environment != "production":
+        raise ImproperlyConfigured(
+            "Live M-Pesa payments may only be enabled in the "
+            "production Pata HAO environment."
+        )
+
+    if mpesa_environment != "production":
+        raise ImproperlyConfigured(
+            "Live M-Pesa payments require MPESA_ENVIRONMENT=production."
+        )
+
+    required_settings = {
+        "MPESA_CONSUMER_KEY": consumer_key,
+        "MPESA_CONSUMER_SECRET": consumer_secret,
+        "MPESA_SHORTCODE": shortcode,
+        "MPESA_PASSKEY": passkey,
+        "MPESA_CALLBACK_URL": callback_url,
+    }
+    missing_settings = [
+        name
+        for name, value in required_settings.items()
+        if not str(value).strip()
+    ]
+
+    if missing_settings:
+        raise ImproperlyConfigured(
+            "Live M-Pesa payments require: "
+            + ", ".join(missing_settings)
+            + "."
+        )
+
+    if not callback_url.startswith("https://"):
+        raise ImproperlyConfigured(
+            "Live M-Pesa payments require an HTTPS callback URL."
+        )
+
+    if development_handoff_enabled:
+        raise ImproperlyConfigured(
+            "Development payment handoff must be disabled before "
+            "live M-Pesa payments can be enabled."
+        )

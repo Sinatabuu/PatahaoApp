@@ -11,10 +11,27 @@ from config.environment import (
     get_database_config,
     get_environment,
     get_secret_key,
+    validate_mpesa_configuration,
 )
 
 
 class EnvironmentConfigTests(SimpleTestCase):
+    def valid_mpesa_configuration(self, **overrides):
+        configuration = {
+            "application_environment": "production",
+            "development_handoff_enabled": False,
+            "mpesa_environment": "production",
+            "live_payments_enabled": True,
+            "consumer_key": "consumer-key",
+            "consumer_secret": "consumer-secret",
+            "shortcode": "123456",
+            "passkey": "passkey",
+            "callback_url": "https://api.patahao.co.ke/mpesa/callback/",
+            "transaction_type": "CustomerPayBillOnline",
+        }
+        configuration.update(overrides)
+        return configuration
+
     def test_environment_defaults_to_development(self):
         self.assertEqual(
             get_environment({}),
@@ -160,4 +177,66 @@ class EnvironmentConfigTests(SimpleTestCase):
                 False,
                 enabled,
             )
+        )
+
+    def test_mpesa_sandbox_can_run_without_live_credentials(self):
+        validate_mpesa_configuration(
+            **self.valid_mpesa_configuration(
+                application_environment="development",
+                mpesa_environment="sandbox",
+                live_payments_enabled=False,
+                consumer_key="",
+                consumer_secret="",
+                passkey="",
+                callback_url="",
+            )
+        )
+
+    def test_mpesa_production_provider_requires_explicit_live_flag(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "MPESA_LIVE_PAYMENTS_ENABLED=true",
+        ):
+            validate_mpesa_configuration(
+                **self.valid_mpesa_configuration(
+                    live_payments_enabled=False,
+                )
+            )
+
+    def test_live_mpesa_requires_production_application(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "production Pata HAO environment",
+        ):
+            validate_mpesa_configuration(
+                **self.valid_mpesa_configuration(
+                    application_environment="staging",
+                )
+            )
+
+    def test_live_mpesa_requires_https_callback(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "HTTPS callback URL",
+        ):
+            validate_mpesa_configuration(
+                **self.valid_mpesa_configuration(
+                    callback_url="http://api.patahao.co.ke/mpesa/callback/",
+                )
+            )
+
+    def test_live_mpesa_requires_all_daraja_credentials(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "MPESA_PASSKEY",
+        ):
+            validate_mpesa_configuration(
+                **self.valid_mpesa_configuration(
+                    passkey="",
+                )
+            )
+
+    def test_complete_live_mpesa_configuration_is_accepted(self):
+        validate_mpesa_configuration(
+            **self.valid_mpesa_configuration()
         )

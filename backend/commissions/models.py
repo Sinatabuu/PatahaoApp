@@ -4,6 +4,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from properties.models import Property
@@ -1283,6 +1284,13 @@ class CommissionSettlementPayment(models.Model):
             "id",
         ]
 
+        constraints = [
+            models.UniqueConstraint(
+                Lower("payment_reference"),
+                name="comm_payout_ref_ci_uniq",
+            ),
+        ]
+
     def clean(self):
         errors = {}
 
@@ -1386,7 +1394,9 @@ class CommissionSettlementPayment(models.Model):
             )
 
         self.currency = self.currency.strip().upper()
-        self.payment_reference = self.payment_reference.strip()
+        self.payment_reference = (
+            self.payment_reference.strip().upper()
+        )
 
         self.full_clean()
         super().save(*args, **kwargs)

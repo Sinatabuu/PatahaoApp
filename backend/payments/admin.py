@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 from .views import _complete_payment
 
-from .models import Payment, ViewingCredit
+from .models import Payment, PaymentAttempt, ViewingCredit
 
 
 @admin.action(description="DEV ONLY: Mark selected payments successful")
@@ -147,6 +147,70 @@ class PaymentAdmin(admin.ModelAdmin):
             actions.pop("mark_payments_successful", None)
 
         return actions
+
+
+@admin.register(PaymentAttempt)
+class PaymentAttemptAdmin(admin.ModelAdmin):
+    list_display = (
+        "attempt_reference",
+        "payment",
+        "status",
+        "checkout_request_id",
+        "provider_receipt_number",
+        "requested_amount",
+        "callback_amount",
+        "initiated_at",
+        "callback_received_at",
+        "reconciled_at",
+    )
+
+    list_filter = (
+        "status",
+        "initiated_at",
+        "callback_received_at",
+        "reconciled_at",
+    )
+
+    search_fields = (
+        "attempt_reference",
+        "payment__payment_reference",
+        "merchant_request_id",
+        "checkout_request_id",
+        "provider_receipt_number",
+        "phone_number",
+    )
+
+    readonly_fields = (
+        "payment",
+        "attempt_reference",
+        "status",
+        "merchant_request_id",
+        "checkout_request_id",
+        "provider_receipt_number",
+        "requested_amount",
+        "callback_amount",
+        "phone_number",
+        "provider_response_code",
+        "provider_response_description",
+        "failure_reason",
+        "provider_request_payload",
+        "provider_response_payload",
+        "provider_callback_payload",
+        "provider_query_payload",
+        "initiated_at",
+        "callback_received_at",
+        "reconciled_at",
+        "completed_at",
+        "failed_at",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ViewingCredit)

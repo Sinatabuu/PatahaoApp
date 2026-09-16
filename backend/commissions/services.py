@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from governance.services import get_current_tier
@@ -257,6 +257,69 @@ def allocate_commission_settlement(
 
     return settlement
 
+
+def _existing_payout_for_reference(
+    *,
+    participant,
+    payment_reference,
+    payment_method,
+    amount=None,
+):
+    normalized_reference = str(payment_reference).strip().upper()
+
+    if not normalized_reference:
+        raise ValidationError(
+            {
+                "payment_reference": (
+                    "A payment reference is required."
+                )
+            }
+        )
+
+    existing = (
+        CommissionSettlementPayment.objects
+        .select_for_update()
+        .filter(
+            payment_reference__iexact=normalized_reference,
+        )
+        .select_related("participant__settlement")
+        .first()
+    )
+
+    if existing is None:
+        return normalized_reference, None
+
+    if (
+        existing.participant_id != participant.id
+        or existing.payment_method != payment_method
+    ):
+        raise ValidationError(
+            {
+                "payment_reference": (
+                    "This payout reference is already attached "
+                    "to different payment evidence."
+                )
+            }
+        )
+
+    if amount is not None:
+        normalized_amount = Decimal(str(amount)).quantize(
+            Decimal("0.01")
+        )
+
+        if existing.amount != normalized_amount:
+            raise ValidationError(
+                {
+                    "payment_reference": (
+                        "This payout reference is already attached "
+                        "to a different amount."
+                    )
+                }
+            )
+
+    return normalized_reference, existing
+
+
 @transaction.atomic
 def record_commission_payment(
     *,
@@ -307,6 +370,18 @@ def record_commission_payment(
         .get(pk=participant.settlement_id)
     )
 
+    payment_reference, existing_payment = (
+        _existing_payout_for_reference(
+            participant=participant,
+            payment_reference=payment_reference,
+            payment_method=payment_method,
+            amount=amount,
+        )
+    )
+
+    if existing_payment is not None:
+        return existing_payment, settlement
+
     if participant.is_platform_share:
         raise ValidationError(
             {
@@ -330,19 +405,33 @@ def record_commission_payment(
             }
         )
 
-    payment = CommissionSettlementPayment.objects.create(
-        participant=participant,
-        amount=amount,
-        currency=settlement.currency,
-        payment_method=payment_method,
-        payment_reference=payment_reference,
-        paid_at=(
-            paid_at
-            or timezone.now()
-        ),
-        notes=notes,
-        recorded_by=actor,
-    )
+    try:
+        with transaction.atomic():
+            payment = CommissionSettlementPayment.objects.create(
+                participant=participant,
+                amount=amount,
+                currency=settlement.currency,
+                payment_method=payment_method,
+                payment_reference=payment_reference,
+                paid_at=(
+                    paid_at
+                    or timezone.now()
+                ),
+                notes=notes,
+                recorded_by=actor,
+            )
+    except (IntegrityError, ValidationError):
+        _, existing_payment = _existing_payout_for_reference(
+            participant=participant,
+            payment_reference=payment_reference,
+            payment_method=payment_method,
+            amount=amount,
+        )
+
+        if existing_payment is not None:
+            return existing_payment, settlement
+
+        raise
 
     payable_participants = (
         settlement.participants
@@ -453,6 +542,17 @@ def pay_commission_participant_outstanding(
         .select_for_update()
         .get(pk=participant.settlement_id)
     )
+
+    payment_reference, existing_payment = (
+        _existing_payout_for_reference(
+            participant=participant,
+            payment_reference=payment_reference,
+            payment_method=payment_method,
+        )
+    )
+
+    if existing_payment is not None:
+        return existing_payment, settlement
 
     if participant.is_platform_share:
         raise ValidationError(

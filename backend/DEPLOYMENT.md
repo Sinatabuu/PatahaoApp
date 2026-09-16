@@ -31,6 +31,51 @@ Use `.env.example` as the complete variable reference. Never commit a real
 hard-coded in the repository as exposed and never reuse it for staging or
 production.
 
+## Sandbox-first M-Pesa rollout
+
+Keep real customer charges disabled until Pata HAO has its approved Safaricom
+business payment product and production Daraja credentials:
+
+```dotenv
+MPESA_ENVIRONMENT=sandbox
+MPESA_LIVE_PAYMENTS_ENABLED=false
+```
+
+Development may use Daraja sandbox credentials and an HTTPS test callback at
+`/api/payments/mpesa/callback/`. Each STK request is recorded as a separate
+payment attempt. Callback amount, phone number, merchant request ID, checkout
+request ID, receipt number, and transaction time must all match before the
+viewing is credited. Staff may query an attempt for reconciliation, but a
+query response alone never creates a successful receipt.
+
+When the Safaricom production setup is ready, configure all of the following
+in the hosting provider's secret store:
+
+```dotenv
+PATAHAO_ENVIRONMENT=production
+ENABLE_DEVELOPMENT_PAYMENT_HANDOFF=false
+MPESA_ENVIRONMENT=production
+MPESA_LIVE_PAYMENTS_ENABLED=true
+MPESA_CONSUMER_KEY=replace-with-production-consumer-key
+MPESA_CONSUMER_SECRET=replace-with-production-consumer-secret
+MPESA_SHORTCODE=replace-with-approved-shortcode-or-till
+MPESA_PASSKEY=replace-with-production-passkey
+MPESA_CALLBACK_URL=https://patahao-api.example.com/api/payments/mpesa/callback/
+MPESA_TRANSACTION_TYPE=CustomerPayBillOnline
+```
+
+Use `CustomerPayBillOnline` for an approved PayBill or
+`CustomerBuyGoodsOnline` for an approved Buy Goods Till. Production startup
+fails closed if the live flag, credentials, HTTPS callback, transaction type,
+or development-handoff setting is unsafe. Do not switch these values until
+the actual Safaricom product is known.
+
+The payment migrations add unique financial-reference constraints. They first
+check existing rows and stop with an explicit error if duplicate payment,
+checkout, receipt, or commission-payout references require staff review. Do
+not edit or delete historical payment evidence merely to make a migration
+pass; investigate and document each conflict.
+
 ## Release checks
 
 From `backend/`, with the deployed environment variables loaded:

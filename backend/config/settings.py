@@ -25,6 +25,7 @@ from config.environment import (
     get_database_config,
     get_environment,
     get_secret_key,
+    validate_mpesa_configuration,
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -171,7 +172,15 @@ USE_I18N = True
 
 USE_TZ = True
 
-MPESA_ENVIRONMENT = os.environ.get("MPESA_ENVIRONMENT", "sandbox")
+MPESA_ENVIRONMENT = (
+    os.environ.get("MPESA_ENVIRONMENT", "sandbox")
+    .strip()
+    .lower()
+)
+MPESA_LIVE_PAYMENTS_ENABLED = env_bool(
+    "MPESA_LIVE_PAYMENTS_ENABLED",
+    False,
+)
 MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY", "")
 MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
 MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")
@@ -180,8 +189,21 @@ MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL", "")
 MPESA_TRANSACTION_TYPE = os.environ.get(
     "MPESA_TRANSACTION_TYPE",
     "CustomerPayBillOnline",
-)
+).strip()
 MPESA_HTTP_TIMEOUT = env_int("MPESA_HTTP_TIMEOUT", 30)
+
+validate_mpesa_configuration(
+    ENVIRONMENT,
+    ENABLE_DEVELOPMENT_PAYMENT_HANDOFF,
+    mpesa_environment=MPESA_ENVIRONMENT,
+    live_payments_enabled=MPESA_LIVE_PAYMENTS_ENABLED,
+    consumer_key=MPESA_CONSUMER_KEY,
+    consumer_secret=MPESA_CONSUMER_SECRET,
+    shortcode=MPESA_SHORTCODE,
+    passkey=MPESA_PASSKEY,
+    callback_url=MPESA_CALLBACK_URL,
+    transaction_type=MPESA_TRANSACTION_TYPE,
+)
 
 DEFAULT_EMAIL_BACKEND = (
     "django.core.mail.backends.console.EmailBackend"
