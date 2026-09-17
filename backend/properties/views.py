@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view
 from math import asin, cos, radians, sin, sqrt
 from core.models import ActivityLog
 from partners.models import Partner
-from django.db.models import Q
+from django.db.models import Case, Q, When
 from django.utils import timezone
 from .models import (
     Property,
@@ -1562,8 +1562,6 @@ class PropertyVideoViewSet(viewsets.ModelViewSet):
                 "Videos cannot be changed for a closed or archived property."
             )
 
-        was_featured = instance.is_featured
-
         ActivityLog.objects.create(
             actor=self.request.user,
             action="property_video_deleted",
@@ -1577,14 +1575,30 @@ class PropertyVideoViewSet(viewsets.ModelViewSet):
 
         instance.delete()
 
-        if was_featured:
-            next_video = (
-                PropertyVideo.objects
-                .filter(property=property_obj)
-                .order_by("-uploaded_at")
-                .first()
+        next_video = (
+            PropertyVideo.objects
+            .filter(property=property_obj)
+            .order_by(
+                Case(
+                    When(
+                        review_status=PropertyVideo.ReviewStatus.APPROVED,
+                        then=0,
+                    ),
+                    When(
+                        review_status=PropertyVideo.ReviewStatus.PENDING,
+                        then=1,
+                    ),
+                    default=2,
+                ),
+                "-uploaded_at",
             )
+            .first()
+        )
 
-            if next_video:
-                next_video.is_featured = True
-                next_video.save(update_fields=["is_featured"])
+        if next_video and not next_video.is_featured:
+            PropertyVideo.objects.filter(
+                property=property_obj,
+                is_featured=True,
+            ).update(is_featured=False)
+            next_video.is_featured = True
+            next_video.save(update_fields=["is_featured"])

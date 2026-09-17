@@ -703,7 +703,6 @@ class PartnerPropertyService {
     required int videoId,
     String? title,
     String? description,
-    bool? isFeatured,
   }) async {
     _validateId(
       videoId,
@@ -719,10 +718,6 @@ class PartnerPropertyService {
 
     if (description != null) {
       body['description'] = description.trim();
-    }
-
-    if (isFeatured != null) {
-      body['is_featured'] = isFeatured;
     }
 
     final uri = Uri.parse(

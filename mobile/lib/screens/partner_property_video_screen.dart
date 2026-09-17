@@ -5,6 +5,31 @@ import 'package:mobile/models/property.dart';
 import 'package:mobile/screens/property_video_screen.dart';
 import 'package:mobile/services/partner_property_service.dart';
 
+bool canUploadPropertyVideo({
+  required List<PropertyVideo> videos,
+  required bool isUploading,
+  required bool canManage,
+}) {
+  return canManage &&
+      !isUploading &&
+      !videos.any((video) => video.isPendingReview);
+}
+
+String propertyVideoUploadActionLabel({
+  required List<PropertyVideo> videos,
+  required bool isUploading,
+}) {
+  if (isUploading) {
+    return 'Uploading...';
+  }
+
+  if (videos.any((video) => video.isPendingReview)) {
+    return 'Awaiting Review';
+  }
+
+  return videos.isEmpty ? 'Add Video' : 'Replace Video';
+}
+
 class PartnerPropertyVideoScreen extends StatefulWidget {
   const PartnerPropertyVideoScreen({super.key, required this.property});
 
@@ -33,7 +58,18 @@ class _PartnerPropertyVideoScreenState
   }
 
   bool get _canUpload {
-    return !_isUploading && _videos.length < 3 && _canManage;
+    return canUploadPropertyVideo(
+      videos: _videos,
+      isUploading: _isUploading,
+      canManage: _canManage,
+    );
+  }
+
+  String get _uploadActionLabel {
+    return propertyVideoUploadActionLabel(
+      videos: _videos,
+      isUploading: _isUploading,
+    );
   }
 
   @override
@@ -267,27 +303,22 @@ class _PartnerPropertyVideoScreenState
     }
   }
 
-  Future<void> _setFeatured(PropertyVideo video) async {
-    try {
-      await PartnerPropertyService.instance.updatePropertyVideo(
-        videoId: video.id,
-        isFeatured: true,
-      );
-      await _loadVideos();
-      _showMessage('Featured walkthrough updated.');
-    } catch (error) {
-      _showMessage(_cleanError(error));
-    }
-  }
-
   Future<void> _deleteVideo(PropertyVideo video) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Delete walkthrough?'),
-          content: const Text(
-            'This video and its staff review record will be permanently removed.',
+          title: Text(
+            video.isPendingReview
+                ? 'Cancel pending replacement?'
+                : 'Delete walkthrough?',
+          ),
+          content: Text(
+            video.isApproved
+                ? 'This is the video customers can currently see. Deleting '
+                      'it will remove the walkthrough from the listing.'
+                : 'This video and its staff review record will be '
+                      'permanently removed.',
           ),
           actions: [
             TextButton(
@@ -347,15 +378,6 @@ class _PartnerPropertyVideoScreenState
                   _preview(video);
                 },
               ),
-              if (!video.isFeatured)
-                ListTile(
-                  leading: const Icon(Icons.star_outline),
-                  title: const Text('Set as featured'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    _setFeatured(video);
-                  },
-                ),
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Edit title and description'),
@@ -366,7 +388,11 @@ class _PartnerPropertyVideoScreenState
               ),
               ListTile(
                 leading: const Icon(Icons.delete_outline),
-                title: const Text('Delete video'),
+                title: Text(
+                  video.isPendingReview
+                      ? 'Cancel pending replacement'
+                      : 'Delete video',
+                ),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   _deleteVideo(video);
@@ -397,7 +423,7 @@ class _PartnerPropertyVideoScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Walkthrough videos'),
+        title: const Text('Walkthrough video'),
         backgroundColor: const Color(0xFF14532D),
         foregroundColor: Colors.white,
       ),
@@ -410,7 +436,7 @@ class _PartnerPropertyVideoScreenState
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.video_call_outlined),
-        label: Text(_isUploading ? 'Uploading...' : 'Add Video'),
+        label: Text(_uploadActionLabel),
       ),
       body: RefreshIndicator(
         onRefresh: _loadVideos,
@@ -418,7 +444,7 @@ class _PartnerPropertyVideoScreenState
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           children: [
-            _VideoRulesCard(videoCount: _videos.length),
+            const _VideoRulesCard(),
             if (_isUploading) ...[
               const SizedBox(height: 12),
               const LinearProgressIndicator(),
@@ -531,9 +557,7 @@ class _PartnerPropertyVideoDetailsDialogState
 }
 
 class _VideoRulesCard extends StatelessWidget {
-  const _VideoRulesCard({required this.videoCount});
-
-  final int videoCount;
+  const _VideoRulesCard();
 
   @override
   Widget build(BuildContext context) {
@@ -549,7 +573,7 @@ class _VideoRulesCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'HD walkthroughs · $videoCount/3',
+                    'One HD walkthrough',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
@@ -566,8 +590,9 @@ class _VideoRulesCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Standard walkthroughs are supported now. Interactive 360° '
-              'video will be added after launch.',
+              'Aim for under 60 seconds and 50 MB. If you replace an '
+              'approved walkthrough, the current video stays visible until '
+              'staff approves the new one.',
               style: TextStyle(color: Color(0xFF4B5563)),
             ),
           ],
@@ -640,13 +665,13 @@ class _PartnerVideoCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (video.isFeatured)
+                  if (video.isApproved)
                     const Positioned(
                       left: 10,
                       top: 10,
                       child: Chip(
-                        avatar: Icon(Icons.star, size: 17),
-                        label: Text('Featured'),
+                        avatar: Icon(Icons.public, size: 17),
+                        label: Text('Visible to customers'),
                       ),
                     ),
                 ],

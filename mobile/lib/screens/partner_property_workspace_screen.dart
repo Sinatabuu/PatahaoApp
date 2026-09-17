@@ -1313,14 +1313,19 @@ class _WalkthroughVideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final approved = videos.where((video) => video.isApproved).length;
-    final pending = videos.where((video) => video.isPendingReview).length;
-    final returned = videos.where((video) => video.isRejected).length;
-    final summary = <String>[
-      '$approved approved',
-      if (pending > 0) '$pending awaiting review',
-      if (returned > 0) '$returned to replace',
-    ].join(' · ');
+    final hasApproved = videos.any((video) => video.isApproved);
+    final hasPending = videos.any((video) => video.isPendingReview);
+    final hasReturned = videos.any((video) => video.isRejected);
+    final summary = switch ((hasApproved, hasPending, hasReturned)) {
+      (true, true, _) =>
+        'Current video is visible · replacement awaiting review',
+      (true, false, true) =>
+        'Current video is visible · replacement was returned',
+      (true, false, false) => 'Approved and visible to customers',
+      (false, true, _) => 'Awaiting staff review',
+      (false, false, true) => 'Returned by staff · replacement required',
+      _ => '',
+    };
 
     return Card(
       child: Padding(
@@ -1337,7 +1342,7 @@ class _WalkthroughVideoCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Walkthrough videos · ${videos.length}/3',
+                    'Walkthrough video',
                     style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -1360,7 +1365,7 @@ class _WalkthroughVideoCard extends StatelessWidget {
                 onPressed: onManage,
                 icon: const Icon(Icons.video_settings_outlined),
                 label: Text(
-                  videos.isEmpty ? 'Add Walkthrough' : 'Manage Videos',
+                  videos.isEmpty ? 'Add Walkthrough' : 'Manage Walkthrough',
                 ),
               ),
             ),

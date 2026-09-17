@@ -57,6 +57,66 @@ void main() {
     });
   });
 
+  group('One-video walkthrough policy', () {
+    final approved = PropertyVideo.fromJson({
+      'id': 20,
+      'video': '/media/property_videos/current.mp4',
+      'review_status': 'approved',
+    });
+    final pending = PropertyVideo.fromJson({
+      'id': 21,
+      'video': '/media/property_videos/replacement.mp4',
+      'review_status': 'pending',
+    });
+    final returned = PropertyVideo.fromJson({
+      'id': 22,
+      'video': '/media/property_videos/returned.mp4',
+      'review_status': 'rejected',
+    });
+
+    test('offers add for empty and replace for an existing video', () {
+      expect(
+        propertyVideoUploadActionLabel(
+          videos: const [],
+          isUploading: false,
+        ),
+        'Add Video',
+      );
+      expect(
+        propertyVideoUploadActionLabel(
+          videos: [approved],
+          isUploading: false,
+        ),
+        'Replace Video',
+      );
+      expect(
+        propertyVideoUploadActionLabel(
+          videos: [returned],
+          isUploading: false,
+        ),
+        'Replace Video',
+      );
+    });
+
+    test('blocks another upload while replacement awaits review', () {
+      expect(
+        canUploadPropertyVideo(
+          videos: [approved, pending],
+          isUploading: false,
+          canManage: true,
+        ),
+        isFalse,
+      );
+      expect(
+        propertyVideoUploadActionLabel(
+          videos: [approved, pending],
+          isUploading: false,
+        ),
+        'Awaiting Review',
+      );
+    });
+  });
+
   testWidgets('walkthrough details close without a controller lifecycle error', (
     tester,
   ) async {

@@ -1,5 +1,7 @@
 from django.contrib import admin, messages
+from django.db import transaction
 from django.utils import timezone
+from django.utils.html import format_html
 from mandates.services import evaluate_property_publication
 from core.models import ActivityLog
 
@@ -26,19 +28,81 @@ class PropertyPhotoInline(admin.TabularInline):
     )
 
 
-class PropertyVideoInline(admin.TabularInline):
+def _video_player(video, *, max_width):
+    if video is None or not video.video:
+        return "No walkthrough video uploaded."
+
+    try:
+        video_url = video.video.url
+    except ValueError:
+        return "The walkthrough video file is unavailable."
+
+    poster_url = ""
+
+    if video.thumbnail:
+        try:
+            poster_url = video.thumbnail.url
+        except ValueError:
+            poster_url = ""
+
+    return format_html(
+        '<div style="max-width:{}px">'
+        '<video controls preload="none" poster="{}" '
+        'style="display:block;width:100%;height:auto;background:#111">'
+        '<source src="{}" type="video/mp4">'
+        'Your browser cannot play this walkthrough video.'
+        '</video>'
+        '<div style="margin-top:6px">'
+        '<a href="{}" target="_blank" rel="noopener">'
+        'Open video in a new tab'
+        '</a>'
+        '</div>'
+        '</div>',
+        max_width,
+        poster_url,
+        video_url,
+        video_url,
+    )
+
+
+class PropertyVideoPreviewMixin:
+    @admin.display(description="Walkthrough preview")
+    def video_preview(self, obj):
+        return _video_player(obj, max_width=640)
+
+
+class PropertyVideoInline(
+    PropertyVideoPreviewMixin,
+    admin.StackedInline,
+):
     model = PropertyVideo
     extra = 0
+    can_delete = False
+    fields = (
+        "title",
+        "description",
+        "video_preview",
+        ("duration", "width", "height"),
+        ("file_size", "video_codec", "audio_codec"),
+        ("is_featured", "review_status"),
+        "rejection_reason",
+        ("uploaded_by", "uploaded_at"),
+        ("reviewed_by", "reviewed_at"),
+    )
     readonly_fields = (
-        "thumbnail",
+        "title",
+        "description",
+        "video_preview",
         "duration",
         "width",
         "height",
         "file_size",
         "video_codec",
         "audio_codec",
+        "is_featured",
         "uploaded_by",
         "review_status",
+        "rejection_reason",
         "reviewed_by",
         "reviewed_at",
         "uploaded_at",
@@ -48,24 +112,43 @@ class PropertyVideoInline(admin.TabularInline):
 @admin.action(description="Approve selected walkthrough videos")
 def approve_property_videos(modeladmin, request, queryset):
     approved_count = 0
+    replaced_count = 0
+    skipped_count = 0
 
-    for video in queryset.select_related("property"):
-        video.approve(reviewed_by=request.user)
-        ActivityLog.objects.create(
-            actor=request.user,
-            action="property_video_approved",
-            entity_type="PropertyVideo",
-            entity_id=str(video.id),
-            description=(
-                f"Approved a walkthrough video for "
-                f"{video.property.title}."
-            ),
-        )
-        approved_count += 1
+    for video_id in queryset.values_list("id", flat=True):
+        try:
+            with transaction.atomic():
+                video = (
+                    PropertyVideo.objects
+                    .select_for_update()
+                    .select_related("property")
+                    .get(pk=video_id)
+                )
+                replaced_video_ids = video.approve(
+                    reviewed_by=request.user,
+                )
+                ActivityLog.objects.create(
+                    actor=request.user,
+                    action="property_video_approved",
+                    entity_type="PropertyVideo",
+                    entity_id=str(video.id),
+                    description=(
+                        f"Approved a walkthrough video for "
+                        f"{video.property.title}."
+                    ),
+                )
+                approved_count += 1
+                replaced_count += len(replaced_video_ids)
+        except (PropertyVideo.DoesNotExist, ValidationError):
+            skipped_count += 1
 
     modeladmin.message_user(
         request,
-        f"{approved_count} walkthrough video(s) approved.",
+        (
+            f"{approved_count} walkthrough video(s) approved; "
+            f"{replaced_count} previous video(s) removed; "
+            f"{skipped_count} selection(s) skipped."
+        ),
         level=messages.SUCCESS,
     )
 
@@ -73,31 +156,45 @@ def approve_property_videos(modeladmin, request, queryset):
 @admin.action(description="Return selected videos for replacement")
 def return_property_videos(modeladmin, request, queryset):
     returned_count = 0
+    skipped_count = 0
     reason = (
         "The walkthrough does not meet Pata Hao's listing standards. "
         "Please replace it with a clear, accurate video."
     )
 
-    for video in queryset.select_related("property"):
-        video.reject(
-            reviewed_by=request.user,
-            reason=reason,
-        )
-        ActivityLog.objects.create(
-            actor=request.user,
-            action="property_video_returned",
-            entity_type="PropertyVideo",
-            entity_id=str(video.id),
-            description=(
-                f"Returned a walkthrough video for "
-                f"{video.property.title}."
-            ),
-        )
-        returned_count += 1
+    for video_id in queryset.values_list("id", flat=True):
+        try:
+            with transaction.atomic():
+                video = (
+                    PropertyVideo.objects
+                    .select_for_update()
+                    .select_related("property")
+                    .get(pk=video_id)
+                )
+                video.reject(
+                    reviewed_by=request.user,
+                    reason=reason,
+                )
+                ActivityLog.objects.create(
+                    actor=request.user,
+                    action="property_video_returned",
+                    entity_type="PropertyVideo",
+                    entity_id=str(video.id),
+                    description=(
+                        f"Returned a walkthrough video for "
+                        f"{video.property.title}."
+                    ),
+                )
+                returned_count += 1
+        except (PropertyVideo.DoesNotExist, ValidationError):
+            skipped_count += 1
 
     modeladmin.message_user(
         request,
-        f"{returned_count} walkthrough video(s) returned.",
+        (
+            f"{returned_count} walkthrough video(s) returned; "
+            f"{skipped_count} selection(s) skipped."
+        ),
         level=messages.WARNING,
     )
 
@@ -292,7 +389,9 @@ def suspend_property_participations(
       )
 
 @admin.action(
-    description="Approve and publish selected pending properties"
+    description=(
+        "Approve and publish properties with pending walkthrough videos"
+    )
 )
 def approve_and_publish_properties(
     modeladmin,
@@ -300,22 +399,89 @@ def approve_and_publish_properties(
     queryset,
 ):
     published_count = 0
+    approved_video_count = 0
     skipped_count = 0
     blocked_count = 0
 
     for property_obj in queryset.select_related(
         "partner",
-    ).prefetch_related(
-        "photos",
     ):
         if property_obj.status != Property.STATUS_PENDING:
             skipped_count += 1
             continue
 
         try:
-            result = PublishingEngine.publish(
-                property_obj,
-            )
+            with transaction.atomic():
+                locked_property = (
+                    Property.objects
+                    .select_for_update()
+                    .select_related("partner")
+                    .get(pk=property_obj.pk)
+                )
+
+                if locked_property.status != Property.STATUS_PENDING:
+                    skipped_count += 1
+                    continue
+
+                result = PublishingEngine.publish(
+                    locked_property,
+                )
+
+                if not result.can_publish:
+                    blocked_count += 1
+
+                    requirements = "; ".join(
+                        result.missing_requirements
+                    )
+
+                    modeladmin.message_user(
+                        request,
+                        (
+                            f'{locked_property.title} was not published. '
+                            f'Missing: {requirements}'
+                        ),
+                        level=messages.WARNING,
+                    )
+
+                    continue
+
+                pending_videos = list(
+                    PropertyVideo.objects
+                    .select_for_update()
+                    .filter(
+                        property=locked_property,
+                        review_status=(
+                            PropertyVideo.ReviewStatus.PENDING
+                        ),
+                    )
+                )
+
+                for video in pending_videos:
+                    video.approve(reviewed_by=request.user)
+                    ActivityLog.objects.create(
+                        actor=request.user,
+                        action="property_video_approved",
+                        entity_type="PropertyVideo",
+                        entity_id=str(video.id),
+                        description=(
+                            "Approved a walkthrough video during the "
+                            f"initial review of {locked_property.title}."
+                        ),
+                    )
+
+                ActivityLog.objects.create(
+                    actor=request.user,
+                    action="property_approved_and_published",
+                    entity_type="Property",
+                    entity_id=str(locked_property.id),
+                    description=(
+                        f"{request.user} approved and published "
+                        f"{locked_property.title}."
+                    ),
+                )
+
+                published_count += 1
+                approved_video_count += len(pending_videos)
         except ValidationError as exc:
             blocked_count += 1
 
@@ -346,43 +512,14 @@ def approve_and_publish_properties(
 
             continue
 
-        if not result.can_publish:
-            blocked_count += 1
-
-            requirements = "; ".join(
-                result.missing_requirements
-            )
-
-            modeladmin.message_user(
-                request,
-                (
-                    f'{property_obj.title} was not published. '
-                    f'Missing: {requirements}'
-                ),
-                level=messages.WARNING,
-            )
-
-            continue
-
-        ActivityLog.objects.create(
-            actor=request.user,
-            action="property_approved_and_published",
-            entity_type="Property",
-            entity_id=str(property_obj.id),
-            description=(
-                f"{request.user} approved and published "
-                f"{property_obj.title}."
-            ),
-        )
-
-        published_count += 1
-
     if published_count:
         modeladmin.message_user(
             request,
             (
                 f"{published_count} property/properties "
-                "approved and published."
+                "approved and published; "
+                f"{approved_video_count} pending walkthrough "
+                "video(s) approved."
             ),
             level=messages.SUCCESS,
         )
@@ -743,10 +880,14 @@ class PropertyPhotoAdmin(admin.ModelAdmin):
 
 
 @admin.register(PropertyVideo)
-class PropertyVideoAdmin(admin.ModelAdmin):
+class PropertyVideoAdmin(
+    PropertyVideoPreviewMixin,
+    admin.ModelAdmin,
+):
     list_display = (
         "property",
         "title",
+        "review_preview",
         "duration",
         "resolution",
         "is_featured",
@@ -765,6 +906,9 @@ class PropertyVideoAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = (
+        "property",
+        "video_preview",
+        "video",
         "thumbnail",
         "duration",
         "width",
@@ -774,16 +918,61 @@ class PropertyVideoAdmin(admin.ModelAdmin):
         "video_codec",
         "audio_codec",
         "uploaded_by",
+        "is_featured",
         "review_status",
         "reviewed_by",
         "reviewed_at",
         "uploaded_at",
     )
 
+    fieldsets = (
+        (
+            "Review walkthrough",
+            {
+                "fields": (
+                    "property",
+                    "title",
+                    "description",
+                    "video_preview",
+                    "is_featured",
+                    "review_status",
+                    "rejection_reason",
+                )
+            },
+        ),
+        (
+            "Verified media metadata",
+            {
+                "fields": (
+                    "video",
+                    "thumbnail",
+                    ("duration", "width", "height"),
+                    ("file_size", "video_codec", "audio_codec"),
+                    "content_sha256",
+                )
+            },
+        ),
+        (
+            "Audit information",
+            {
+                "fields": (
+                    ("uploaded_by", "uploaded_at"),
+                    ("reviewed_by", "reviewed_at"),
+                )
+            },
+        ),
+    )
+
     actions = (
         approve_property_videos,
         return_property_videos,
     )
+
+    list_per_page = 25
+
+    @admin.display(description="Preview")
+    def review_preview(self, obj):
+        return _video_player(obj, max_width=300)
 
     @admin.display(description="Resolution")
     def resolution(self, obj):

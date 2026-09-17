@@ -2,16 +2,25 @@ from decimal import Decimal
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.contrib.admin.sites import AdminSite
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import User
+from core.models import ActivityLog
 from partners.models import Partner
 
+from .admin import (
+    PropertyAdmin,
+    PropertyVideoAdmin,
+    approve_and_publish_properties,
+)
 from .models import Property, PropertyVideo
+from .service import PublishingResult
 from .video_quality import (
     PropertyVideoAnalysis,
     _validate_probe,
@@ -127,6 +136,24 @@ class PropertyVideoApiTests(APITestCase):
             review_status=review_status,
         )
 
+    def _admin_request(self):
+        request = RequestFactory().post("/admin/properties/property/")
+        request.user = self.staff
+        request.session = {}
+        request._messages = FallbackStorage(request)
+        return request
+
+    @staticmethod
+    def _publish_property(property_obj):
+        property_obj.status = Property.STATUS_PUBLISHED
+        Property.objects.filter(pk=property_obj.pk).update(
+            status=Property.STATUS_PUBLISHED,
+        )
+        return PublishingResult(
+            can_publish=True,
+            readiness_score=100,
+        )
+
     @patch("properties.serializers.analyze_property_video")
     def test_source_partner_upload_is_pending_with_verified_metadata(
         self,
@@ -186,6 +213,7 @@ class PropertyVideoApiTests(APITestCase):
         self._create_video(
             content_hash=existing_hash,
             featured=True,
+            review_status=PropertyVideo.ReviewStatus.APPROVED,
         )
         analyze_mock.return_value = video_analysis(existing_hash)
 
@@ -201,12 +229,11 @@ class PropertyVideoApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("already been uploaded", str(response.data))
 
-    def test_fourth_video_is_rejected(self):
-        for index in range(3):
-            self._create_video(
-                content_hash=str(index) * 64,
-                featured=index == 0,
-            )
+    def test_second_pending_video_is_rejected(self):
+        self._create_video(
+            content_hash="0" * 64,
+            featured=True,
+        )
 
         response = self.client.post(
             "/api/partner/videos/",
@@ -218,7 +245,7 @@ class PropertyVideoApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("up to three", str(response.data))
+        self.assertIn("already awaiting staff review", str(response.data))
 
     def test_public_property_only_exposes_approved_videos(self):
         pending = self._create_video(
@@ -245,24 +272,54 @@ class PropertyVideoApiTests(APITestCase):
         )
         self.assertNotEqual(pending.id, approved.id)
 
-    def test_setting_featured_video_unsets_previous_video(self):
-        first = self._create_video(
+    @patch("properties.serializers.analyze_property_video")
+    def test_uploading_replacement_keeps_approved_video_live(
+        self,
+        analyze_mock,
+    ):
+        current = self._create_video(
             content_hash="e" * 64,
             featured=True,
+            review_status=PropertyVideo.ReviewStatus.APPROVED,
         )
-        second = self._create_video(content_hash="f" * 64)
+        analyze_mock.return_value = video_analysis("f" * 64)
 
-        response = self.client.patch(
-            f"/api/partner/videos/{second.id}/",
-            {"is_featured": True},
-            format="json",
+        response = self.client.post(
+            "/api/partner/videos/",
+            {
+                "property": self.property_obj.id,
+                "video": uploaded_mp4(marker=b"replacement"),
+            },
+            format="multipart",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        first.refresh_from_db()
-        second.refresh_from_db()
-        self.assertFalse(first.is_featured)
-        self.assertTrue(second.is_featured)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+            response.data,
+        )
+        current.refresh_from_db()
+        replacement = PropertyVideo.objects.get(
+            review_status=PropertyVideo.ReviewStatus.PENDING,
+        )
+        self.assertEqual(
+            current.review_status,
+            PropertyVideo.ReviewStatus.APPROVED,
+        )
+        self.assertTrue(current.is_featured)
+        self.assertFalse(replacement.is_featured)
+
+        Property.objects.filter(pk=self.property_obj.pk).update(
+            status=Property.STATUS_PUBLISHED,
+        )
+        self.client.force_authenticate(user=None)
+        public_response = self.client.get(
+            f"/api/properties/{self.property_obj.id}/",
+        )
+        self.assertEqual(
+            [item["id"] for item in public_response.data["videos"]],
+            [current.id],
+        )
 
     def test_only_staff_can_approve_or_return_video(self):
         video = self._create_video(
@@ -276,12 +333,26 @@ class PropertyVideoApiTests(APITestCase):
         video.approve(reviewed_by=self.staff)
         self.assertEqual(video.review_status, "approved")
 
-        video.reject(
+        with self.assertRaises(ValidationError):
+            video.reject(
+                reviewed_by=self.staff,
+                reason="The rooms are too dark.",
+            )
+
+        replacement = self._create_video(
+            content_hash="a" * 64,
+        )
+        replacement.reject(
             reviewed_by=self.staff,
             reason="The rooms are too dark.",
         )
-        self.assertEqual(video.review_status, "rejected")
-        self.assertEqual(video.rejection_reason, "The rooms are too dark.")
+        self.assertEqual(replacement.review_status, "rejected")
+        self.assertEqual(
+            replacement.rejection_reason,
+            "The rooms are too dark.",
+        )
+        video.refresh_from_db()
+        self.assertEqual(video.review_status, "approved")
 
     def test_closed_property_video_cannot_be_changed_or_deleted(self):
         video = self._create_video(
@@ -320,13 +391,216 @@ class PropertyVideoApiTests(APITestCase):
         video_name = video.video.name
         thumbnail_name = video.thumbnail.name
 
-        response = self.client.delete(
-            f"/api/partner/videos/{video.id}/",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(
+                f"/api/partner/videos/{video.id}/",
+            )
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(video_storage.exists(video_name))
         self.assertFalse(video_storage.exists(thumbnail_name))
+
+    def test_initial_property_approval_approves_pending_videos_together(self):
+        pending = self._create_video(
+            content_hash="4" * 64,
+            featured=True,
+        )
+        approved = self._create_video(
+            content_hash="5" * 64,
+            review_status=PropertyVideo.ReviewStatus.APPROVED,
+        )
+        returned = self._create_video(
+            content_hash="6" * 64,
+            review_status=PropertyVideo.ReviewStatus.REJECTED,
+        )
+        self.property_obj.status = Property.STATUS_PENDING
+        self.property_obj.save(update_fields=["status", "updated_at"])
+
+        modeladmin = PropertyAdmin(Property, AdminSite())
+
+        with patch(
+            "properties.admin.PublishingEngine.publish",
+            side_effect=self._publish_property,
+        ):
+            approve_and_publish_properties(
+                modeladmin,
+                self._admin_request(),
+                Property.objects.filter(pk=self.property_obj.pk),
+            )
+
+        self.property_obj.refresh_from_db()
+        pending.refresh_from_db()
+
+        self.assertEqual(
+            self.property_obj.status,
+            Property.STATUS_PUBLISHED,
+        )
+        self.assertEqual(
+            pending.review_status,
+            PropertyVideo.ReviewStatus.APPROVED,
+        )
+        self.assertEqual(pending.reviewed_by, self.staff)
+        self.assertIsNotNone(pending.reviewed_at)
+        self.assertFalse(
+            PropertyVideo.objects.filter(pk=approved.pk).exists()
+        )
+        self.assertFalse(
+            PropertyVideo.objects.filter(pk=returned.pk).exists()
+        )
+        self.assertEqual(
+            PropertyVideo.objects.filter(
+                property=self.property_obj,
+            ).count(),
+            1,
+        )
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                action="property_video_approved",
+                entity_id=str(pending.id),
+                actor=self.staff,
+            ).exists()
+        )
+
+    def test_video_added_after_publication_still_requires_separate_review(self):
+        pending = self._create_video(
+            content_hash="7" * 64,
+            featured=True,
+        )
+        self.property_obj.status = Property.STATUS_PUBLISHED
+        Property.objects.filter(pk=self.property_obj.pk).update(
+            status=Property.STATUS_PUBLISHED,
+        )
+
+        approve_and_publish_properties(
+            PropertyAdmin(Property, AdminSite()),
+            self._admin_request(),
+            Property.objects.filter(pk=self.property_obj.pk),
+        )
+
+        pending.refresh_from_db()
+        self.assertEqual(
+            pending.review_status,
+            PropertyVideo.ReviewStatus.PENDING,
+        )
+
+    def test_approving_replacement_removes_old_video_after_commit(self):
+        current = self._create_video(
+            content_hash="b" * 64,
+            featured=True,
+            review_status=PropertyVideo.ReviewStatus.APPROVED,
+        )
+        replacement = self._create_video(
+            content_hash="c" * 64,
+        )
+        current_storage = current.video.storage
+        current_video_name = current.video.name
+        current_thumbnail_name = current.thumbnail.name
+
+        with self.captureOnCommitCallbacks(execute=True):
+            replaced_ids = replacement.approve(
+                reviewed_by=self.staff,
+            )
+
+        replacement.refresh_from_db()
+        self.assertEqual(replaced_ids, [current.id])
+        self.assertFalse(
+            PropertyVideo.objects.filter(pk=current.pk).exists()
+        )
+        self.assertEqual(
+            replacement.review_status,
+            PropertyVideo.ReviewStatus.APPROVED,
+        )
+        self.assertTrue(replacement.is_featured)
+        self.assertFalse(current_storage.exists(current_video_name))
+        self.assertFalse(current_storage.exists(current_thumbnail_name))
+
+    @patch("properties.serializers.analyze_property_video")
+    def test_new_upload_removes_returned_candidate(
+        self,
+        analyze_mock,
+    ):
+        returned = self._create_video(
+            content_hash="d" * 64,
+            featured=True,
+            review_status=PropertyVideo.ReviewStatus.REJECTED,
+        )
+        analyze_mock.return_value = video_analysis("f" * 64)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/api/partner/videos/",
+                {
+                    "property": self.property_obj.id,
+                    "video": uploaded_mp4(marker=b"new-candidate"),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+            response.data,
+        )
+        self.assertFalse(
+            PropertyVideo.objects.filter(pk=returned.pk).exists()
+        )
+        candidate = PropertyVideo.objects.get()
+        self.assertEqual(
+            candidate.review_status,
+            PropertyVideo.ReviewStatus.PENDING,
+        )
+        self.assertTrue(candidate.is_featured)
+
+    def test_combined_approval_rolls_back_property_and_video_together(self):
+        pending = self._create_video(
+            content_hash="8" * 64,
+            featured=True,
+        )
+        self.property_obj.status = Property.STATUS_PENDING
+        self.property_obj.save(update_fields=["status", "updated_at"])
+
+        with patch(
+            "properties.admin.PublishingEngine.publish",
+            side_effect=self._publish_property,
+        ), patch(
+            "properties.admin.ActivityLog.objects.create",
+            side_effect=RuntimeError("audit unavailable"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "audit unavailable"):
+                approve_and_publish_properties(
+                    PropertyAdmin(Property, AdminSite()),
+                    self._admin_request(),
+                    Property.objects.filter(pk=self.property_obj.pk),
+                )
+
+        self.property_obj.refresh_from_db()
+        pending.refresh_from_db()
+        self.assertEqual(
+            self.property_obj.status,
+            Property.STATUS_PENDING,
+        )
+        self.assertEqual(
+            pending.review_status,
+            PropertyVideo.ReviewStatus.PENDING,
+        )
+
+    def test_admin_video_review_renders_playable_preview(self):
+        video = self._create_video(
+            content_hash="9" * 64,
+            featured=True,
+        )
+        modeladmin = PropertyVideoAdmin(PropertyVideo, AdminSite())
+
+        preview = str(modeladmin.video_preview(video))
+        list_preview = str(modeladmin.review_preview(video))
+
+        for rendered in (preview, list_preview):
+            self.assertIn("<video", rendered)
+            self.assertIn("controls", rendered)
+            self.assertIn('preload="none"', rendered)
+            self.assertIn(video.video.url, rendered)
+            self.assertIn(video.thumbnail.url, rendered)
+            self.assertIn("Open video in a new tab", rendered)
 
 
 class PropertyVideoQualityTests(TestCase):

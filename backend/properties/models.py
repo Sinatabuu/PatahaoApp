@@ -4,7 +4,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -688,6 +688,20 @@ class PropertyVideo(models.Model):
                 condition=models.Q(is_featured=True),
                 name="unique_featured_video_per_property",
             ),
+            models.UniqueConstraint(
+                fields=["property"],
+                condition=models.Q(
+                    review_status="approved",
+                ),
+                name="unique_approved_video_per_property",
+            ),
+            models.UniqueConstraint(
+                fields=["property"],
+                condition=models.Q(
+                    review_status="pending",
+                ),
+                name="unique_pending_video_per_property",
+            ),
         ]
 
     def clean(self):
@@ -721,25 +735,64 @@ class PropertyVideo(models.Model):
         self.video_codec = analysis.video_codec
         self.audio_codec = analysis.audio_codec
 
+    @transaction.atomic
     def approve(self, *, reviewed_by):
         if not reviewed_by or not reviewed_by.is_staff:
             raise ValidationError(
                 "Only a staff user can approve a property video."
             )
 
-        self.review_status = self.ReviewStatus.APPROVED
-        self.reviewed_by = reviewed_by
-        self.reviewed_at = timezone.now()
-        self.rejection_reason = ""
-        self.save(
+        current = (
+            type(self).objects
+            .select_for_update()
+            .get(pk=self.pk)
+        )
+
+        if current.review_status != self.ReviewStatus.PENDING:
+            raise ValidationError(
+                "Only a walkthrough awaiting review can be approved."
+            )
+
+        sibling_videos = (
+            type(self).objects
+            .select_for_update()
+            .filter(property_id=current.property_id)
+            .exclude(pk=current.pk)
+        )
+        replaced_video_ids = list(
+            sibling_videos.values_list("id", flat=True)
+        )
+
+        # A pending replacement may coexist with the current approved video
+        # only while staff review is in progress. File deletion is deferred
+        # until this transaction commits by the post-delete receiver below.
+        sibling_videos.delete()
+
+        current.review_status = self.ReviewStatus.APPROVED
+        current.reviewed_by = reviewed_by
+        current.reviewed_at = timezone.now()
+        current.rejection_reason = ""
+        current.is_featured = True
+        current.save(
             update_fields=[
                 "review_status",
                 "reviewed_by",
                 "reviewed_at",
                 "rejection_reason",
+                "is_featured",
             ]
         )
 
+        self.review_status = current.review_status
+        self.reviewed_by = current.reviewed_by
+        self.reviewed_by_id = current.reviewed_by_id
+        self.reviewed_at = current.reviewed_at
+        self.rejection_reason = current.rejection_reason
+        self.is_featured = current.is_featured
+
+        return replaced_video_ids
+
+    @transaction.atomic
     def reject(self, *, reviewed_by, reason):
         if not reviewed_by or not reviewed_by.is_staff:
             raise ValidationError(
@@ -753,11 +806,22 @@ class PropertyVideo(models.Model):
                 {"rejection_reason": "A return reason is required."}
             )
 
-        self.review_status = self.ReviewStatus.REJECTED
-        self.reviewed_by = reviewed_by
-        self.reviewed_at = timezone.now()
-        self.rejection_reason = reason
-        self.save(
+        current = (
+            type(self).objects
+            .select_for_update()
+            .get(pk=self.pk)
+        )
+
+        if current.review_status != self.ReviewStatus.PENDING:
+            raise ValidationError(
+                "Only a walkthrough awaiting review can be returned."
+            )
+
+        current.review_status = self.ReviewStatus.REJECTED
+        current.reviewed_by = reviewed_by
+        current.reviewed_at = timezone.now()
+        current.rejection_reason = reason
+        current.save(
             update_fields=[
                 "review_status",
                 "reviewed_by",
@@ -765,6 +829,12 @@ class PropertyVideo(models.Model):
                 "rejection_reason",
             ]
         )
+
+        self.review_status = current.review_status
+        self.reviewed_by = current.reviewed_by
+        self.reviewed_by_id = current.reviewed_by_id
+        self.reviewed_at = current.reviewed_at
+        self.rejection_reason = current.rejection_reason
 
     def save(self, *args, **kwargs):
         should_analyze = (
@@ -803,7 +873,15 @@ class PropertyVideo(models.Model):
 @receiver(post_delete, sender=PropertyVideo)
 def delete_property_video_files(sender, instance, **kwargs):
     if instance.video:
-        instance.video.delete(save=False)
+        video_storage = instance.video.storage
+        video_name = instance.video.name
+        transaction.on_commit(
+            lambda: video_storage.delete(video_name)
+        )
 
     if instance.thumbnail:
-        instance.thumbnail.delete(save=False)
+        thumbnail_storage = instance.thumbnail.storage
+        thumbnail_name = instance.thumbnail.name
+        transaction.on_commit(
+            lambda: thumbnail_storage.delete(thumbnail_name)
+        )

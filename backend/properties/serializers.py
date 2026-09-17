@@ -364,6 +364,7 @@ class PropertyVideoUploadSerializer(PartnerPropertyVideoSerializer):
             "rejection_reason",
             "reviewed_at",
             "uploaded_at",
+            "is_featured",
         )
 
     def validate(self, attrs):
@@ -388,12 +389,16 @@ class PropertyVideoUploadSerializer(PartnerPropertyVideoSerializer):
                 }
             )
 
-        if PropertyVideo.objects.filter(property=property_obj).count() >= 3:
+        if PropertyVideo.objects.filter(
+            property=property_obj,
+            review_status=PropertyVideo.ReviewStatus.PENDING,
+        ).exists():
             raise serializers.ValidationError(
                 {
                     "video": (
-                        "A property can have up to three walkthrough "
-                        "videos. Delete one before uploading another."
+                        "A walkthrough is already awaiting staff review. "
+                        "Wait for the decision or delete it before "
+                        "uploading another."
                     )
                 }
             )
@@ -428,12 +433,16 @@ class PropertyVideoUploadSerializer(PartnerPropertyVideoSerializer):
             pk=validated_data["property"].pk,
         )
 
-        if PropertyVideo.objects.filter(property=property_obj).count() >= 3:
+        if PropertyVideo.objects.filter(
+            property=property_obj,
+            review_status=PropertyVideo.ReviewStatus.PENDING,
+        ).exists():
             raise serializers.ValidationError(
                 {
                     "video": (
-                        "A property can have up to three walkthrough "
-                        "videos. Delete one before uploading another."
+                        "A walkthrough is already awaiting staff review. "
+                        "Wait for the decision or delete it before "
+                        "uploading another."
                     )
                 }
             )
@@ -464,8 +473,20 @@ class PropertyVideoUploadSerializer(PartnerPropertyVideoSerializer):
             }
         )
 
-        if not PropertyVideo.objects.filter(property=property_obj).exists():
-            validated_data["is_featured"] = True
+        current_videos = PropertyVideo.objects.filter(
+            property=property_obj,
+        )
+        approved_video_exists = current_videos.filter(
+            review_status=PropertyVideo.ReviewStatus.APPROVED,
+        ).exists()
+
+        # A returned upload is replaced immediately. An approved video stays
+        # live while its new pending replacement is reviewed by staff.
+        current_videos.filter(
+            review_status=PropertyVideo.ReviewStatus.REJECTED,
+        ).delete()
+
+        validated_data["is_featured"] = not approved_video_exists
 
         video = PropertyVideo(**validated_data)
         video.thumbnail.save(
@@ -473,11 +494,6 @@ class PropertyVideoUploadSerializer(PartnerPropertyVideoSerializer):
             ContentFile(analysis.thumbnail_bytes),
             save=False,
         )
-
-        if video.is_featured:
-            PropertyVideo.objects.filter(
-                property=property_obj,
-            ).update(is_featured=False)
 
         video.save()
         return video
@@ -489,19 +505,7 @@ class PropertyVideoUpdateSerializer(serializers.ModelSerializer):
         fields = (
             "title",
             "description",
-            "is_featured",
         )
-
-    @transaction.atomic
-    def update(self, instance, validated_data):
-        if validated_data.get("is_featured"):
-            PropertyVideo.objects.filter(
-                property=instance.property,
-            ).exclude(pk=instance.pk).update(
-                is_featured=False,
-            )
-
-        return super().update(instance, validated_data)
 
 
 class PropertySerializer(serializers.ModelSerializer):
