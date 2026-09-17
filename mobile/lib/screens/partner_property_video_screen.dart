@@ -78,6 +78,25 @@ class _PartnerPropertyVideoScreenState
       return;
     }
 
+    try {
+      await _chooseAndUploadVideo();
+    } catch (error, stackTrace) {
+      debugPrint('WALKTHROUGH VIDEO SELECTION ERROR: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage(
+        'The selected video could not be prepared. Please try again or '
+        'choose it from your gallery.',
+      );
+    }
+  }
+
+  Future<void> _chooseAndUploadVideo() async {
+
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
@@ -146,63 +165,13 @@ class _PartnerPropertyVideoScreenState
     String? title,
     String? description,
   }) async {
-    final titleController = TextEditingController(
-      text: title ?? '${widget.property.title} walkthrough',
-    );
-    final descriptionController = TextEditingController(
-      text: description ?? '',
-    );
-
-    final result = await showDialog<(String, String)>(
+    return showDialog<(String, String)>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Walkthrough details'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleController,
-                  maxLength: 255,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    hintText: 'Example: Full apartment tour',
-                  ),
-                ),
-                TextField(
-                  controller: descriptionController,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Description (optional)',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop((
-                  titleController.text.trim(),
-                  descriptionController.text.trim(),
-                ));
-              },
-              child: const Text('Continue'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => PartnerPropertyVideoDetailsDialog(
+        initialTitle: title ?? '${widget.property.title} walkthrough',
+        initialDescription: description ?? '',
+      ),
     );
-
-    titleController.dispose();
-    descriptionController.dispose();
-    return result;
   }
 
   Future<void> _uploadVideo(
@@ -481,6 +450,82 @@ class _PartnerPropertyVideoScreenState
           ],
         ),
       ),
+    );
+  }
+}
+
+class PartnerPropertyVideoDetailsDialog extends StatefulWidget {
+  const PartnerPropertyVideoDetailsDialog({
+    super.key,
+    required this.initialTitle,
+    this.initialDescription = '',
+  });
+
+  final String initialTitle;
+  final String initialDescription;
+
+  @override
+  State<PartnerPropertyVideoDetailsDialog> createState() =>
+      _PartnerPropertyVideoDetailsDialogState();
+}
+
+class _PartnerPropertyVideoDetailsDialogState
+    extends State<PartnerPropertyVideoDetailsDialog> {
+  late String _title;
+  late String _description;
+
+  @override
+  void initState() {
+    super.initState();
+    _title = widget.initialTitle;
+    _description = widget.initialDescription;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Walkthrough details'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              initialValue: _title,
+              maxLength: 255,
+              onChanged: (value) {
+                _title = value;
+              },
+              decoration: const InputDecoration(
+                labelText: 'Title',
+                hintText: 'Example: Full apartment tour',
+              ),
+            ),
+            TextFormField(
+              initialValue: _description,
+              minLines: 2,
+              maxLines: 4,
+              onChanged: (value) {
+                _description = value;
+              },
+              decoration: const InputDecoration(
+                labelText: 'Description (optional)',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.of(context).pop((_title.trim(), _description.trim()));
+          },
+          child: const Text('Continue'),
+        ),
+      ],
     );
   }
 }

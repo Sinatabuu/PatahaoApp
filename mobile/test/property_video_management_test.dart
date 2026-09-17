@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/models/property.dart';
+import 'package:mobile/screens/partner_property_video_screen.dart';
 
 void main() {
   group('Partner property video metadata', () {
@@ -53,5 +55,50 @@ void main() {
       expect(video.isApproved, isTrue);
       expect(video.isPendingReview, isFalse);
     });
+  });
+
+  testWidgets('walkthrough details close without a controller lifecycle error', (
+    tester,
+  ) async {
+    (String, String)? submittedDetails;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) {
+              return FilledButton(
+                onPressed: () async {
+                  submittedDetails = await showDialog<(String, String)>(
+                    context: context,
+                    builder: (_) => const PartnerPropertyVideoDetailsDialog(
+                      initialTitle: 'Original walkthrough',
+                    ),
+                  );
+                },
+                child: const Text('Open details'),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open details'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextFormField);
+    expect(fields, findsNWidgets(2));
+
+    await tester.enterText(fields.at(0), '  Bright apartment tour  ');
+    await tester.enterText(fields.at(1), '  Every room included.  ');
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(
+      submittedDetails,
+      ('Bright apartment tour', 'Every room included.'),
+    );
   });
 }
