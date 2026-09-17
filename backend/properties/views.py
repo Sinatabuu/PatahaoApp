@@ -2,7 +2,7 @@ from decimal import Decimal, InvalidOperation
 
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
@@ -16,7 +16,8 @@ from .models import (
     PropertyAmenity,
     PropertyPartner,
     PropertyPhoto,
-    PropertyFavorite
+    PropertyFavorite,
+    PropertyVideo,
 )
 from .serializers import (
     PartnerPropertySerializer,
@@ -27,6 +28,9 @@ from .serializers import (
     PropertyPhotoSerializer,
     PropertyPhotoUploadSerializer,
     PropertySerializer,
+    PartnerPropertyVideoSerializer,
+    PropertyVideoUploadSerializer,
+    PropertyVideoUpdateSerializer,
 )
 from .service import (
     evaluate_property_submission_readiness,
@@ -1420,3 +1424,167 @@ class PropertyPhotoViewSet(viewsets.ModelViewSet):
             if next_photo:
                 next_photo.is_cover = True
                 next_photo.save()
+
+
+class PropertyVideoViewSet(viewsets.ModelViewSet):
+    """Protected walkthrough-video management for source partners."""
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+    http_method_names = [
+        "get",
+        "post",
+        "patch",
+        "delete",
+        "head",
+        "options",
+    ]
+
+    def _get_partner(self):
+        try:
+            partner = Partner.objects.get(
+                user=self.request.user,
+            )
+        except Partner.DoesNotExist as exc:
+            raise PermissionDenied(
+                "A partner profile is required."
+            ) from exc
+
+        if partner.verification_status != Partner.STATUS_APPROVED:
+            raise PermissionDenied(
+                "Partner profile is not approved."
+            )
+
+        if not partner.is_active:
+            raise PermissionDenied(
+                "Partner profile is inactive."
+            )
+
+        return partner
+
+    def get_queryset(self):
+        partner = self._get_partner()
+        queryset = (
+            PropertyVideo.objects
+            .select_related(
+                "property",
+                "uploaded_by",
+                "reviewed_by",
+            )
+            .filter(property__partner=partner)
+        )
+        property_id = self.request.query_params.get("property")
+
+        if property_id:
+            queryset = queryset.filter(property_id=property_id)
+
+        return queryset.order_by(
+            "-is_featured",
+            "-uploaded_at",
+        )
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return PropertyVideoUploadSerializer
+
+        if self.action == "partial_update":
+            return PropertyVideoUpdateSerializer
+
+        return PartnerPropertyVideoSerializer
+
+    def get_serializer(self, *args, **kwargs):
+        serializer = super().get_serializer(*args, **kwargs)
+
+        if self.action == "create":
+            partner = self._get_partner()
+            serializer.fields["property"].queryset = (
+                Property.objects.filter(partner=partner)
+            )
+
+        return serializer
+
+    def perform_create(self, serializer):
+        partner = self._get_partner()
+        property_obj = serializer.validated_data["property"]
+
+        if property_obj.partner_id != partner.id:
+            raise PermissionDenied(
+                "You may only upload videos for your own properties."
+            )
+
+        video = serializer.save(uploaded_by=self.request.user)
+
+        ActivityLog.objects.create(
+            actor=self.request.user,
+            action="property_video_uploaded",
+            entity_type="PropertyVideo",
+            entity_id=str(video.id),
+            description=(
+                f"Uploaded a walkthrough video for "
+                f"{property_obj.title}."
+            ),
+        )
+
+    def perform_update(self, serializer):
+        if serializer.instance.property.status not in {
+            Property.STATUS_DRAFT,
+            Property.STATUS_PENDING,
+            Property.STATUS_PUBLISHED,
+        }:
+            raise ValidationError(
+                "Videos cannot be changed for a closed or archived property."
+            )
+
+        video = serializer.save()
+
+        ActivityLog.objects.create(
+            actor=self.request.user,
+            action="property_video_updated",
+            entity_type="PropertyVideo",
+            entity_id=str(video.id),
+            description=(
+                f"Updated a walkthrough video for "
+                f"{video.property.title}."
+            ),
+        )
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        property_obj = instance.property
+
+        if property_obj.status not in {
+            Property.STATUS_DRAFT,
+            Property.STATUS_PENDING,
+            Property.STATUS_PUBLISHED,
+        }:
+            raise ValidationError(
+                "Videos cannot be changed for a closed or archived property."
+            )
+
+        was_featured = instance.is_featured
+
+        ActivityLog.objects.create(
+            actor=self.request.user,
+            action="property_video_deleted",
+            entity_type="PropertyVideo",
+            entity_id=str(instance.id),
+            description=(
+                f"Deleted a walkthrough video from "
+                f"{property_obj.title}."
+            ),
+        )
+
+        instance.delete()
+
+        if was_featured:
+            next_video = (
+                PropertyVideo.objects
+                .filter(property=property_obj)
+                .order_by("-uploaded_at")
+                .first()
+            )
+
+            if next_video:
+                next_video.is_featured = True
+                next_video.save(update_fields=["is_featured"])

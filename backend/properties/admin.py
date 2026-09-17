@@ -28,7 +28,78 @@ class PropertyPhotoInline(admin.TabularInline):
 
 class PropertyVideoInline(admin.TabularInline):
     model = PropertyVideo
-    extra = 1
+    extra = 0
+    readonly_fields = (
+        "thumbnail",
+        "duration",
+        "width",
+        "height",
+        "file_size",
+        "video_codec",
+        "audio_codec",
+        "uploaded_by",
+        "review_status",
+        "reviewed_by",
+        "reviewed_at",
+        "uploaded_at",
+    )
+
+
+@admin.action(description="Approve selected walkthrough videos")
+def approve_property_videos(modeladmin, request, queryset):
+    approved_count = 0
+
+    for video in queryset.select_related("property"):
+        video.approve(reviewed_by=request.user)
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="property_video_approved",
+            entity_type="PropertyVideo",
+            entity_id=str(video.id),
+            description=(
+                f"Approved a walkthrough video for "
+                f"{video.property.title}."
+            ),
+        )
+        approved_count += 1
+
+    modeladmin.message_user(
+        request,
+        f"{approved_count} walkthrough video(s) approved.",
+        level=messages.SUCCESS,
+    )
+
+
+@admin.action(description="Return selected videos for replacement")
+def return_property_videos(modeladmin, request, queryset):
+    returned_count = 0
+    reason = (
+        "The walkthrough does not meet Pata Hao's listing standards. "
+        "Please replace it with a clear, accurate video."
+    )
+
+    for video in queryset.select_related("property"):
+        video.reject(
+            reviewed_by=request.user,
+            reason=reason,
+        )
+        ActivityLog.objects.create(
+            actor=request.user,
+            action="property_video_returned",
+            entity_type="PropertyVideo",
+            entity_id=str(video.id),
+            description=(
+                f"Returned a walkthrough video for "
+                f"{video.property.title}."
+            ),
+        )
+        returned_count += 1
+
+    modeladmin.message_user(
+        request,
+        f"{returned_count} walkthrough video(s) returned.",
+        level=messages.WARNING,
+    )
 
 @admin.action(
     description="Approve selected partner participation requests"
@@ -677,15 +748,46 @@ class PropertyVideoAdmin(admin.ModelAdmin):
         "property",
         "title",
         "duration",
+        "resolution",
         "is_featured",
+        "review_status",
         "uploaded_at",
     )
 
     list_filter = (
         "is_featured",
+        "review_status",
     )
 
     search_fields = (
         "title",
         "property__title",
     )
+
+    readonly_fields = (
+        "thumbnail",
+        "duration",
+        "width",
+        "height",
+        "file_size",
+        "content_sha256",
+        "video_codec",
+        "audio_codec",
+        "uploaded_by",
+        "review_status",
+        "reviewed_by",
+        "reviewed_at",
+        "uploaded_at",
+    )
+
+    actions = (
+        approve_property_videos,
+        return_property_videos,
+    )
+
+    @admin.display(description="Resolution")
+    def resolution(self, obj):
+        if not obj.width or not obj.height:
+            return "Not analyzed"
+
+        return f"{obj.width} × {obj.height}"

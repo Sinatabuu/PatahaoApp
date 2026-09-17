@@ -1,14 +1,32 @@
 from datetime import timedelta
+from uuid import uuid4
 
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from .photo_coverage import (
     PHOTO_TYPE_CHOICES,
     PHOTO_TYPE_OTHER,
 )
+
+
+def property_video_upload_path(instance, filename):
+    return (
+        f"property_videos/{instance.property_id}/"
+        f"{uuid4().hex}.mp4"
+    )
+
+
+def property_video_thumbnail_upload_path(instance, filename):
+    return (
+        f"property_video_thumbnails/{instance.property_id}/"
+        f"{uuid4().hex}.jpg"
+    )
 
 
 class PropertyAmenity(models.Model):
@@ -545,6 +563,11 @@ class PropertyPartner(models.Model):
         )
 
 class PropertyVideo(models.Model):
+    class ReviewStatus(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Returned for replacement"
+
     property = models.ForeignKey(
         Property,
         on_delete=models.CASCADE,
@@ -552,11 +575,11 @@ class PropertyVideo(models.Model):
     )
 
     video = models.FileField(
-        upload_to="property_videos/",
+        upload_to=property_video_upload_path,
     )
 
     thumbnail = models.ImageField(
-        upload_to="property_video_thumbnails/",
+        upload_to=property_video_thumbnail_upload_path,
         null=True,
         blank=True,
     )
@@ -576,10 +599,211 @@ class PropertyVideo(models.Model):
 
     is_featured = models.BooleanField(default=False)
 
+    file_size = models.PositiveIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    content_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        editable=False,
+        db_index=True,
+    )
+
+    width = models.PositiveIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    height = models.PositiveIntegerField(
+        default=0,
+        editable=False,
+    )
+
+    video_codec = models.CharField(
+        max_length=30,
+        blank=True,
+        editable=False,
+    )
+
+    audio_codec = models.CharField(
+        max_length=30,
+        blank=True,
+        editable=False,
+    )
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="uploaded_property_videos",
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    review_status = models.CharField(
+        max_length=20,
+        choices=ReviewStatus.choices,
+        default=ReviewStatus.PENDING,
+        db_index=True,
+    )
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="reviewed_property_videos",
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
+    rejection_reason = models.TextField(
+        blank=True,
+    )
+
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-is_featured", "-uploaded_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "property",
+                    "content_sha256",
+                ],
+                condition=models.Q(
+                    content_sha256__gt="",
+                ),
+                name="unique_property_video_content",
+            ),
+            models.UniqueConstraint(
+                fields=["property"],
+                condition=models.Q(is_featured=True),
+                name="unique_featured_video_per_property",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+
+        if self.property_id and self.content_sha256:
+            duplicates = type(self).objects.filter(
+                property_id=self.property_id,
+                content_sha256=self.content_sha256,
+            )
+
+            if self.pk:
+                duplicates = duplicates.exclude(pk=self.pk)
+
+            if duplicates.exists():
+                raise ValidationError(
+                    {
+                        "video": (
+                            "This exact video has already been uploaded "
+                            "for the property."
+                        )
+                    }
+                )
+
+    def apply_quality_analysis(self, analysis):
+        self.file_size = analysis.file_size
+        self.content_sha256 = analysis.content_sha256
+        self.width = analysis.width
+        self.height = analysis.height
+        self.duration = analysis.duration
+        self.video_codec = analysis.video_codec
+        self.audio_codec = analysis.audio_codec
+
+    def approve(self, *, reviewed_by):
+        if not reviewed_by or not reviewed_by.is_staff:
+            raise ValidationError(
+                "Only a staff user can approve a property video."
+            )
+
+        self.review_status = self.ReviewStatus.APPROVED
+        self.reviewed_by = reviewed_by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = ""
+        self.save(
+            update_fields=[
+                "review_status",
+                "reviewed_by",
+                "reviewed_at",
+                "rejection_reason",
+            ]
+        )
+
+    def reject(self, *, reviewed_by, reason):
+        if not reviewed_by or not reviewed_by.is_staff:
+            raise ValidationError(
+                "Only a staff user can return a property video."
+            )
+
+        reason = str(reason).strip()
+
+        if not reason:
+            raise ValidationError(
+                {"rejection_reason": "A return reason is required."}
+            )
+
+        self.review_status = self.ReviewStatus.REJECTED
+        self.reviewed_by = reviewed_by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = reason
+        self.save(
+            update_fields=[
+                "review_status",
+                "reviewed_by",
+                "reviewed_at",
+                "rejection_reason",
+            ]
+        )
+
+    def save(self, *args, **kwargs):
+        should_analyze = (
+            bool(self.video)
+            and not self.content_sha256
+            and (
+                self._state.adding
+                or not getattr(
+                    self.video,
+                    "_committed",
+                    True,
+                )
+            )
+        )
+
+        if should_analyze:
+            from .video_quality import analyze_property_video
+
+            analysis = analyze_property_video(self.video)
+            self.apply_quality_analysis(analysis)
+
+            if analysis.thumbnail_bytes and not self.thumbnail:
+                self.thumbnail.save(
+                    f"{uuid4().hex}.jpg",
+                    ContentFile(analysis.thumbnail_bytes),
+                    save=False,
+                )
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title or f"Video for {self.property.title}"
+
+
+@receiver(post_delete, sender=PropertyVideo)
+def delete_property_video_files(sender, instance, **kwargs):
+    if instance.video:
+        instance.video.delete(save=False)
+
+    if instance.thumbnail:
+        instance.thumbnail.delete(save=False)

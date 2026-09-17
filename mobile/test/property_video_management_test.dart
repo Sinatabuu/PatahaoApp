@@ -1,0 +1,57 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/models/property.dart';
+
+void main() {
+  group('Partner property video metadata', () {
+    test('parses moderation and quality details', () {
+      final video = PropertyVideo.fromJson({
+        'id': 17,
+        'video_url': 'https://media.example.test/walkthrough.mp4',
+        'thumbnail_url': 'https://media.example.test/thumbnail.jpg',
+        'title': 'Full apartment tour',
+        'description': 'A room-by-room walkthrough.',
+        'duration': 75,
+        'width': 1920,
+        'height': 1080,
+        'file_size': 52428800,
+        'video_codec': 'h264',
+        'audio_codec': 'aac',
+        'is_featured': true,
+        'review_status': 'pending',
+        'rejection_reason': '',
+      });
+
+      expect(video.video, endsWith('walkthrough.mp4'));
+      expect(video.thumbnail, endsWith('thumbnail.jpg'));
+      expect(video.isFeatured, isTrue);
+      expect(video.isPendingReview, isTrue);
+      expect(video.durationLabel, '1:15');
+      expect(video.resolutionLabel, '1920 × 1080');
+      expect(video.fileSizeLabel, '50.0 MB');
+    });
+
+    test('parses returned video instructions', () {
+      final video = PropertyVideo.fromJson({
+        'id': 18,
+        'video': '/media/property_videos/returned.mp4',
+        'title': 'Dark walkthrough',
+        'review_status': 'rejected',
+        'rejection_reason': 'The rooms are too dark.',
+      });
+
+      expect(video.isRejected, isTrue);
+      expect(video.isApproved, isFalse);
+      expect(video.rejectionReason, 'The rooms are too dark.');
+    });
+
+    test('legacy public video remains safely approved', () {
+      final video = PropertyVideo.fromJson({
+        'id': 19,
+        'video': '/media/property_videos/legacy.mp4',
+      });
+
+      expect(video.isApproved, isTrue);
+      expect(video.isPendingReview, isFalse);
+    });
+  });
+}

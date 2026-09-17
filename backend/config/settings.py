@@ -192,6 +192,19 @@ MPESA_TRANSACTION_TYPE = os.environ.get(
 ).strip()
 MPESA_HTTP_TIMEOUT = env_int("MPESA_HTTP_TIMEOUT", 30)
 
+VIDEO_FFPROBE_BINARY = os.environ.get(
+    "VIDEO_FFPROBE_BINARY",
+    "ffprobe",
+).strip()
+VIDEO_FFMPEG_BINARY = os.environ.get(
+    "VIDEO_FFMPEG_BINARY",
+    "ffmpeg",
+).strip()
+VIDEO_PROCESSING_TIMEOUT_SECONDS = env_int(
+    "VIDEO_PROCESSING_TIMEOUT_SECONDS",
+    45,
+)
+
 validate_mpesa_configuration(
     ENVIRONMENT,
     ENABLE_DEVELOPMENT_PAYMENT_HANDOFF,

@@ -4,6 +4,7 @@ from .views import (
     PartnerPropertyViewSet,
     PropertyFavoriteViewSet,
     PropertyPhotoViewSet,
+    PropertyVideoViewSet,
     PropertyViewSet,
     property_types,
 )
@@ -36,6 +37,12 @@ router.register(
     r"partner/photos",
     PropertyPhotoViewSet,
     basename="partner-photo",
+)
+
+router.register(
+    r"partner/videos",
+    PropertyVideoViewSet,
+    basename="partner-video",
 )
 
 router.register(

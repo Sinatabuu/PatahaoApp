@@ -7,6 +7,7 @@ import 'package:mobile/models/property.dart';
 import 'package:mobile/services/partner_mandate_service.dart';
 import 'package:mobile/services/partner_property_service.dart';
 import 'package:mobile/screens/partner_property_mandate_screen.dart';
+import 'package:mobile/screens/partner_property_video_screen.dart';
 
 IconData _photoTypeIcon(String photoType) {
   switch (photoType) {
@@ -728,6 +729,20 @@ class _PartnerPropertyWorkspaceScreenState
     await _loadPhotos();
   }
 
+  Future<void> _openVideoManager() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PartnerPropertyVideoScreen(property: property),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadPhotos();
+  }
+
   Future<void> _showPhotoActions(PartnerPropertyPhoto photo) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1203,6 +1218,13 @@ class _PartnerPropertyWorkspaceScreenState
                 onToggle: _toggleAmenity,
                 onSave: _saveAmenities,
               ),
+              if (property.partnerRole == 'source') ...[
+                const SizedBox(height: 18),
+                _WalkthroughVideoCard(
+                  videos: property.videos,
+                  onManage: _openVideoManager,
+                ),
+              ],
             ],
 
             const SizedBox(height: 18),
@@ -1276,6 +1298,75 @@ class _PartnerPropertyWorkspaceScreenState
           onMorePressed: () => _showPhotoActions(photo),
         );
       },
+    );
+  }
+}
+
+class _WalkthroughVideoCard extends StatelessWidget {
+  const _WalkthroughVideoCard({
+    required this.videos,
+    required this.onManage,
+  });
+
+  final List<PropertyVideo> videos;
+  final VoidCallback onManage;
+
+  @override
+  Widget build(BuildContext context) {
+    final approved = videos.where((video) => video.isApproved).length;
+    final pending = videos.where((video) => video.isPendingReview).length;
+    final returned = videos.where((video) => video.isRejected).length;
+    final summary = <String>[
+      '$approved approved',
+      if (pending > 0) '$pending awaiting review',
+      if (returned > 0) '$returned to replace',
+    ].join(' · ');
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.video_library_outlined,
+                  color: Color(0xFF166534),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Walkthrough videos · ${videos.length}/3',
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              videos.isEmpty
+                  ? 'Optional: add an HD tour so customers can understand '
+                        'the property before requesting a viewing.'
+                  : summary,
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onManage,
+                icon: const Icon(Icons.video_settings_outlined),
+                label: Text(
+                  videos.isEmpty ? 'Add Walkthrough' : 'Manage Videos',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

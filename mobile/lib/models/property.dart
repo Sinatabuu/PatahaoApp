@@ -62,6 +62,14 @@ class PropertyVideo {
   final String description;
   final int duration;
   final bool isFeatured;
+  final int width;
+  final int height;
+  final int fileSize;
+  final String videoCodec;
+  final String audioCodec;
+  final String reviewStatus;
+  final String rejectionReason;
+  final DateTime? reviewedAt;
 
   const PropertyVideo({
     required this.id,
@@ -71,6 +79,14 @@ class PropertyVideo {
     required this.description,
     required this.duration,
     required this.isFeatured,
+    this.width = 0,
+    this.height = 0,
+    this.fileSize = 0,
+    this.videoCodec = '',
+    this.audioCodec = '',
+    this.reviewStatus = 'approved',
+    this.rejectionReason = '',
+    this.reviewedAt,
   });
 
   factory PropertyVideo.fromJson(Map<String, dynamic> json) {
@@ -91,7 +107,43 @@ class PropertyVideo {
       description: json['description']?.toString() ?? '',
       duration: Property._toInt(json['duration']),
       isFeatured: json['is_featured'] == true,
+      width: Property._toInt(json['width']),
+      height: Property._toInt(json['height']),
+      fileSize: Property._toInt(json['file_size']),
+      videoCodec: json['video_codec']?.toString() ?? '',
+      audioCodec: json['audio_codec']?.toString() ?? '',
+      reviewStatus: json['review_status']?.toString() ?? 'approved',
+      rejectionReason: json['rejection_reason']?.toString() ?? '',
+      reviewedAt: Property._toDateTime(json['reviewed_at']),
     );
+  }
+
+  bool get isPendingReview => reviewStatus == 'pending';
+
+  bool get isApproved => reviewStatus == 'approved';
+
+  bool get isRejected => reviewStatus == 'rejected';
+
+  String get durationLabel {
+    final minutes = duration ~/ 60;
+    final seconds = duration % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String get resolutionLabel {
+    if (width <= 0 || height <= 0) {
+      return '';
+    }
+
+    return '$width × $height';
+  }
+
+  String get fileSizeLabel {
+    if (fileSize <= 0) {
+      return '';
+    }
+
+    return '${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }
 
@@ -109,6 +161,7 @@ class Property {
   final int bathrooms;
   final String description;
   final String status;
+  final String partnerRole;
   final bool canDeleteDraft;
   final String verificationReturnReason;
   final String trustBadge;
@@ -137,6 +190,7 @@ class Property {
     required this.description,
     required this.verificationReturnReason,
     required this.status,
+    this.partnerRole = '',
     required this.trustBadge,
     required this.isFavorite,
     required this.favoriteId,
@@ -174,6 +228,7 @@ class Property {
       bathrooms: _toInt(json['bathrooms']),
       description: json['description']?.toString() ?? '',
       status: json['status']?.toString() ?? '',
+      partnerRole: json['partner_role']?.toString() ?? '',
       canDeleteDraft: json['can_delete_draft'] == true,
       verificationReturnReason:
           json['verification_return_reason']?.toString() ?? '',
@@ -403,6 +458,7 @@ class Property {
     int? bathrooms,
     String? description,
     String? status,
+    String? partnerRole,
     String? verificationReturnReason,
     String? trustBadge,
     bool? isSuccessBroadcastActive,
@@ -430,6 +486,7 @@ class Property {
       bathrooms: bathrooms ?? this.bathrooms,
       description: description ?? this.description,
       status: status ?? this.status,
+      partnerRole: partnerRole ?? this.partnerRole,
       verificationReturnReason:
           verificationReturnReason ?? this.verificationReturnReason,
       trustBadge: trustBadge ?? this.trustBadge,

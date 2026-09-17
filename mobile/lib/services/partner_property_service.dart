@@ -14,6 +14,7 @@ class PartnerPropertyService {
   static final PartnerPropertyService instance = PartnerPropertyService._();
 
   static const Duration _timeout = Duration(seconds: 30);
+  static const Duration _videoTimeout = Duration(minutes: 3);
 
   Future<List<Property>> fetchMyProperties({
     String? status,
@@ -574,6 +575,217 @@ class PartnerPropertyService {
       _extractErrorMessage(
         decoded,
         fallback: 'Unable to delete the property photo.',
+      ),
+    );
+  }
+
+  Future<List<PropertyVideo>> fetchPropertyVideos(
+    int propertyId,
+  ) async {
+    _validateId(
+      propertyId,
+      name: 'propertyId',
+      message: 'Property ID must be greater than zero.',
+    );
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/partner/videos/',
+    ).replace(
+      queryParameters: {
+        'property': propertyId.toString(),
+      },
+    );
+
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .get(
+              uri,
+              headers: _authorizationHeaders(accessToken),
+            )
+            .timeout(_timeout);
+      },
+    );
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to load the walkthrough videos.',
+        ),
+      );
+    }
+
+    if (decoded is! List) {
+      throw const FormatException(
+        'The walkthrough video API returned invalid data.',
+      );
+    }
+
+    return decoded
+        .whereType<Map>()
+        .map(
+          (item) => PropertyVideo.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<PropertyVideo> uploadPropertyVideo({
+    required int propertyId,
+    required String filePath,
+    required String fileName,
+    String title = '',
+    String description = '',
+  }) async {
+    _validateId(
+      propertyId,
+      name: 'propertyId',
+      message: 'Property ID must be greater than zero.',
+    );
+
+    if (filePath.trim().isEmpty) {
+      throw ArgumentError('A walkthrough video is required.');
+    }
+
+    final safeFileName = fileName.trim().isEmpty
+        ? 'property_walkthrough.mp4'
+        : fileName.trim();
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/partner/videos/',
+    );
+    final response = await _sendAuthorizedRequest(
+      (accessToken) async {
+        final request = http.MultipartRequest('POST', uri);
+        request.headers.addAll(_authorizationHeaders(accessToken));
+        request.fields['property'] = propertyId.toString();
+        request.fields['title'] = title.trim();
+        request.fields['description'] = description.trim();
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'video',
+            filePath,
+            filename: safeFileName,
+          ),
+        );
+
+        final streamedResponse = await request.send().timeout(
+          _videoTimeout,
+        );
+        return http.Response.fromStream(streamedResponse);
+      },
+    );
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to upload the walkthrough video.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The walkthrough upload returned invalid data.',
+      );
+    }
+
+    return PropertyVideo.fromJson(
+      Map<String, dynamic>.from(decoded),
+    );
+  }
+
+  Future<void> updatePropertyVideo({
+    required int videoId,
+    String? title,
+    String? description,
+    bool? isFeatured,
+  }) async {
+    _validateId(
+      videoId,
+      name: 'videoId',
+      message: 'Video ID must be greater than zero.',
+    );
+
+    final body = <String, dynamic>{};
+
+    if (title != null) {
+      body['title'] = title.trim();
+    }
+
+    if (description != null) {
+      body['description'] = description.trim();
+    }
+
+    if (isFeatured != null) {
+      body['is_featured'] = isFeatured;
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/partner/videos/$videoId/',
+    );
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .patch(
+              uri,
+              headers: {
+                ..._authorizationHeaders(accessToken),
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(body),
+            )
+            .timeout(_timeout);
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return;
+    }
+
+    final dynamic decoded = _decodeResponse(response);
+    throw Exception(
+      _extractErrorMessage(
+        decoded,
+        fallback: 'Unable to update the walkthrough video.',
+      ),
+    );
+  }
+
+  Future<void> deletePropertyVideo(int videoId) async {
+    _validateId(
+      videoId,
+      name: 'videoId',
+      message: 'Video ID must be greater than zero.',
+    );
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/partner/videos/$videoId/',
+    );
+    final response = await _sendAuthorizedRequest(
+      (accessToken) {
+        return http
+            .delete(
+              uri,
+              headers: _authorizationHeaders(accessToken),
+            )
+            .timeout(_timeout);
+      },
+    );
+
+    if (response.statusCode == 204) {
+      return;
+    }
+
+    final dynamic decoded = _decodeResponse(response);
+    throw Exception(
+      _extractErrorMessage(
+        decoded,
+        fallback: 'Unable to delete the walkthrough video.',
       ),
     );
   }

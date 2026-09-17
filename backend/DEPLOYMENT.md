@@ -78,6 +78,22 @@ pass; investigate and document each conflict.
 
 ## Release checks
 
+Install `ffmpeg` and `ffprobe` on every application worker before enabling
+property walkthrough uploads. The server uses them to verify the codec,
+duration, and resolution and to generate a safe thumbnail. Keep the default
+binary names unless the deployment installs them at explicit paths:
+
+```dotenv
+VIDEO_FFPROBE_BINARY=ffprobe
+VIDEO_FFMPEG_BINARY=ffmpeg
+VIDEO_PROCESSING_TIMEOUT_SECONDS=45
+```
+
+Allow at least 105 MB request bodies at the reverse proxy so multipart
+overhead does not reject a valid 100 MB video. The application worker and
+proxy request timeouts must also exceed the 45-second processing limit. Keep
+the public API limit at 100 MB; do not raise it merely to accept 4K uploads.
+
 From `backend/`, with the deployed environment variables loaded:
 
 ```bash
@@ -102,7 +118,8 @@ migration; do not point production at the existing SQLite file.
 ## Remaining infrastructure work
 
 `DJANGO_MEDIA_ROOT` still refers to local disk. Before public production,
-property media and private mandate documents must be split and moved to
-durable storage with private access controls for mandate files. The production
-application server, health monitoring, log collection, and automated backup
-policy must also be configured on the chosen hosting platform.
+property photos and videos must move to durable object storage/CDN, while
+private mandate documents must use separate private access controls. The
+production application server, health monitoring, log collection, and
+automated backup policy must also be configured on the chosen hosting
+platform.

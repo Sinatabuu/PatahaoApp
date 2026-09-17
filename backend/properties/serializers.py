@@ -1,4 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.files.base import ContentFile
+from django.db import transaction
 from rest_framework import serializers
 
 from partners.models import Partner
@@ -14,6 +16,7 @@ from .models import (
 
 from .media_quality import analyze_property_photo
 from .photo_coverage import evaluate_photo_coverage
+from .video_quality import analyze_property_video
 
 class PublicPartnerSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
@@ -288,14 +291,217 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
 
 
 class PropertyVideoSerializer(serializers.ModelSerializer):
+    video_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
         model = PropertyVideo
         fields = (
             "id",
             "video",
+            "video_url",
+            "thumbnail",
+            "thumbnail_url",
             "title",
+            "description",
+            "duration",
+            "width",
+            "height",
+            "is_featured",
             "uploaded_at",
         )
+
+    def _absolute_file_url(self, file_field):
+        if not file_field:
+            return None
+
+        request = self.context.get("request")
+
+        if request:
+            return request.build_absolute_uri(file_field.url)
+
+        return file_field.url
+
+    def get_video_url(self, obj):
+        return self._absolute_file_url(obj.video)
+
+    def get_thumbnail_url(self, obj):
+        return self._absolute_file_url(obj.thumbnail)
+
+
+class PartnerPropertyVideoSerializer(PropertyVideoSerializer):
+    class Meta(PropertyVideoSerializer.Meta):
+        fields = (
+            *PropertyVideoSerializer.Meta.fields,
+            "file_size",
+            "video_codec",
+            "audio_codec",
+            "review_status",
+            "rejection_reason",
+            "reviewed_at",
+        )
+
+
+class PropertyVideoUploadSerializer(PartnerPropertyVideoSerializer):
+    class Meta(PartnerPropertyVideoSerializer.Meta):
+        model = PropertyVideo
+        fields = (
+            *PartnerPropertyVideoSerializer.Meta.fields,
+            "property",
+        )
+        read_only_fields = (
+            "id",
+            "video_url",
+            "thumbnail",
+            "thumbnail_url",
+            "duration",
+            "width",
+            "height",
+            "file_size",
+            "video_codec",
+            "audio_codec",
+            "review_status",
+            "rejection_reason",
+            "reviewed_at",
+            "uploaded_at",
+        )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        video = attrs.get("video")
+        property_obj = attrs.get("property")
+
+        if video is None or property_obj is None:
+            return attrs
+
+        if property_obj.status not in {
+            Property.STATUS_DRAFT,
+            Property.STATUS_PENDING,
+            Property.STATUS_PUBLISHED,
+        }:
+            raise serializers.ValidationError(
+                {
+                    "property": (
+                        "Videos cannot be changed for a closed or "
+                        "archived property."
+                    )
+                }
+            )
+
+        if PropertyVideo.objects.filter(property=property_obj).count() >= 3:
+            raise serializers.ValidationError(
+                {
+                    "video": (
+                        "A property can have up to three walkthrough "
+                        "videos. Delete one before uploading another."
+                    )
+                }
+            )
+
+        try:
+            analysis = analyze_property_video(video)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {"video": exc.messages}
+            ) from exc
+
+        if PropertyVideo.objects.filter(
+            property=property_obj,
+            content_sha256=analysis.content_sha256,
+        ).exists():
+            raise serializers.ValidationError(
+                {
+                    "video": (
+                        "This exact video has already been uploaded "
+                        "for the property."
+                    )
+                }
+            )
+
+        self._video_quality_analysis = analysis
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        analysis = self._video_quality_analysis
+        property_obj = Property.objects.select_for_update().get(
+            pk=validated_data["property"].pk,
+        )
+
+        if PropertyVideo.objects.filter(property=property_obj).count() >= 3:
+            raise serializers.ValidationError(
+                {
+                    "video": (
+                        "A property can have up to three walkthrough "
+                        "videos. Delete one before uploading another."
+                    )
+                }
+            )
+
+        if PropertyVideo.objects.filter(
+            property=property_obj,
+            content_sha256=analysis.content_sha256,
+        ).exists():
+            raise serializers.ValidationError(
+                {
+                    "video": (
+                        "This exact video has already been uploaded "
+                        "for the property."
+                    )
+                }
+            )
+
+        validated_data["property"] = property_obj
+        validated_data.update(
+            {
+                "file_size": analysis.file_size,
+                "content_sha256": analysis.content_sha256,
+                "width": analysis.width,
+                "height": analysis.height,
+                "duration": analysis.duration,
+                "video_codec": analysis.video_codec,
+                "audio_codec": analysis.audio_codec,
+            }
+        )
+
+        if not PropertyVideo.objects.filter(property=property_obj).exists():
+            validated_data["is_featured"] = True
+
+        video = PropertyVideo(**validated_data)
+        video.thumbnail.save(
+            "walkthrough-thumbnail.jpg",
+            ContentFile(analysis.thumbnail_bytes),
+            save=False,
+        )
+
+        if video.is_featured:
+            PropertyVideo.objects.filter(
+                property=property_obj,
+            ).update(is_featured=False)
+
+        video.save()
+        return video
+
+
+class PropertyVideoUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyVideo
+        fields = (
+            "title",
+            "description",
+            "is_featured",
+        )
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        if validated_data.get("is_featured"):
+            PropertyVideo.objects.filter(
+                property=instance.property,
+            ).exclude(pk=instance.pk).update(
+                is_featured=False,
+            )
+
+        return super().update(instance, validated_data)
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -304,10 +510,7 @@ class PropertySerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
-    videos = PropertyVideoSerializer(
-        many=True,
-        read_only=True,
-    )
+    videos = serializers.SerializerMethodField()
 
     amenities = PropertyAmenitySerializer(
         many=True,
@@ -413,6 +616,20 @@ class PropertySerializer(serializers.ModelSerializer):
 
         return favorite.id
 
+    def get_videos(self, obj):
+        videos = [
+            video
+            for video in obj.videos.all()
+            if video.review_status
+            == PropertyVideo.ReviewStatus.APPROVED
+        ]
+
+        return PropertyVideoSerializer(
+            videos,
+            many=True,
+            context=self.context,
+        ).data
+
 
 class PropertyCardSerializer(PropertySerializer):
     """
@@ -496,7 +713,15 @@ class PropertyCardSerializer(PropertySerializer):
         ]
 
     def get_videos(self, obj):
-        video = next(iter(obj.videos.all()), None)
+        video = next(
+            (
+                item
+                for item in obj.videos.all()
+                if item.review_status
+                == PropertyVideo.ReviewStatus.APPROVED
+            ),
+            None,
+        )
 
         if video is None:
             return []
@@ -523,6 +748,7 @@ class PartnerPropertySerializer(PropertySerializer):
         many=True,
         read_only=True,
     )
+    videos = serializers.SerializerMethodField()
     partner_role = serializers.SerializerMethodField()
     participation_status = serializers.SerializerMethodField()
     photo_coverage = serializers.SerializerMethodField()
@@ -542,6 +768,24 @@ class PartnerPropertySerializer(PropertySerializer):
             obj,
             obj.photos.all(),
         )
+
+    def get_videos(self, obj):
+        partner = self._get_partner()
+        videos = list(obj.videos.all())
+
+        if partner is None or obj.partner_id != partner.id:
+            videos = [
+                video
+                for video in videos
+                if video.review_status
+                == PropertyVideo.ReviewStatus.APPROVED
+            ]
+
+        return PartnerPropertyVideoSerializer(
+            videos,
+            many=True,
+            context=self.context,
+        ).data
 
     def get_can_delete_draft(self, obj):
         partner = self._get_partner()
