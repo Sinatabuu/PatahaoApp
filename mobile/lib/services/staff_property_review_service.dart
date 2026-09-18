@@ -112,6 +112,40 @@ class StaffPropertyReviewService {
     );
   }
 
+  Future<Map<String, dynamic>> approveVideo({
+    required int propertyId,
+    required int videoId,
+  }) async {
+    _validateId(videoId, name: 'videoId');
+
+    return _postReviewAction(
+      propertyId: propertyId,
+      actionPath: 'videos/$videoId/approve',
+      fallbackMessage: 'Unable to approve this walkthrough video.',
+    );
+  }
+
+  Future<Map<String, dynamic>> returnVideo({
+    required int propertyId,
+    required int videoId,
+    required String reason,
+  }) async {
+    _validateId(videoId, name: 'videoId');
+
+    final cleanReason = reason.trim();
+
+    if (cleanReason.isEmpty) {
+      throw ArgumentError('A video return reason is required.');
+    }
+
+    return _postReviewAction(
+      propertyId: propertyId,
+      actionPath: 'videos/$videoId/return-to-partner',
+      fallbackMessage: 'Unable to return this walkthrough video.',
+      body: <String, dynamic>{'reason': cleanReason},
+    );
+  }
+
   Future<Map<String, dynamic>> publishProperty(int propertyId) async {
     _validateId(propertyId, name: 'propertyId');
 
@@ -207,6 +241,7 @@ class StaffPropertyReviewService {
     required int propertyId,
     required String actionPath,
     required String fallbackMessage,
+    Map<String, dynamic> body = const <String, dynamic>{},
   }) async {
     _validateId(propertyId, name: 'propertyId');
 
@@ -223,7 +258,7 @@ class StaffPropertyReviewService {
               ..._authorizationHeaders(accessToken),
               'Content-Type': 'application/json',
             },
-            body: jsonEncode(<String, dynamic>{}),
+            body: jsonEncode(body),
           )
           .timeout(_timeout);
     });

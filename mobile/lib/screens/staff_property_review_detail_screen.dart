@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/screens/property_video_screen.dart';
 import 'package:mobile/services/staff_property_review_service.dart';
 
 class StaffPropertyReviewDetailScreen extends StatefulWidget {
@@ -68,6 +69,7 @@ class _StaffPropertyReviewDetailScreenState
     required String confirmationMessage,
     required String successMessage,
     required Future<Map<String, dynamic>> Function() action,
+    bool closeAfterSuccess = false,
   }) async {
     if (_isProcessing) {
       return;
@@ -121,6 +123,10 @@ class _StaffPropertyReviewDetailScreenState
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(successMessage)));
+
+      if (closeAfterSuccess && mounted) {
+        Navigator.of(context).pop(true);
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -184,19 +190,47 @@ class _StaffPropertyReviewDetailScreenState
     );
   }
 
+  Future<void> _approvePendingVideo(int videoId) async {
+    await _runReviewAction(
+      confirmationTitle: 'Approve Walkthrough Video?',
+      confirmationMessage:
+          'This replacement will become the one customer-visible walkthrough. '
+          'The previous approved video will be removed after approval.',
+      successMessage: 'Walkthrough video approved.',
+      closeAfterSuccess: true,
+      action: () {
+        return StaffPropertyReviewService.instance.approveVideo(
+          propertyId: widget.propertyId,
+          videoId: videoId,
+        );
+      },
+    );
+  }
+
   Future<void> _publishProperty() async {
     if (_isProcessing) {
       return;
     }
 
+    final hasPendingVideo = _pendingVideo(_review['videos']) != null;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Publish Property?'),
-          content: const Text(
-            'This property will become visible to customers. '
-            'The backend will perform the final publication checks before publishing.',
+          title: Text(
+            hasPendingVideo
+                ? 'Approve Property and Video?'
+                : 'Publish Property?',
+          ),
+          content: Text(
+            hasPendingVideo
+                ? 'The property and its pending walkthrough will be approved '
+                      'together and become visible to customers. Final '
+                      'publication checks will still run.'
+                : 'This property will become visible to customers. The '
+                      'backend will perform the final publication checks '
+                      'before publishing.',
           ),
           actions: [
             TextButton(
@@ -209,7 +243,7 @@ class _StaffPropertyReviewDetailScreenState
               onPressed: () {
                 Navigator.of(dialogContext).pop(true);
               },
-              child: const Text('Publish'),
+              child: Text(hasPendingVideo ? 'Approve & Publish' : 'Publish'),
             ),
           ],
         );
@@ -237,7 +271,13 @@ class _StaffPropertyReviewDetailScreenState
       _hasChanged = true;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Property approved and published.')),
+        SnackBar(
+          content: Text(
+            hasPendingVideo
+                ? 'Property and walkthrough approved and published.'
+                : 'Property approved and published.',
+          ),
+        ),
       );
 
       Navigator.of(context).pop(true);
@@ -376,6 +416,130 @@ class _StaffPropertyReviewDetailScreenState
     }
   }
 
+  Future<void> _returnPendingVideo({
+    required int videoId,
+    required bool closeAfterSuccess,
+  }) async {
+    if (_isProcessing) {
+      return;
+    }
+
+    final controller = TextEditingController();
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        String? validationMessage;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Return Walkthrough Video'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Explain what must be corrected before the partner '
+                    'uploads a replacement.',
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: controller,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Video return reason',
+                      border: const OutlineInputBorder(),
+                      errorText: validationMessage,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final cleanReason = controller.text.trim();
+
+                    if (cleanReason.isEmpty) {
+                      setDialogState(() {
+                        validationMessage = 'A reason is required.';
+                      });
+
+                      return;
+                    }
+
+                    Navigator.of(dialogContext).pop(cleanReason);
+                  },
+                  child: const Text('Return Video'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (reason == null || reason.trim().isEmpty || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await StaffPropertyReviewService.instance.returnVideo(
+        propertyId: widget.propertyId,
+        videoId: videoId,
+        reason: reason,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _review = result;
+        _hasChanged = true;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Walkthrough returned to the partner.')),
+      );
+
+      if (closeAfterSuccess && mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _errorMessage = _cleanError(error);
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
+    }
+  }
+
   String _cleanError(Object error) {
     return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
   }
@@ -436,6 +600,14 @@ class _StaffPropertyReviewDetailScreenState
 
     final commercialReadiness = _map(_review['commercial_readiness']);
 
+    final videos = _mapList(_review['videos']);
+
+    final pendingVideo = _pendingVideo(videos);
+
+    final propertyReviewRequired = _bool(_review['property_review_required']);
+
+    final videoOnlyReview = !propertyReviewRequired && pendingVideo != null;
+
     final blockers = _list(_review['blockers']);
 
     final readyToPublish = _bool(_review['ready_to_publish']);
@@ -478,48 +650,76 @@ class _StaffPropertyReviewDetailScreenState
 
           const SizedBox(height: 16),
 
+          _VideoReviewCard(
+            videos: videos,
+            isProcessing: _isProcessing,
+            showApproveAction: videoOnlyReview,
+            showReturnAction: pendingVideo != null,
+            onApprove: pendingVideo == null
+                ? null
+                : () => _approvePendingVideo(_int(pendingVideo['id'])),
+            onReturn: pendingVideo == null
+                ? null
+                : () => _returnPendingVideo(
+                    videoId: _int(pendingVideo['id']),
+                    closeAfterSuccess: videoOnlyReview,
+                  ),
+          ),
+
+          const SizedBox(height: 16),
+
           if (_errorMessage != null) ...[
             _InlineError(message: _errorMessage!),
             const SizedBox(height: 16),
           ],
 
-          _ReadinessCard(
-            publishing: publishing,
-            commercialReadiness: commercialReadiness,
-            photos: photos,
-            blockers: blockers,
-            readyToPublish: readyToPublish,
-          ),
+          if (propertyReviewRequired) ...[
+            _ReadinessCard(
+              publishing: publishing,
+              commercialReadiness: commercialReadiness,
+              photos: photos,
+              blockers: blockers,
+              readyToPublish: readyToPublish,
+            ),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          _CommissionCard(commission: commission),
+            _CommissionCard(commission: commission),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          _MandateCard(mandate: mandate),
+            _MandateCard(mandate: mandate),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          _ActionCard(
-            isProcessing: _isProcessing,
-            commissionExists: commissionExists,
-            commissionAccepted: commissionAccepted,
-            commissionVerified: commissionVerified,
-            commissionLocked: commissionLocked,
-            mandateExists: mandateExists,
-            mandateDeclared: mandateDeclared,
-            mandateApproved: mandateApproved,
-            readyToPublish: readyToPublish,
-            canVerifyCommission: canVerifyCommission,
-            canLockCommission: canLockCommission,
-            canApproveMandate: canApproveMandate,
-            onVerifyCommission: _verifyCommission,
-            onLockCommission: _lockCommission,
-            onApproveMandate: _approveMandate,
-            onPublish: _publishProperty,
-            onReturnToPartner: _returnToPartner,
-          ),
+            _ActionCard(
+              isProcessing: _isProcessing,
+              commissionExists: commissionExists,
+              commissionAccepted: commissionAccepted,
+              commissionVerified: commissionVerified,
+              commissionLocked: commissionLocked,
+              mandateExists: mandateExists,
+              mandateDeclared: mandateDeclared,
+              mandateApproved: mandateApproved,
+              readyToPublish: readyToPublish,
+              hasPendingVideo: pendingVideo != null,
+              canVerifyCommission: canVerifyCommission,
+              canLockCommission: canLockCommission,
+              canApproveMandate: canApproveMandate,
+              onVerifyCommission: _verifyCommission,
+              onLockCommission: _lockCommission,
+              onApproveMandate: _approveMandate,
+              onPublish: _publishProperty,
+              onReturnToPartner: _returnToPartner,
+            ),
+          ] else if (videoOnlyReview) ...[
+            const _InlineGuidance(
+              message:
+                  'This property is already live. Approving the replacement '
+                  'will swap only the walkthrough video; returning it will '
+                  'keep the current approved video visible to customers.',
+            ),
+          ],
         ],
       ),
     );
@@ -579,13 +779,274 @@ class _PropertyCard extends StatelessWidget {
             ),
             _InfoLine(
               label: 'Amenities',
-              value: amenities.isEmpty
-                  ? 'None selected'
-                  : amenities.join(', '),
+              value: amenities.isEmpty ? 'None selected' : amenities.join(', '),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _VideoReviewCard extends StatelessWidget {
+  const _VideoReviewCard({
+    required this.videos,
+    required this.isProcessing,
+    required this.showApproveAction,
+    required this.showReturnAction,
+    required this.onApprove,
+    required this.onReturn,
+  });
+
+  final List<Map<String, dynamic>> videos;
+  final bool isProcessing;
+  final bool showApproveAction;
+  final bool showReturnAction;
+  final Future<void> Function()? onApprove;
+  final Future<void> Function()? onReturn;
+
+  @override
+  Widget build(BuildContext context) {
+    if (videos.isEmpty) {
+      return const _SectionCard(
+        title: 'Walkthrough Video',
+        icon: Icons.videocam_outlined,
+        child: _EmptyPanel(
+          text:
+              'No walkthrough was uploaded. Video is optional, so the '
+              'property can still be reviewed and published.',
+        ),
+      );
+    }
+
+    final orderedVideos = [...videos]
+      ..sort((left, right) {
+        final leftPending = left['review_status']?.toString() == 'pending';
+        final rightPending = right['review_status']?.toString() == 'pending';
+
+        if (leftPending == rightPending) {
+          return 0;
+        }
+
+        return leftPending ? -1 : 1;
+      });
+
+    return _SectionCard(
+      title: 'Walkthrough Video Review',
+      icon: Icons.videocam_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ...orderedVideos.map((video) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _StaffVideoPreview(video: video),
+            );
+          }),
+          if (showApproveAction) ...[
+            FilledButton.icon(
+              onPressed: isProcessing ? null : onApprove,
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Approve Replacement Video'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (showReturnAction)
+            OutlinedButton.icon(
+              onPressed: isProcessing ? null : onReturn,
+              icon: const Icon(Icons.undo),
+              label: const Text('Return Video to Partner'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StaffVideoPreview extends StatelessWidget {
+  const _StaffVideoPreview({required this.video});
+
+  final Map<String, dynamic> video;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = video['title']?.toString().trim() ?? '';
+    final videoUrl = video['video_url']?.toString().trim() ?? '';
+    final thumbnailUrl = video['thumbnail_url']?.toString().trim() ?? '';
+    final reviewStatus = video['review_status']?.toString() ?? '';
+    final rejectionReason = video['rejection_reason']?.toString().trim() ?? '';
+    final duration = _int(video['duration']);
+    final width = _int(video['width']);
+    final height = _int(video['height']);
+    final fileSize = _int(video['file_size']);
+
+    final statusColor = switch (reviewStatus) {
+      'approved' => const Color(0xFF166534),
+      'rejected' => const Color(0xFFB91C1C),
+      _ => const Color(0xFF9A3412),
+    };
+
+    final statusBackground = switch (reviewStatus) {
+      'approved' => const Color(0xFFF0FDF4),
+      'rejected' => const Color(0xFFFEF2F2),
+      _ => const Color(0xFFFFF7ED),
+    };
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Material(
+              color: Colors.black87,
+              child: InkWell(
+                onTap: videoUrl.isEmpty
+                    ? null
+                    : () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => PropertyVideoScreen(
+                              videoUrl: videoUrl,
+                              title: title.isEmpty
+                                  ? 'Walkthrough Review'
+                                  : title,
+                            ),
+                          ),
+                        );
+                      },
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (thumbnailUrl.isNotEmpty)
+                      Image.network(
+                        thumbnailUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) {
+                          return const ColoredBox(color: Colors.black87);
+                        },
+                      ),
+                    const ColoredBox(color: Color(0x22000000)),
+                    Center(
+                      child: CircleAvatar(
+                        radius: 30,
+                        backgroundColor: Colors.black54,
+                        child: Icon(
+                          videoUrl.isEmpty
+                              ? Icons.videocam_off_outlined
+                              : Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 42,
+                        ),
+                      ),
+                    ),
+                    const Positioned(
+                      left: 12,
+                      bottom: 10,
+                      child: Text(
+                        'Tap to preview',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title.isEmpty ? 'Property walkthrough' : title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusBackground,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        _pretty(reviewStatus),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 6,
+                  children: [
+                    if (duration > 0)
+                      _VideoFact(
+                        icon: Icons.timer_outlined,
+                        label: _formatDuration(duration),
+                      ),
+                    if (width > 0 && height > 0)
+                      _VideoFact(
+                        icon: Icons.high_quality_outlined,
+                        label: '$width × $height',
+                      ),
+                    if (fileSize > 0)
+                      _VideoFact(
+                        icon: Icons.storage_outlined,
+                        label: _formatFileSize(fileSize),
+                      ),
+                  ],
+                ),
+                if (rejectionReason.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Return reason: $rejectionReason',
+                    style: const TextStyle(color: Color(0xFF991B1B)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VideoFact extends StatelessWidget {
+  const _VideoFact({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: Colors.black54),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(color: Colors.black54)),
+      ],
     );
   }
 }
@@ -778,6 +1239,7 @@ class _ActionCard extends StatelessWidget {
     required this.mandateDeclared,
     required this.mandateApproved,
     required this.readyToPublish,
+    required this.hasPendingVideo,
     required this.canVerifyCommission,
     required this.canLockCommission,
     required this.canApproveMandate,
@@ -797,6 +1259,7 @@ class _ActionCard extends StatelessWidget {
   final bool mandateDeclared;
   final bool mandateApproved;
   final bool readyToPublish;
+  final bool hasPendingVideo;
   final bool canVerifyCommission;
   final bool canLockCommission;
   final bool canApproveMandate;
@@ -856,7 +1319,9 @@ class _ActionCard extends StatelessWidget {
           const SizedBox(height: 10),
           _ActionStep(
             number: 4,
-            title: 'Publish Property',
+            title: hasPendingVideo
+                ? 'Approve & Publish Property + Video'
+                : 'Publish Property',
             complete: false,
             enabled: readyToPublish && !isProcessing,
             unavailableReason: !readyToPublish
@@ -1142,6 +1607,29 @@ class _InlineError extends StatelessWidget {
   }
 }
 
+class _InlineGuidance extends StatelessWidget {
+  const _InlineGuidance({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Text(
+        message,
+        style: const TextStyle(color: Color(0xFF1E3A8A), height: 1.4),
+      ),
+    );
+  }
+}
+
 class _ErrorPanel extends StatelessWidget {
   const _ErrorPanel({required this.message, required this.onRetry});
 
@@ -1177,6 +1665,27 @@ Map<String, dynamic> _map(dynamic value) {
   }
 
   return <String, dynamic>{};
+}
+
+List<Map<String, dynamic>> _mapList(dynamic value) {
+  if (value is! List) {
+    return <Map<String, dynamic>>[];
+  }
+
+  return value
+      .whereType<Map>()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList();
+}
+
+Map<String, dynamic>? _pendingVideo(dynamic value) {
+  for (final video in _mapList(value)) {
+    if (video['review_status']?.toString() == 'pending') {
+      return video;
+    }
+  }
+
+  return null;
 }
 
 List<dynamic> _list(dynamic value) {
@@ -1238,6 +1747,18 @@ String _formatKes(num value) {
   );
 
   return 'KES $formatted';
+}
+
+String _formatDuration(int seconds) {
+  final minutes = seconds ~/ 60;
+  final remainingSeconds = seconds % 60;
+
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+String _formatFileSize(int bytes) {
+  final megabytes = bytes / (1024 * 1024);
+  return '${megabytes.toStringAsFixed(1)} MB';
 }
 
 String _pretty(String value) {

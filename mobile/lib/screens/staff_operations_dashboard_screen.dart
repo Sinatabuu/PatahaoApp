@@ -366,7 +366,7 @@ class _StaffOperationsDashboardScreenState
               summary.pendingAuthorizationReviews == 1
                   ? '1 authorization waiting for review'
                   : '${summary.pendingAuthorizationReviews} '
-                      'authorizations waiting for review',
+                        'authorizations waiting for review',
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _openAuthorizationReviews,
@@ -391,8 +391,9 @@ class _StaffOperationsDashboardScreenState
             ),
             subtitle: Text(
               summary.pendingReviews == 1
-                  ? '1 property waiting for review'
-                  : '${summary.pendingReviews} properties waiting for review',
+                  ? '1 property or video waiting for review'
+                  : '${summary.pendingReviews} property/video items '
+                        'waiting for review',
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _openReviewDesk,

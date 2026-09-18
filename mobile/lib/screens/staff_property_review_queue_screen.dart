@@ -159,7 +159,8 @@ class _StaffPropertyReviewQueueScreenState
           ),
           SizedBox(height: 8),
           Text(
-            'There are no properties currently waiting for Pata Hao review.',
+            'There are no properties or walkthrough videos currently waiting '
+            'for Pata Hao review.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.black54, height: 1.4),
           ),
@@ -220,12 +221,13 @@ class _QueueSummaryCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Pending property reviews',
+                    'Pending property and video reviews',
                     style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '$reviewCount ${reviewCount == 1 ? 'property' : 'properties'} waiting for review.',
+                    '$reviewCount ${reviewCount == 1 ? 'item' : 'items'} '
+                    'waiting for staff review.',
                     style: const TextStyle(color: Colors.black54),
                   ),
                 ],
@@ -254,6 +256,8 @@ class _ReviewCard extends StatelessWidget {
 
     final publishing = _map(review['publishing']);
 
+    final videoReview = _map(review['video_review']);
+
     final commission = _map(review['commission']);
 
     final mandate = _map(review['mandate']);
@@ -261,6 +265,13 @@ class _ReviewCard extends StatelessWidget {
     final blockers = _list(review['blockers']);
 
     final readyToPublish = _bool(review['ready_to_publish']);
+
+    final reviewScope = review['review_scope']?.toString() ?? 'property';
+
+    final reviewScopeDisplay =
+        review['review_scope_display']?.toString().trim() ?? '';
+
+    final pendingVideoCount = _int(videoReview['pending_count']);
 
     final title = property['title']?.toString().trim() ?? '';
 
@@ -296,6 +307,10 @@ class _ReviewCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _ReviewScopeChip(scope: reviewScope, label: reviewScopeDisplay),
+
+              const SizedBox(height: 12),
+
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -321,7 +336,7 @@ class _ReviewCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _ReadyChip(ready: readyToPublish),
+                  if (reviewScope != 'video') _ReadyChip(ready: readyToPublish),
                 ],
               ),
 
@@ -349,43 +364,56 @@ class _ReviewCard extends StatelessWidget {
                 value: '$photoCount / $requiredPhotos',
               ),
 
-              const Divider(height: 28),
+              if (pendingVideoCount > 0) ...[
+                const SizedBox(height: 10),
+                _InfoLine(
+                  icon: Icons.videocam_outlined,
+                  label: 'Walkthrough',
+                  value: reviewScope == 'video'
+                      ? 'Replacement awaiting review'
+                      : 'Included with property review',
+                ),
+              ],
 
-              const Text(
-                'Commercial checks',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
+              if (reviewScope != 'video') ...[
+                const Divider(height: 28),
 
-              const SizedBox(height: 8),
+                const Text(
+                  'Commercial checks',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
 
-              _CheckLine(
-                label: 'Partner accepted commission',
-                complete: commissionAccepted,
-              ),
+                const SizedBox(height: 8),
 
-              _CheckLine(
-                label: 'Pata Hao verified commission',
-                complete: commissionVerified,
-              ),
+                _CheckLine(
+                  label: 'Partner accepted commission',
+                  complete: commissionAccepted,
+                ),
 
-              _CheckLine(
-                label: 'Commission locked',
-                complete: commissionLocked,
-              ),
+                _CheckLine(
+                  label: 'Pata Hao verified commission',
+                  complete: commissionVerified,
+                ),
 
-              _CheckLine(
-                label: 'Partner declared mandate',
-                complete: mandateDeclared,
-              ),
+                _CheckLine(
+                  label: 'Commission locked',
+                  complete: commissionLocked,
+                ),
 
-              _CheckLine(
-                label: 'Pata Hao approved mandate',
-                complete: mandateApproved,
-              ),
+                _CheckLine(
+                  label: 'Partner declared mandate',
+                  complete: mandateDeclared,
+                ),
 
-              if (blockers.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _BlockerSummary(blockers: blockers),
+                _CheckLine(
+                  label: 'Pata Hao approved mandate',
+                  complete: mandateApproved,
+                ),
+
+                if (blockers.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _BlockerSummary(blockers: blockers),
+                ],
               ],
 
               const SizedBox(height: 14),
@@ -395,11 +423,61 @@ class _ReviewCard extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onOpen,
                   icon: const Icon(Icons.chevron_right),
-                  label: const Text('Review Property'),
+                  label: Text(
+                    reviewScope == 'video'
+                        ? 'Review Walkthrough Video'
+                        : 'Review Property',
+                  ),
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewScopeChip extends StatelessWidget {
+  const _ReviewScopeChip({required this.scope, required this.label});
+
+  final String scope;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final videoOnly = scope == 'video';
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: videoOnly ? const Color(0xFFEFF6FF) : const Color(0xFFF0FDF4),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              videoOnly ? Icons.videocam_outlined : Icons.home_work_outlined,
+              size: 16,
+              color: videoOnly
+                  ? const Color(0xFF1D4ED8)
+                  : const Color(0xFF166534),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label.isEmpty ? 'Property review' : label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: videoOnly
+                    ? const Color(0xFF1D4ED8)
+                    : const Color(0xFF166534),
+              ),
+            ),
+          ],
         ),
       ),
     );

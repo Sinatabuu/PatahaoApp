@@ -4,6 +4,7 @@ from django.urls import path
 from .views import (
     AdminOperationsSummaryView,
     ApproveMandateReviewView,
+    ApprovePropertyVideoReviewView,
     LockCommissionReviewView,
     MyPartnerCapacityView,
     PropertyReviewDetailView,
@@ -13,6 +14,7 @@ from .views import (
     PartnerRequestGovernanceReviewView,
     PublishPropertyReviewView,
     ReturnPropertyToPartnerReviewView,
+    ReturnPropertyVideoReviewView,
     VerifyCommissionReviewView,
     StaffDealGovernanceCaseListView,
     StaffDealGovernanceCaseDecisionView,
@@ -72,6 +74,22 @@ urlpatterns = [
         "property-reviews/<int:property_id>/return-to-partner/",
         ReturnPropertyToPartnerReviewView.as_view(),
         name="governance-property-review-return-to-partner",
+    ),
+    path(
+        (
+            "property-reviews/<int:property_id>/videos/"
+            "<int:video_id>/approve/"
+        ),
+        ApprovePropertyVideoReviewView.as_view(),
+        name="governance-property-video-review-approve",
+    ),
+    path(
+        (
+            "property-reviews/<int:property_id>/videos/"
+            "<int:video_id>/return-to-partner/"
+        ),
+        ReturnPropertyVideoReviewView.as_view(),
+        name="governance-property-video-review-return",
     ),
     path(
         "partner/governance-cases/<int:case_id>/",
