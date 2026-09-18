@@ -4,6 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import (
+    ValidationError as DjangoValidationError,
+)
 from django.urls import reverse
 
 from rest_framework import status
@@ -156,4 +159,54 @@ class ViewingCompletionDealHandoffTests(APITestCase):
                 ),
             ).count(),
             1,
+        )
+
+    def test_pic_validation_error_returns_400_and_rolls_back(self):
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        with patch(
+            "viewings.views.create_property_introduction_certificate",
+            side_effect=DjangoValidationError(
+                "Only an active PIC can create a deal."
+            ),
+        ):
+            response = self.client.post(
+                reverse(
+                    "viewing-complete-viewing",
+                    kwargs={
+                        "pk": self.viewing.pk,
+                    },
+                ),
+                {
+                    "completion_notes": (
+                        "Customer completed a repeat viewing."
+                    ),
+                },
+                format="json",
+            )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+            response.data,
+        )
+        self.assertEqual(
+            response.data["detail"],
+            "Only an active PIC can create a deal.",
+        )
+
+        self.viewing.refresh_from_db()
+
+        self.assertEqual(
+            self.viewing.status,
+            Viewing.Status.CONFIRMED,
+        )
+        self.assertFalse(
+            self.viewing.events.filter(
+                event_type=(
+                    ViewingEvent.EventType.VIEWING_COMPLETED
+                ),
+            ).exists()
         )

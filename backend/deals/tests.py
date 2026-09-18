@@ -48,6 +48,7 @@ from .models import (
 from .services import (
     close_commission_paid_deal,
     complete_agreed_deal_and_raise_commission,
+    create_deal_from_pic,
     ensure_commission_invoice_for_due_deal,
     evaluate_deal_outcomes,
     record_commission_receipt,
@@ -1329,6 +1330,48 @@ class DealCompletionCommissionTests(
                 "updated_at",
             ]
         )
+
+    def test_converted_pic_reuses_its_existing_deal(self):
+        self.introduction.transition_status(
+            new_status=(
+                ProtectedIntroduction.Status.CONVERTED_TO_DEAL
+            ),
+            actor=self.staff_user,
+            notes="PIC was already converted by the first viewing.",
+        )
+
+        deal_count = Deal.objects.count()
+
+        deal, created = create_deal_from_pic(
+            introduction=self.introduction,
+            actor=self.staff_user,
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(deal.pk, self.deal.pk)
+        self.assertEqual(Deal.objects.count(), deal_count)
+
+    def test_inactive_pic_without_deal_remains_rejected(self):
+        Deal.objects.filter(
+            pk=self.deal.pk,
+        ).update(
+            introduction=None,
+        )
+
+        self.introduction.transition_status(
+            new_status=ProtectedIntroduction.Status.EXPIRED,
+            actor=self.staff_user,
+            notes="PIC expired before conversion.",
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Only an active PIC can create a deal.",
+        ):
+            create_deal_from_pic(
+                introduction=self.introduction,
+                actor=self.staff_user,
+            )
 
     def test_agreed_deal_completion_allocates_commission(
         self,

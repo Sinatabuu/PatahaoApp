@@ -804,11 +804,6 @@ def create_deal_from_pic(
             operation="convert_pic_to_deal",
         )
 
-    if not introduction.is_active:
-        raise ValidationError(
-            "Only an active PIC can create a deal."
-        )
-
     existing = (
         Deal.objects
         .filter(
@@ -819,6 +814,11 @@ def create_deal_from_pic(
 
     if existing is not None:
         return existing, False
+
+    if not introduction.is_active:
+        raise ValidationError(
+            "Only an active PIC can create a deal."
+        )
 
     listing_type = (
         introduction.listing_type_snapshot

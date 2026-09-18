@@ -1394,16 +1394,42 @@ class ViewingViewSet(viewsets.ModelViewSet):
             ),
         )
 
-        introduction, introduction_created = (
-            create_property_introduction_certificate(
-                viewing=viewing,
+        try:
+            introduction, introduction_created = (
+                create_property_introduction_certificate(
+                    viewing=viewing,
+                    actor=request.user,
+                )
+            )
+            deal, deal_created = create_deal_from_pic(
+                introduction=introduction,
                 actor=request.user,
             )
-        )
-        deal, deal_created = create_deal_from_pic(
-            introduction=introduction,
-            actor=request.user,
-        )
+
+        except DjangoValidationError as exc:
+            detail = getattr(
+                exc,
+                "message_dict",
+                None,
+            )
+
+            if detail is None:
+                messages = getattr(
+                    exc,
+                    "messages",
+                    None,
+                )
+                detail = {
+                    "detail": (
+                        messages[0]
+                        if messages and len(messages) == 1
+                        else messages or str(exc)
+                    )
+                }
+
+            raise ValidationError(
+                detail=detail,
+            ) from exc
 
         ActivityLog.objects.create(
             actor=request.user,
