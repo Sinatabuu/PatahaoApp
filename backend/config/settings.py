@@ -24,6 +24,7 @@ from config.environment import (
     get_allowed_hosts,
     get_database_config,
     get_environment,
+    get_log_level,
     get_secret_key,
     validate_mpesa_configuration,
 )
@@ -38,6 +39,7 @@ IS_DEVELOPMENT = ENVIRONMENT == "development"
 IS_STAGING = ENVIRONMENT == "staging"
 IS_PRODUCTION = ENVIRONMENT == "production"
 IS_DEPLOYED_ENVIRONMENT = IS_STAGING or IS_PRODUCTION
+DJANGO_LOG_LEVEL = get_log_level(ENVIRONMENT)
 
 DEBUG = env_bool(
     "DJANGO_DEBUG",
@@ -336,3 +338,39 @@ SECURE_HSTS_PRELOAD = env_bool(
     "DJANGO_SECURE_HSTS_PRELOAD",
     False,
 )
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": (
+                "{asctime} {levelname} {name} "
+                "process={process:d} thread={thread:d} {message}"
+            ),
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": DJANGO_LOG_LEVEL,
+    },
+    "loggers": {
+        "django.server": {
+            "handlers": ["console"],
+            "level": DJANGO_LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}

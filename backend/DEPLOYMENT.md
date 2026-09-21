@@ -21,7 +21,9 @@ DJANGO_DEBUG=false
 DJANGO_SECRET_KEY=replace-with-a-long-random-production-secret
 DJANGO_ALLOWED_HOSTS=patahao-api.example.com
 DJANGO_CSRF_TRUSTED_ORIGINS=https://patahao-api.example.com
+DJANGO_LOG_LEVEL=INFO
 DATABASE_URL=postgresql://user:password@host:5432/database?sslmode=require
+DATABASE_CONNECT_TIMEOUT=5
 DJANGO_SECURE_HSTS_SECONDS=3600
 ENABLE_DEVELOPMENT_PAYMENT_HANDOFF=false
 ```
@@ -30,6 +32,21 @@ Use `.env.example` as the complete variable reference. Never commit a real
 `.env` file or production secret. Treat the Django key that was previously
 hard-coded in the repository as exposed and never reuse it for staging or
 production.
+
+## Health probes and logs
+
+Configure the hosting platform to call these unauthenticated HTTPS endpoints:
+
+- `/health/live/` confirms that the web process can answer requests.
+- `/health/ready/` confirms that the process can reach its database. It
+  returns HTTP 503 without exposing the underlying database error when the
+  dependency is unavailable.
+
+Both responses disable caching. Use the liveness endpoint for process restarts
+and the readiness endpoint for traffic routing and deployment verification.
+Application logs are written to standard output. `DJANGO_LOG_LEVEL` accepts
+`CRITICAL`, `ERROR`, `WARNING`, `INFO`, or `DEBUG`; deployed environments
+default to `INFO`.
 
 ## Sandbox-first M-Pesa rollout
 
@@ -103,6 +120,13 @@ python manage.py migrate --plan
 python manage.py migrate
 python manage.py collectstatic --noinput
 python manage.py test
+```
+
+After deployment, verify both probes from outside the hosting network:
+
+```bash
+curl --fail --silent --show-error https://patahao-api.example.com/health/live/
+curl --fail --silent --show-error https://patahao-api.example.com/health/ready/
 ```
 
 Start HSTS with the documented one-hour value. After HTTPS has been verified

@@ -45,6 +45,25 @@ jobs:
         working-directory: backend
         run: python manage.py check
 
+      - name: Validate production configuration boots safely
+        working-directory: backend
+        env:
+          PATAHAO_ENVIRONMENT: production
+          DJANGO_DEBUG: "false"
+          DJANGO_SECRET_KEY: ci-only-production-settings-validation-key-0123456789-DO-NOT-USE
+          DJANGO_ALLOWED_HOSTS: api.example.test
+          DJANGO_CSRF_TRUSTED_ORIGINS: https://api.example.test
+          DJANGO_LOG_LEVEL: INFO
+          DATABASE_URL: postgresql://ci:ci@db.example.test:5432/patahao
+          ENABLE_DEVELOPMENT_PAYMENT_HANDOFF: "false"
+          DJANGO_EMAIL_HOST: smtp.example.test
+          DJANGO_EMAIL_HOST_USER: ci-user
+          DJANGO_EMAIL_HOST_PASSWORD: ci-password
+          DJANGO_DEFAULT_FROM_EMAIL: Pata HAO <no-reply@example.test>
+          MPESA_ENVIRONMENT: sandbox
+          MPESA_LIVE_PAYMENTS_ENABLED: "false"
+        run: python manage.py check --deploy --fail-level ERROR
+
       - name: Verify committed migrations
         working-directory: backend
         run: python manage.py makemigrations --check --dry-run

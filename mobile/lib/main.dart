@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'config/app_config.dart';
 import 'screens/app_entry_screen.dart';
 
 void main() {
+  AppConfig.validate();
   runApp(const PataHaoApp());
 }
 

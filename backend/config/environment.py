@@ -13,6 +13,13 @@ SUPPORTED_ENVIRONMENTS = {
     "staging",
     "production",
 }
+SUPPORTED_LOG_LEVELS = {
+    "CRITICAL",
+    "ERROR",
+    "WARNING",
+    "INFO",
+    "DEBUG",
+}
 
 
 def env_bool(name, default=False, environ=None):
@@ -77,6 +84,21 @@ def get_environment(environ=None):
         )
 
     return environment
+
+
+def get_log_level(environment, environ=None):
+    """Return a validated console log level for the current environment."""
+    source = environ if environ is not None else os.environ
+    default = "DEBUG" if environment == "development" else "INFO"
+    log_level = source.get("DJANGO_LOG_LEVEL", default).strip().upper()
+
+    if log_level not in SUPPORTED_LOG_LEVELS:
+        choices = ", ".join(sorted(SUPPORTED_LOG_LEVELS))
+        raise ImproperlyConfigured(
+            f"DJANGO_LOG_LEVEL must be one of: {choices}."
+        )
+
+    return log_level
 
 
 def get_secret_key(environment, environ=None):
@@ -168,9 +190,21 @@ def get_database_config(environment, base_dir, environ=None):
             "CONN_HEALTH_CHECKS": True,
         }
         query = parse_qs(parsed.query)
+        connect_timeout = env_int(
+            "DATABASE_CONNECT_TIMEOUT",
+            5,
+            environ=source,
+        )
+        if connect_timeout <= 0:
+            raise ImproperlyConfigured(
+                "DATABASE_CONNECT_TIMEOUT must be greater than zero."
+            )
+
+        options = {"connect_timeout": connect_timeout}
         sslmode = query.get("sslmode", [""])[-1].strip()
         if sslmode:
-            config["OPTIONS"] = {"sslmode": sslmode}
+            options["sslmode"] = sslmode
+        config["OPTIONS"] = options
 
         return config
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../config/app_config.dart';
 import '../models/property.dart';
 import '../models/property_type_option.dart';
 
@@ -82,7 +83,7 @@ class PropertyFeedPage {
 }
 
 class PropertyService {
-  static const String baseUrl = 'https://patahao-api.roysafi.com';
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   static const Duration _timeout = Duration(seconds: 30);
 

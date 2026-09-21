@@ -8,6 +8,7 @@ from accounts.views import (
     FlexibleTokenObtainPairView,
     PasswordAwareTokenRefreshView,
 )
+from core.health import liveness, readiness
 
 
 def home(request):
@@ -19,6 +20,8 @@ def home(request):
             "endpoints": {
                 "admin": "/admin/",
                 "api": "/api/",
+                "liveness": "/health/live/",
+                "readiness": "/health/ready/",
                 "login": "/api/auth/login/",
                 "refresh": "/api/auth/refresh/",
             },
@@ -27,6 +30,8 @@ def home(request):
 
 urlpatterns = [
     path("", home, name="home"),
+    path("health/live/", liveness, name="health-live"),
+    path("health/ready/", readiness, name="health-ready"),
     path("", include("deals.public_urls")),
     path("admin/", admin.site.urls),
 

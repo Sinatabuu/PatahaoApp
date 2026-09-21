@@ -10,6 +10,7 @@ from config.environment import (
     get_allowed_hosts,
     get_database_config,
     get_environment,
+    get_log_level,
     get_secret_key,
     validate_mpesa_configuration,
 )
@@ -45,6 +46,30 @@ class EnvironmentConfigTests(SimpleTestCase):
         ):
             get_environment(
                 {"PATAHAO_ENVIRONMENT": "preview"}
+            )
+
+    def test_log_level_uses_safe_environment_defaults(self):
+        self.assertEqual(get_log_level("development", {}), "DEBUG")
+        self.assertEqual(get_log_level("staging", {}), "INFO")
+        self.assertEqual(get_log_level("production", {}), "INFO")
+
+    def test_log_level_accepts_case_insensitive_supported_value(self):
+        self.assertEqual(
+            get_log_level(
+                "production",
+                {"DJANGO_LOG_LEVEL": "warning"},
+            ),
+            "WARNING",
+        )
+
+    def test_log_level_rejects_unknown_value(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "DJANGO_LOG_LEVEL must be one of",
+        ):
+            get_log_level(
+                "production",
+                {"DJANGO_LOG_LEVEL": "verbose"},
             )
 
     def test_boolean_and_list_values_are_parsed(self):
@@ -116,6 +141,7 @@ class EnvironmentConfigTests(SimpleTestCase):
                     "db.example.com:5433/patahao_prod?sslmode=require"
                 ),
                 "DATABASE_CONN_MAX_AGE": "120",
+                "DATABASE_CONNECT_TIMEOUT": "7",
             },
         )
 
@@ -130,9 +156,29 @@ class EnvironmentConfigTests(SimpleTestCase):
                 "PORT": "5433",
                 "CONN_MAX_AGE": 120,
                 "CONN_HEALTH_CHECKS": True,
-                "OPTIONS": {"sslmode": "require"},
+                "OPTIONS": {
+                    "connect_timeout": 7,
+                    "sslmode": "require",
+                },
             },
         )
+
+    def test_postgresql_database_timeout_must_be_positive(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "DATABASE_CONNECT_TIMEOUT must be greater than zero",
+        ):
+            get_database_config(
+                "production",
+                Path("/srv/patahao"),
+                {
+                    "DATABASE_URL": (
+                        "postgresql://patahao:secret@"
+                        "db.example.com:5432/patahao_prod"
+                    ),
+                    "DATABASE_CONNECT_TIMEOUT": "0",
+                },
+            )
 
     def test_deployed_environment_rejects_sqlite(self):
         with self.assertRaisesMessage(
