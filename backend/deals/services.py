@@ -2937,6 +2937,12 @@ def close_commission_paid_deal(
         .get(pk=deal_id)
     )
 
+    if (
+        deal.status == Deal.Status.COMPLETED
+        and deal.closed_at is not None
+    ):
+        return deal
+
     if deal.status != Deal.Status.COMMISSION_PAID:
         raise ValidationError(
             {

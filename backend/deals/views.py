@@ -991,7 +991,7 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(
             {
-                "message": "Deal closed successfully.",
+                "message": "Deal is closed.",
                 "deal": self.get_serializer(
                     deal
                 ).data,

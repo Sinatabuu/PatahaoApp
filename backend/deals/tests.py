@@ -2309,6 +2309,44 @@ class DealFinalClosureServiceTests(
             self.completed_deal.closed_at,
         )
 
+    def test_closed_deal_can_be_closed_idempotently(self):
+        self.pay_invoice_in_full()
+        self.complete_commission_settlement()
+
+        close_commission_paid_deal(
+            deal_id=self.completed_deal.id,
+            actor=self.staff_user,
+            notes="Original closure.",
+        )
+
+        self.completed_deal.refresh_from_db()
+
+        original_closed_at = self.completed_deal.closed_at
+
+        retried_deal = close_commission_paid_deal(
+            deal_id=self.completed_deal.id,
+            actor=self.staff_user,
+            notes="Retry must not replace audit evidence.",
+        )
+
+        retried_deal.refresh_from_db()
+
+        self.assertEqual(
+            retried_deal.status,
+            Deal.Status.COMPLETED,
+        )
+        self.assertEqual(
+            retried_deal.closed_at,
+            original_closed_at,
+        )
+        self.assertEqual(
+            DealEvent.objects.filter(
+                deal=retried_deal,
+                action="deal_closed",
+            ).count(),
+            1,
+        )
+
     def test_unpaid_invoice_deal_cannot_be_closed(self):
         Deal.objects.filter(
             pk=self.completed_deal.pk,
@@ -2412,6 +2450,7 @@ class DealFinalClosureAPITests(
     test_unpaid_invoice_deal_cannot_be_closed = None
     test_wrong_status_deal_cannot_be_closed = None
     test_final_closure_preserves_transaction_completion_time = None
+    test_closed_deal_can_be_closed_idempotently = None
 
     def close_url(self):
         return reverse(
@@ -2483,6 +2522,62 @@ class DealFinalClosureAPITests(
         self.assertEqual(
             self.completed_deal.status,
             Deal.Status.COMMISSION_PAID,
+        )
+
+    def test_repeated_close_request_is_idempotent(self):
+        self.pay_invoice_in_full()
+        self.complete_commission_settlement()
+
+        self.client.force_authenticate(
+            user=self.staff_user,
+        )
+
+        first_response = self.client.post(
+            self.close_url(),
+            {
+                "notes": "Original API closure.",
+            },
+            format="json",
+        )
+
+        self.completed_deal.refresh_from_db()
+        original_closed_at = self.completed_deal.closed_at
+
+        retry_response = self.client.post(
+            self.close_url(),
+            {
+                "notes": "Retry must remain idempotent.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_200_OK,
+            first_response.data,
+        )
+        self.assertEqual(
+            retry_response.status_code,
+            status.HTTP_200_OK,
+            retry_response.data,
+        )
+        self.assertEqual(
+            retry_response.data["message"],
+            "Deal is closed.",
+        )
+
+        self.completed_deal.refresh_from_db()
+
+        self.assertEqual(
+            self.completed_deal.closed_at,
+            original_closed_at,
+        )
+        self.assertEqual(
+            DealEvent.objects.filter(
+                deal=self.completed_deal,
+                action="deal_closed",
+            ).count(),
+            1,
         )
 
     def test_staff_cannot_close_deal_before_commission_paid(self):

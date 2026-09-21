@@ -1044,7 +1044,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
     });
 
     try {
-      await StaffDealAdminService.instance.closeDeal(
+      final response = await StaffDealAdminService.instance.closeDeal(
         dealId: widget.dealId,
         notes: notes,
       );
@@ -1053,8 +1053,16 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
         return;
       }
 
+      final rawDeal = response['deal'];
+
+      if (rawDeal is Map) {
+        setState(() {
+          _deal = Map<String, dynamic>.from(rawDeal);
+        });
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Deal closed successfully.')),
+        const SnackBar(content: Text('Deal is closed.')),
       );
 
       await _loadDeal();
