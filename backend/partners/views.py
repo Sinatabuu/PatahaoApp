@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from properties.models import Property
 from viewings.models import Viewing, ViewingEvent
+from viewings.services import send_partner_decline_to_fee_resolution
 
 from .models import Partner
 from .serializers import (
@@ -1551,6 +1552,7 @@ class PartnerDashboardView(APIView):
             status__in=[
                 Viewing.Status.PAID_PENDING_PARTNER,
                 Viewing.Status.RESCHEDULE_PROPOSED,
+                Viewing.Status.SCHEDULING_FAILED,
                 Viewing.Status.CONFIRMED,
                 Viewing.Status.COMPLETED,
             ]
@@ -2163,33 +2165,19 @@ class PartnerDeclineViewingView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        viewing.assigned_partner = partner
-        viewing.status = Viewing.Status.CANCELLED
-        viewing.partner_response_message = reason
-        viewing.partner_responded_at = timezone.now()
-
-        viewing.save(
-            update_fields=[
-                "assigned_partner",
-                "status",
-                "partner_response_message",
-                "partner_responded_at",
-                "updated_at",
-            ]
-        )
-
-        viewing.record_event(
-            event_type=ViewingEvent.EventType.VIEWING_CANCELLED,
+        send_partner_decline_to_fee_resolution(
+            viewing=viewing,
             actor=request.user,
-            notes=reason,
-            metadata={
-                "cancelled_by": "partner",
-            },
+            reason=reason,
+            partner=partner,
         )
 
         return Response(
             {
-                "detail": "Viewing declined successfully.",
+                "detail": (
+                    "Viewing declined. The customer's paid fee is protected "
+                    "and now requires their credit-or-refund choice."
+                ),
                 "viewing": serialize_viewing(viewing, request),
             },
             status=status.HTTP_200_OK,

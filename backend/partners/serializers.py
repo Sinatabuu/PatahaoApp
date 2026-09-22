@@ -82,6 +82,14 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
 
     partner_outcome_submitted = serializers.SerializerMethodField()
 
+    fee_resolution_label = serializers.CharField(
+        source="get_fee_resolution_choice_display",
+        read_only=True,
+    )
+
+    requires_fee_resolution = serializers.SerializerMethodField()
+    fee_resolution_processed = serializers.SerializerMethodField()
+
     class Meta:
         model = Viewing
 
@@ -102,6 +110,14 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
             "fee_amount",
             "status",
             "payment_reference",
+            "reschedule_decline_count",
+            "fee_resolution_choice",
+            "fee_resolution_label",
+            "fee_resolution_requested_at",
+            "fee_resolution_reference",
+            "fee_resolution_processed_at",
+            "fee_resolution_processed",
+            "requires_fee_resolution",
 
             "proposed_date",
             "proposed_time",
@@ -144,3 +160,15 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
         return deal.outcomes.filter(
             reporter="partner",
         ).exists()
+
+    def get_requires_fee_resolution(self, viewing):
+        return (
+            viewing.status == Viewing.Status.SCHEDULING_FAILED
+            and not viewing.fee_resolution_choice
+        )
+
+    def get_fee_resolution_processed(self, viewing):
+        return (
+            viewing.fee_resolution_processed_at is not None
+            and viewing.fee_resolution_processed_by_id is not None
+        )

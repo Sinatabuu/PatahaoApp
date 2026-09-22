@@ -1,6 +1,8 @@
 from datetime import timedelta
 from decimal import Decimal
+from importlib import import_module
 
+from django.apps import apps
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
@@ -393,7 +395,7 @@ class PaidViewingHandoffTests(APITestCase):
             "Please meet at 2:30 PM instead.",
         )
 
-    def test_paid_viewing_decline_is_visible_to_customer(self):
+    def test_paid_viewing_decline_requires_customer_fee_resolution(self):
         viewing = self._create_paid_viewing()
         decline_reason = (
             "The owner cannot accommodate this viewing time."
@@ -417,8 +419,9 @@ class PaidViewingHandoffTests(APITestCase):
         )
         self.assertEqual(
             response.data["status"],
-            Viewing.Status.DECLINED,
+            Viewing.Status.SCHEDULING_FAILED,
         )
+        self.assertTrue(response.data["requires_fee_resolution"])
 
         self.client.force_authenticate(
             user=self.customer,
@@ -433,9 +436,125 @@ class PaidViewingHandoffTests(APITestCase):
         )
         self.assertEqual(
             customer_response.data["status"],
-            Viewing.Status.DECLINED,
+            Viewing.Status.SCHEDULING_FAILED,
+        )
+        self.assertTrue(
+            customer_response.data["requires_fee_resolution"]
         )
         self.assertEqual(
             customer_response.data["partner_response_message"],
             decline_reason,
+        )
+        self.assertEqual(
+            customer_response.data["fee_resolution_choice"],
+            "",
+        )
+
+        viewing.refresh_from_db()
+        viewing.payment.refresh_from_db()
+
+        self.assertEqual(
+            viewing.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+        self.assertTrue(
+            ViewingEvent.objects.filter(
+                viewing=viewing,
+                event_type=ViewingEvent.EventType.SCHEDULING_FAILED,
+                metadata__trigger="partner_declined",
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.customer,
+                title="Action required: choose fee resolution",
+                action_label="Choose credit or refund",
+            ).exists()
+        )
+
+    def test_partner_dashboard_decline_uses_the_same_fee_resolution_flow(self):
+        viewing = self._create_paid_viewing()
+
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+        response = self.client.post(
+            f"/api/partners/viewings/{viewing.id}/decline/",
+            {
+                "partner_response_message": (
+                    "The seller withdrew access to the property."
+                ),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+            response.data,
+        )
+        self.assertEqual(
+            response.data["viewing"]["status"],
+            Viewing.Status.SCHEDULING_FAILED,
+        )
+        self.assertTrue(
+            response.data["viewing"]["requires_fee_resolution"]
+        )
+
+        viewing.refresh_from_db()
+        viewing.payment.refresh_from_db()
+        self.assertEqual(
+            viewing.status,
+            Viewing.Status.SCHEDULING_FAILED,
+        )
+        self.assertEqual(
+            viewing.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    def test_migration_repairs_an_existing_paid_partner_cancellation(self):
+        viewing = self._create_paid_viewing()
+        viewing.status = Viewing.Status.CANCELLED
+        viewing.partner_response_message = "The property is unavailable."
+        viewing.save(
+            update_fields=[
+                "status",
+                "partner_response_message",
+                "updated_at",
+            ]
+        )
+        viewing.record_event(
+            event_type=ViewingEvent.EventType.VIEWING_CANCELLED,
+            actor=self.partner_user,
+            notes=viewing.partner_response_message,
+            metadata={"cancelled_by": "partner"},
+        )
+
+        migration = import_module(
+            "viewings.migrations.0013_repair_paid_partner_declines"
+        )
+        migration.repair_paid_partner_declines(apps, None)
+
+        viewing.refresh_from_db()
+        viewing.payment.refresh_from_db()
+
+        self.assertEqual(
+            viewing.status,
+            Viewing.Status.SCHEDULING_FAILED,
+        )
+        self.assertEqual(
+            viewing.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+        self.assertTrue(
+            viewing.events.filter(
+                event_type=ViewingEvent.EventType.SCHEDULING_FAILED,
+                metadata__repair="0013",
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.customer,
+                title="Action required: choose fee resolution",
+            ).exists()
         )

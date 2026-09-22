@@ -412,6 +412,13 @@ class PartnerDashboardViewing {
     required this.canOperateToday,
     required this.createdAt,
     required this.updatedAt,
+    this.feeResolutionChoice = '',
+    this.feeResolutionLabel = '',
+    this.feeResolutionRequestedAt,
+    this.feeResolutionReference = '',
+    this.feeResolutionProcessedAt,
+    this.feeResolutionProcessed = false,
+    this.requiresFeeResolution = false,
     
     this.proposedDate,
     this.proposedTime,
@@ -449,6 +456,13 @@ class PartnerDashboardViewing {
   final String paymentReference;
   final String partnerResponseMessage;
   final String completionNotes;
+  final String feeResolutionChoice;
+  final String feeResolutionLabel;
+  final String? feeResolutionRequestedAt;
+  final String feeResolutionReference;
+  final String? feeResolutionProcessedAt;
+  final bool feeResolutionProcessed;
+  final bool requiresFeeResolution;
 
   final String? proposedDate;
   final String? proposedTime;
@@ -524,6 +538,25 @@ class PartnerDashboardViewing {
       partnerResponseMessage: _asString(
         json['partner_response_message'],
       ),
+      feeResolutionChoice: _asString(
+        json['fee_resolution_choice'],
+      ),
+      feeResolutionLabel: _asString(
+        json['fee_resolution_label'],
+      ),
+      feeResolutionRequestedAt: _asNullableString(
+        json['fee_resolution_requested_at'],
+      ),
+      feeResolutionReference: _asString(
+        json['fee_resolution_reference'],
+      ),
+      feeResolutionProcessedAt: _asNullableString(
+        json['fee_resolution_processed_at'],
+      ),
+      feeResolutionProcessed:
+          json['fee_resolution_processed'] == true,
+      requiresFeeResolution:
+          json['requires_fee_resolution'] == true,
       completionNotes: _asString(
         json['completion_notes'],
       ),
@@ -621,6 +654,17 @@ class PartnerDashboardViewing {
 
       case 'completed':
         return 'Completed';
+
+      case 'scheduling_failed':
+        return feeResolutionChoice.trim().isEmpty
+            ? 'Customer fee choice required'
+            : 'Fee resolution pending';
+
+      case 'credit_issued':
+        return 'Viewing credit issued';
+
+      case 'refunded':
+        return 'Refunded';
 
       case 'cancelled':
         return 'Cancelled';

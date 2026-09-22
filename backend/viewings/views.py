@@ -33,6 +33,7 @@ from .serializers import (
     ViewingEventSerializer,
     ViewingSerializer,
 )
+from .services import send_partner_decline_to_fee_resolution
 
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -311,6 +312,8 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 Viewing.Status.CONFIRMED,
                 Viewing.Status.COMPLETED,
                 Viewing.Status.DECLINED,
+                Viewing.Status.CREDIT_ISSUED,
+                Viewing.Status.REFUNDED,
             ],
         )
 
@@ -957,6 +960,7 @@ class ViewingViewSet(viewsets.ModelViewSet):
         allowed_statuses = {
             Viewing.Status.PAID_PENDING_PARTNER,
             Viewing.Status.RESCHEDULE_PROPOSED,
+            Viewing.Status.CONFIRMED,
         }
 
         if viewing.status not in allowed_statuses:
@@ -986,37 +990,20 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        viewing.status = Viewing.Status.DECLINED
-        viewing.partner_response_message = partner_message
-        viewing.partner_responded_at = timezone.now()
+        if viewing.operational_status != "idle":
+            raise ValidationError(
+                {
+                    "status": (
+                        "A viewing cannot be declined after live activity "
+                        "begins."
+                    )
+                }
+            )
 
-        viewing.proposed_date = None
-        viewing.proposed_time = None
-        viewing.confirmed_date = None
-        viewing.confirmed_time = None
-
-        viewing.save(
-            update_fields=[
-                "status",
-                "partner_response_message",
-                "partner_responded_at",
-                "proposed_date",
-                "proposed_time",
-                "confirmed_date",
-                "confirmed_time",
-                "updated_at",
-            ]
-        )
-
-        ActivityLog.objects.create(
+        send_partner_decline_to_fee_resolution(
+            viewing=viewing,
             actor=request.user,
-            action="viewing_partner_declined",
-            entity_type="Viewing",
-            entity_id=str(viewing.pk),
-            description=(
-                f"Partner declined viewing for "
-                f"{viewing.property.title}: {partner_message}"
-            ),
+            reason=partner_message,
         )
 
         serializer = self.get_serializer(viewing)

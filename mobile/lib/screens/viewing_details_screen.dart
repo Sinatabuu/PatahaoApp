@@ -998,8 +998,12 @@ class _FeeResolutionCard extends StatelessWidget {
                   : hasChoice
                   ? '$choiceLabel has been recorded for processing. The '
                       'Pata HAO team will update you when it is completed.'
-                  : 'Two proposed times were declined. Choose what should '
-                      'happen to your paid viewing fee.',
+                  : viewing.rescheduleDeclineCount >= 2
+                  ? 'Two proposed times were declined. Choose what should '
+                      'happen to your paid viewing fee.'
+                  : 'The partner declined this viewing. Your paid fee remains '
+                      'protected. Choose viewing credit or request a full '
+                      'refund.',
               style: const TextStyle(
                 color: Color(0xFF78350F),
                 height: 1.45,

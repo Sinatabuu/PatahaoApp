@@ -42,6 +42,8 @@ class _StaffViewingsScreenState extends State<StaffViewingsScreen> {
     _ViewingFilter(label: 'Processing', value: 'payment_processing'),
     _ViewingFilter(label: 'Awaiting Partner', value: 'paid_pending_partner'),
     _ViewingFilter(label: 'Reschedule', value: 'reschedule_proposed'),
+    _ViewingFilter(label: 'Fee Resolution', value: 'scheduling_failed'),
+    _ViewingFilter(label: 'Credit Issued', value: 'credit_issued'),
     _ViewingFilter(label: 'Confirmed', value: 'confirmed'),
     _ViewingFilter(label: 'Completed', value: 'completed'),
     _ViewingFilter(label: 'Cancelled', value: 'cancelled'),
@@ -276,6 +278,7 @@ class _StaffViewingsScreenState extends State<StaffViewingsScreen> {
       case 'payment_processing':
       case 'paid_pending_partner':
       case 'reschedule_proposed':
+      case 'scheduling_failed':
         return const Color(0xFFB45309);
 
       case 'cancelled':
@@ -285,6 +288,9 @@ class _StaffViewingsScreenState extends State<StaffViewingsScreen> {
 
       case 'refunded':
         return const Color(0xFF0369A1);
+
+      case 'credit_issued':
+        return const Color(0xFF15803D);
 
       case 'disputed':
         return const Color(0xFF7C3AED);

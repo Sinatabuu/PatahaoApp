@@ -271,8 +271,11 @@ class _PartnerViewingDetailScreenState
     await _runAction(
       confirmationTitle: 'Decline this viewing?',
       confirmationMessage:
-          'The customer will be informed that the viewing cannot proceed.',
-      successMessage: 'Viewing declined.',
+          'The customer will be informed. Their paid viewing fee will remain '
+          'protected until they choose viewing credit or a full refund. You '
+          'will not receive a payout for this viewing.',
+      successMessage:
+          'Viewing declined. The customer fee is protected for resolution.',
       dangerous: true,
       action: () {
         return PartnerDashboardService.instance.declineViewing(
@@ -916,6 +919,8 @@ class _ActionCard extends StatelessWidget {
     final cancelled = status == 'cancelled' || status == 'declined';
     final waitingForCustomer = status == 'reschedule_proposed';
     final schedulingFailed = status == 'scheduling_failed';
+    final refunded = status == 'refunded';
+    final creditIssued = status == 'credit_issued';
 
     return _SectionCard(
       title: 'Available actions',
@@ -941,11 +946,32 @@ class _ActionCard extends StatelessWidget {
             color: Color(0xFF6D28D9),
           )
         else if (schedulingFailed)
-          const _FinishedMessage(
+          _FinishedMessage(
             icon: Icons.event_busy_outlined,
-            message: 'Scheduling ended after two declined proposals. '
-                'Pata HAO will handle the customer fee choice.',
+            message: viewing.feeResolutionChoice == 'refund'
+                ? 'The customer requested a full refund. Pata HAO staff will '
+                    'process it. No partner payout will be made.'
+                : viewing.feeResolutionChoice == 'credit'
+                ? 'The customer requested transferable viewing credit. Pata '
+                    'HAO staff will issue it. No partner payout will be made.'
+                : 'The customer\'s ${viewing.formattedFee} remains protected. '
+                    'Waiting for the customer to choose viewing credit or a '
+                    'full refund. No partner payout will be made.',
             color: Color(0xFFB45309),
+          )
+        else if (refunded)
+          const _FinishedMessage(
+            icon: Icons.currency_exchange_outlined,
+            message: 'The customer fee was refunded. No partner payout was '
+                'made for this viewing.',
+            color: Color(0xFF0369A1),
+          )
+        else if (creditIssued)
+          const _FinishedMessage(
+            icon: Icons.card_giftcard_outlined,
+            message: 'The customer received transferable viewing credit. No '
+                'partner payout was made for this viewing.',
+            color: Color(0xFF15803D),
           )
         else if (awaitingPartner) ...[
           _PrimaryActionButton(
@@ -1198,6 +1224,12 @@ Color _bookingStatusColor(String status) {
 
     case 'scheduling_failed':
       return Colors.orange.shade900;
+
+    case 'credit_issued':
+      return Colors.green.shade800;
+
+    case 'refunded':
+      return Colors.blue.shade700;
 
     case 'cancelled':
     case 'declined':

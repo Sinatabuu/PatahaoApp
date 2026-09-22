@@ -103,6 +103,60 @@ class StaffViewingAdminService {
     return Map<String, dynamic>.from(decoded);
   }
 
+  Future<Map<String, dynamic>> processFeeResolution({
+    required int viewingId,
+    String providerReference = '',
+    String notes = '',
+  }) async {
+    if (viewingId <= 0) {
+      throw ArgumentError.value(
+        viewingId,
+        'viewingId',
+        'Viewing ID must be greater than zero.',
+      );
+    }
+
+    final uri = Uri.parse(
+      '${PropertyService.baseUrl}/api/admin/viewings/'
+      '$viewingId/process-fee-resolution/',
+    );
+
+    final response = await _sendAuthorizedRequest((accessToken) {
+      return http
+          .post(
+            uri,
+            headers: <String, String>{
+              ..._authorizationHeaders(accessToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(<String, String>{
+              'provider_reference': providerReference.trim(),
+              'notes': notes.trim(),
+            }),
+          )
+          .timeout(_timeout);
+    });
+
+    final dynamic decoded = _decodeResponse(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(
+          decoded,
+          fallback: 'Unable to process this fee resolution.',
+        ),
+      );
+    }
+
+    if (decoded is! Map) {
+      throw const FormatException(
+        'The fee-resolution response is invalid.',
+      );
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
   Future<http.Response> _sendAuthorizedRequest(
     Future<http.Response> Function(String accessToken) request,
   ) async {

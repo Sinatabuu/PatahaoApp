@@ -39,6 +39,24 @@ void main() {
       expect(viewing.friendlyStatus, 'Scheduling could not be agreed');
     });
 
+    test('requires the same protected fee choice after partner decline', () {
+      final viewing = Viewing.fromJson(<String, dynamic>{
+        'id': 44,
+        'customer': 2,
+        'property': 12,
+        'status': 'scheduling_failed',
+        'booking_status': 'scheduling_failed',
+        'partner_response_message': 'The seller withdrew access.',
+        'reschedule_decline_count': 0,
+        'requires_fee_resolution': true,
+      });
+
+      expect(viewing.requiresFeeResolution, isTrue);
+      expect(viewing.hasFeeResolutionChoice, isFalse);
+      expect(viewing.partnerResponseMessage, 'The seller withdrew access.');
+      expect(viewing.friendlyStatus, 'Scheduling could not be agreed');
+    });
+
     test('shows a recorded refund without asking again', () {
       final viewing = Viewing.fromJson(<String, dynamic>{
         'id': 41,

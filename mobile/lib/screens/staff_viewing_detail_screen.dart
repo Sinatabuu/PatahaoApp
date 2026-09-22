@@ -20,6 +20,7 @@ class StaffViewingDetailScreen extends StatefulWidget {
 class _StaffViewingDetailScreenState
     extends State<StaffViewingDetailScreen> {
   bool _isLoading = true;
+  bool _isProcessingResolution = false;
   String? _errorMessage;
 
   Map<String, dynamic>? _viewing;
@@ -150,6 +151,7 @@ class _StaffViewingDetailScreenState
       case 'payment_processing':
       case 'paid_pending_partner':
       case 'reschedule_proposed':
+      case 'scheduling_failed':
         return const Color(0xFFB45309);
 
       case 'cancelled':
@@ -159,6 +161,9 @@ class _StaffViewingDetailScreenState
 
       case 'refunded':
         return const Color(0xFF0369A1);
+
+      case 'credit_issued':
+        return const Color(0xFF15803D);
 
       case 'disputed':
         return const Color(0xFF7C3AED);
@@ -233,6 +238,165 @@ class _StaffViewingDetailScreenState
     }
 
     return '$date  $cleanTime';
+  }
+
+  Future<void> _processFeeResolution(
+    Map<String, dynamic> viewing,
+  ) async {
+    if (_isProcessingResolution) {
+      return;
+    }
+
+    final choice = _text(
+      viewing,
+      'fee_resolution_choice',
+    );
+
+    if (choice != 'refund' && choice != 'credit') {
+      return;
+    }
+
+    final referenceController = TextEditingController();
+    final notesController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final isRefund = choice == 'refund';
+
+    Map<String, String>? result;
+
+    try {
+      result = await showDialog<Map<String, String>>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(
+              isRefund
+                  ? 'Confirm full refund'
+                  : 'Issue viewing credit',
+            ),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      isRefund
+                          ? 'First complete the refund with the payment '
+                              'provider. Then enter its refund reference so '
+                              'Pata HAO records evidence of the returned money.'
+                          : 'This will create one transferable viewing credit '
+                              'for the customer using the paid fee.',
+                    ),
+                    if (isRefund) ...[
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: referenceController,
+                        decoration: const InputDecoration(
+                          labelText: 'Provider refund reference',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if ((value ?? '').trim().isEmpty) {
+                            return 'Enter the completed refund reference.';
+                          }
+                          return null;
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: notesController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Internal notes (optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (formKey.currentState?.validate() != true) {
+                    return;
+                  }
+
+                  Navigator.pop(
+                    dialogContext,
+                    <String, String>{
+                      'provider_reference': referenceController.text.trim(),
+                      'notes': notesController.text.trim(),
+                    },
+                  );
+                },
+                child: Text(
+                  isRefund ? 'Record Refund' : 'Issue Credit',
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      referenceController.dispose();
+      notesController.dispose();
+    }
+
+    if (result == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isProcessingResolution = true;
+    });
+
+    try {
+      await StaffViewingAdminService.instance.processFeeResolution(
+        viewingId: widget.viewingId,
+        providerReference: result['provider_reference'] ?? '',
+        notes: result['notes'] ?? '',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRefund
+                ? 'The refund was recorded and the customer was notified.'
+                : 'The viewing credit was issued and the customer was '
+                    'notified.',
+          ),
+        ),
+      );
+
+      await _loadViewing();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_cleanError(error)),
+          backgroundColor: const Color(0xFFB91C1C),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingResolution = false;
+        });
+      }
+    }
   }
 
   @override
@@ -353,6 +517,22 @@ class _StaffViewingDetailScreenState
 
     final partnerOutcomeSubmitted =
         viewing['partner_outcome_submitted'] == true;
+
+    final feeResolutionChoice = _text(
+      viewing,
+      'fee_resolution_choice',
+    );
+    final feeResolutionLabel = _text(
+      viewing,
+      'fee_resolution_label',
+    );
+    final feeResolutionProcessed =
+        viewing['fee_resolution_processed'] == true;
+    final showsFeeResolution =
+        status == 'scheduling_failed' ||
+        status == 'credit_issued' ||
+        status == 'refunded' ||
+        feeResolutionChoice.isNotEmpty;
 
     return RefreshIndicator(
       onRefresh: _loadViewing,
@@ -523,6 +703,85 @@ class _StaffViewingDetailScreenState
               ),
             ],
           ),
+
+          if (showsFeeResolution) ...[
+            const SizedBox(height: 12),
+            _DetailSection(
+              title: 'Fee Resolution',
+              icon: Icons.account_balance_wallet_outlined,
+              children: [
+                _DetailRow(
+                  label: 'Customer choice',
+                  value: feeResolutionChoice.isEmpty
+                      ? 'Awaiting customer choice'
+                      : _displayText(
+                          feeResolutionLabel,
+                          fallback: _statusLabel(
+                            feeResolutionChoice,
+                          ),
+                        ),
+                ),
+                _DetailRow(
+                  label: 'Requested',
+                  value: _formatDateTime(
+                    _text(
+                      viewing,
+                      'fee_resolution_requested_at',
+                    ),
+                  ),
+                ),
+                _DetailRow(
+                  label: 'Resolution status',
+                  value: feeResolutionProcessed
+                      ? 'Completed'
+                      : feeResolutionChoice.isEmpty
+                      ? 'Customer action required'
+                      : 'Staff action required',
+                ),
+                if (_text(
+                  viewing,
+                  'fee_resolution_reference',
+                ).isNotEmpty)
+                  _DetailRow(
+                    label: 'Resolution reference',
+                    value: _text(
+                      viewing,
+                      'fee_resolution_reference',
+                    ),
+                  ),
+                if (feeResolutionChoice.isNotEmpty &&
+                    !feeResolutionProcessed) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _isProcessingResolution
+                          ? null
+                          : () => _processFeeResolution(viewing),
+                      icon: _isProcessingResolution
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Icon(
+                              feeResolutionChoice == 'refund'
+                                  ? Icons.currency_exchange_outlined
+                                  : Icons.card_giftcard_outlined,
+                            ),
+                      label: Text(
+                        feeResolutionChoice == 'refund'
+                            ? 'Record Completed Refund'
+                            : 'Issue Viewing Credit',
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
 
           const SizedBox(height: 12),
 
