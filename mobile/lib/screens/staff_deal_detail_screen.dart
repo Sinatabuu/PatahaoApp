@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/services/property_service.dart';
 import 'package:mobile/services/staff_deal_admin_service.dart';
 
@@ -229,7 +230,7 @@ class _StaffDealDetailScreenState extends State<StaffDealDetailScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _text(Map<String, dynamic> data, String key) {

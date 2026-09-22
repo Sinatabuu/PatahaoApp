@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/property.dart';
 import 'package:mobile/services/partner_property_service.dart';
 import 'package:mobile/services/property_service.dart';
@@ -146,13 +147,9 @@ class _MyPropertiesScreenState extends State<MyPropertiesScreen> {
   }
 
   String _cleanError(Object? error) {
-    final message = error?.toString() ?? '';
-
-    if (message.startsWith('Exception: ')) {
-      return message.substring('Exception: '.length);
-    }
-
-    return message.isEmpty ? 'Unable to load your properties.' : message;
+    return error == null
+        ? 'Unable to load your properties.'
+        : AppErrorMessage.forError(error);
   }
 
   @override

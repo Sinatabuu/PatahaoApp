@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/deal.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
@@ -425,7 +426,7 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    snapshot.error.toString().replaceFirst('Exception: ', ''),
+                    AppErrorMessage.forError(snapshot.error),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.black54),
                   ),
@@ -624,7 +625,7 @@ class _ViewingCardState extends State<_ViewingCard> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {

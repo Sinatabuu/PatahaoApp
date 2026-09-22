@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/models/property.dart';
 import 'package:mobile/screens/partner_new_property_form_screen.dart';
@@ -287,7 +288,7 @@ class _PartnerPostPropertyScreenState extends State<PartnerPostPropertyScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _candidateTitle(Map<String, dynamic> candidate) {

@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/models/property.dart';
 import 'package:mobile/services/partner_mandate_service.dart';
@@ -1039,7 +1040,7 @@ class _PartnerPropertyMandateScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String? _validateRequiredText(String? value, String message) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:mobile/models/property.dart';
@@ -406,7 +407,7 @@ class _PartnerPropertyVideoScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+    return AppErrorMessage.forError(error);
   }
 
   void _showMessage(String message, {SnackBarAction? action}) {

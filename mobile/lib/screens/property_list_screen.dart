@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/property.dart';
 import 'package:mobile/screens/my_viewings_screen.dart';
 import 'package:mobile/screens/property_detail_screen.dart';
@@ -651,7 +652,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      snapshot.error.toString(),
+                      AppErrorMessage.forError(snapshot.error),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 20),
@@ -1249,7 +1250,7 @@ class _PropertyCardState extends State<_PropertyCard> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {

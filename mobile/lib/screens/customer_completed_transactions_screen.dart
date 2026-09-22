@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/customer_completed_transaction.dart';
 import 'package:mobile/services/deal_service.dart';
 
@@ -48,7 +49,7 @@ class _CustomerCompletedTransactionsScreenState
       }
 
       setState(() {
-        _errorMessage = error.toString().replaceFirst('Exception: ', '');
+        _errorMessage = AppErrorMessage.forError(error);
 
         _isLoading = false;
       });

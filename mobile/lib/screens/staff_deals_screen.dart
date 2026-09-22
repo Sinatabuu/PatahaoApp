@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/services/staff_deal_admin_service.dart';
 import 'package:mobile/screens/staff_deal_detail_screen.dart';
 
@@ -221,13 +222,7 @@ class _StaffDealsScreenState extends State<StaffDealsScreen> {
   }
 
   String _cleanError(Object error) {
-    final text = error.toString();
-
-    if (text.startsWith('Exception: ')) {
-      return text.substring('Exception: '.length);
-    }
-
-    return text;
+    return AppErrorMessage.forError(error);
   }
 
   String _statusLabel(String status) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/property.dart';
 import 'package:mobile/models/property_type_option.dart';
 import 'package:mobile/services/partner_property_service.dart';
@@ -118,13 +119,7 @@ class _PartnerNewPropertyFormScreenState
   }
 
   String _cleanError(Object error) {
-    return error
-        .toString()
-        .replaceFirst(
-          RegExp(r'^Exception:\s*'),
-          '',
-        )
-        .trim();
+    return AppErrorMessage.forError(error);
   }
 
   bool _candidateIsMine(Map<String, dynamic> candidate) {

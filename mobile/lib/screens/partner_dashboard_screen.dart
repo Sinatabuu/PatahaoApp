@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/partner_dashboard.dart';
 import 'package:mobile/models/partner_commission.dart';
 import 'package:mobile/services/partner_dashboard_service.dart';
@@ -982,7 +983,7 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
   }
 
   String _cleanError(Object? error) {
-    return error.toString().replaceFirst('Exception: ', '').trim();
+    return AppErrorMessage.forError(error);
   }
 }
 

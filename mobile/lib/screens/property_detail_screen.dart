@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../foundation/app_error_message.dart';
 import '../models/property.dart';
 import '../services/property_service.dart';
 import 'request_viewing_screen.dart';
@@ -1075,7 +1076,7 @@ class _PropertyDetailContent extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        error.toString().replaceFirst('Exception: ', ''),
+                        AppErrorMessage.forError(error),
                       ),
                     ),
                   );

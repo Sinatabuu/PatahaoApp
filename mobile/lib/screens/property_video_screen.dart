@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../foundation/app_error_message.dart';
+
 class PropertyVideoScreen extends StatefulWidget {
   const PropertyVideoScreen({
     super.key,
@@ -93,7 +95,7 @@ class _PropertyVideoScreenState extends State<PropertyVideoScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      snapshot.error.toString(),
+                      AppErrorMessage.forError(snapshot.error),
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white60,

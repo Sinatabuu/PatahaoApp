@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/screens/customer_completed_transactions_screen.dart';
 
 import '../services/auth_service.dart';
@@ -86,7 +87,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst('Exception: ', '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _initials(AuthUser user) {

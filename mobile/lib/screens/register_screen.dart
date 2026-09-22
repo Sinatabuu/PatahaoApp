@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -74,7 +75,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {

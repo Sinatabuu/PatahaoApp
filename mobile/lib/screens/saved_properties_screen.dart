@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import '../models/favorite.dart';
 import '../models/property.dart';
 import '../services/favorite_service.dart';
@@ -38,10 +39,7 @@ class _SavedPropertiesScreenState
   }
 
   String _cleanError(Object error) {
-    return error
-        .toString()
-        .replaceFirst('Exception: ', '')
-        .trim();
+    return AppErrorMessage.forError(error);
   }
 
   String? _propertyMediaUrl(Property property) {

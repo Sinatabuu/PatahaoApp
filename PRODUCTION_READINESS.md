@@ -16,6 +16,7 @@ complete.
 - [x] Environment-controlled mobile API origin
 - [x] HTTPS-only release API configuration
 - [x] Android release no longer uses the debug signing key
+- [x] Global mobile crash fallback and safe user-facing error messages
 - [ ] Select permanent Android application ID before Play Console enrollment
 - [ ] Provision stable Django hosting and managed PostgreSQL
 - [ ] Move public photos/videos to durable object storage and a CDN

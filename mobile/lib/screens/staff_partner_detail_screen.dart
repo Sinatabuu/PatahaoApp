@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/services/staff_partner_admin_service.dart';
 
@@ -57,7 +58,7 @@ class _StaffPartnerDetailScreenState extends State<StaffPartnerDetailScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _text(String key) {

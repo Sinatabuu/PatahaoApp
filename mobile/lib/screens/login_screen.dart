@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
@@ -59,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
 
 class AddPhoneNumberScreen extends StatefulWidget {
@@ -54,7 +55,7 @@ class _AddPhoneNumberScreenState extends State<AddPhoneNumberScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {

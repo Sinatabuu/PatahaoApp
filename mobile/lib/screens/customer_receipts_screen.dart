@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
 import '../services/payment_service.dart';
@@ -113,7 +114,7 @@ class _CustomerReceiptsScreenState extends State<CustomerReceiptsScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst('Exception: ', '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _formatDate(Payment payment) {

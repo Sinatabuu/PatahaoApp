@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
 import '../services/payment_service.dart';
@@ -336,7 +337,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst('Exception: ', '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String? _validatePhoneNumber(String? value) {

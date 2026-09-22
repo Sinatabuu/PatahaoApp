@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/services/staff_viewing_admin_service.dart';
 import 'package:mobile/screens/staff_viewing_detail_screen.dart';
@@ -221,7 +222,7 @@ class _StaffViewingsScreenState extends State<StaffViewingsScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   int _parseInt(dynamic value, {int fallback = 0}) {

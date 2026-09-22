@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/payment.dart';
 import '../models/property.dart';
 import '../models/viewing.dart';
@@ -112,7 +113,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {
@@ -156,7 +157,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
           backgroundColor: const Color(0xFFB91C1C),
         ),
       );
@@ -247,7 +248,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
           backgroundColor: const Color(0xFFB91C1C),
         ),
       );
@@ -333,7 +334,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
           backgroundColor: const Color(0xFFB91C1C),
         ),
       );
@@ -525,7 +526,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    snapshot.error.toString().replaceFirst('Exception: ', ''),
+                    AppErrorMessage.forError(snapshot.error),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.black54),
                   ),
@@ -719,9 +720,9 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
 
                       if (feedbackSnapshot.hasError) {
                         return _FeedbackErrorCard(
-                          message: feedbackSnapshot.error
-                              .toString()
-                              .replaceFirst('Exception: ', ''),
+                          message: AppErrorMessage.forError(
+                            feedbackSnapshot.error,
+                          ),
                           onRetry: () {
                             setState(_loadViewing);
                           },

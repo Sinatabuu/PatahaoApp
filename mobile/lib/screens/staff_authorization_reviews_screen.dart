@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/staff_authorization_review.dart';
 import 'package:mobile/services/staff_authorization_review_service.dart';
 
@@ -133,11 +134,7 @@ class _StaffAuthorizationReviewsScreenState
   }
 
   String _cleanError(Object error) {
-    return error
-        .toString()
-        .replaceFirst(RegExp(r'^Exception:\s*'), '')
-        .replaceFirst(RegExp(r'^FormatException:\s*'), '')
-        .trim();
+    return AppErrorMessage.forError(error);
   }
 
   @override

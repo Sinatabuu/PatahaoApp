@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/models/deal.dart';
 import 'package:mobile/services/deal_service.dart';
 
@@ -151,13 +152,7 @@ class _CustomerDealConfirmationScreenState
   }
 
   String _cleanError(Object error) {
-    return error
-        .toString()
-        .replaceFirst(
-          RegExp(r'^Exception:\s*'),
-          '',
-        )
-        .trim();
+    return AppErrorMessage.forError(error);
   }
 
   Widget _buildChoice({

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/screens/staff_deal_detail_screen.dart';
 import 'package:mobile/services/staff_commission_report_service.dart';
@@ -224,7 +225,7 @@ class _StaffCompletedDealsRevenueScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _money(String currency, String rawAmount) {

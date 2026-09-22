@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/services/staff_governance_service.dart';
 import 'package:mobile/screens/staff_governance_case_detail_screen.dart';
@@ -75,7 +76,7 @@ class _StaffGovernanceCasesScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   @override

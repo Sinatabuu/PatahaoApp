@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/models/partner_transaction_history.dart';
 import 'package:mobile/services/partner_transaction_history_service.dart';
@@ -81,7 +82,7 @@ class _PartnerTransactionHistoryScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   Future<void> _runSearch() async {

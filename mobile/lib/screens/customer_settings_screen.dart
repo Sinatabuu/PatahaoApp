@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../services/customer_settings_service.dart';
 
 
@@ -70,7 +71,7 @@ class _CustomerSettingsScreenState extends State<CustomerSettingsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {
@@ -350,10 +351,7 @@ class _CustomerSettingsScreenState extends State<CustomerSettingsScreen> {
 
           if (snapshot.hasError && _settings == null) {
             return _SettingsErrorView(
-              message: snapshot.error.toString().replaceFirst(
-                'Exception: ',
-                '',
-              ),
+              message: AppErrorMessage.forError(snapshot.error),
               onRetry: _refreshSettings,
             );
           }

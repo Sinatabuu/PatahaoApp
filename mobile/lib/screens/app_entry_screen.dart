@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/screens/partner_dashboard_screen.dart';
 import 'package:mobile/screens/property_list_screen.dart';
 import 'package:mobile/screens/welcome_screen.dart';
@@ -140,7 +141,7 @@ class _AppEntryScreenState extends State<AppEntryScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst('Exception: ', '');
+    return AppErrorMessage.forError(error);
   }
 
   Widget _buildAuthenticatedScreen() {

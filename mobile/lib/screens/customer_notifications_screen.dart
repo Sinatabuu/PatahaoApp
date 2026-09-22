@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/notification.dart';
 import '../services/notification_service.dart';
 
@@ -121,7 +122,7 @@ class _CustomerNotificationsScreenState
   }
 
   String _clean(Object error) {
-    return error.toString().replaceFirst('Exception: ', '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   IconData _icon(String type) {

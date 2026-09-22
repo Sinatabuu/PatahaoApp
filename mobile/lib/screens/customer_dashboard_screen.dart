@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/favorite.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
@@ -281,10 +282,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
           if (snapshot.hasError) {
             return _DashboardErrorView(
-              message: snapshot.error.toString().replaceFirst(
-                'Exception: ',
-                '',
-              ),
+              message: AppErrorMessage.forError(snapshot.error),
               onRetry: _refreshDashboard,
             );
           }

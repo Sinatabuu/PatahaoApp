@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/viewing.dart';
 import '../services/viewing_service.dart';
 import 'payment_screen.dart';
@@ -59,7 +60,7 @@ class _PendingPaymentsScreenState extends State<PendingPaymentsScreen> {
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst('Exception: ', '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   String _formatStatus(String status) {

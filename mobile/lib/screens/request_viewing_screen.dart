@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/property.dart';
 import '../models/viewing.dart';
 import '../services/viewing_service.dart';
@@ -125,7 +126,7 @@ class _RequestViewingScreenState extends State<RequestViewingScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(AppErrorMessage.forError(error)),
         ),
       );
     } finally {

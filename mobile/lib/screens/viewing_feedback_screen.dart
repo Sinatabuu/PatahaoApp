@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../foundation/app_error_message.dart';
 import '../models/viewing.dart';
 import '../models/viewing_feedback.dart';
 import '../services/viewing_service.dart';
@@ -116,7 +117,7 @@ class _ViewingFeedbackScreenState extends State<ViewingFeedbackScreen> {
       }
 
       setState(() {
-        _errorMessage = error.toString().replaceFirst('Exception: ', '');
+        _errorMessage = AppErrorMessage.forError(error);
       });
     } finally {
       if (mounted) {

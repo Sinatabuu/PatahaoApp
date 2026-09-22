@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:mobile/models/partner_property_photo.dart';
@@ -964,7 +965,7 @@ class _PartnerPropertyWorkspaceScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+    return AppErrorMessage.forError(error);
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/foundation/app_error_message.dart';
 
 import 'package:mobile/screens/staff_property_review_detail_screen.dart';
 import 'package:mobile/services/staff_property_review_service.dart';
@@ -98,7 +99,7 @@ class _StaffPropertyReviewQueueScreenState
   }
 
   String _cleanError(Object error) {
-    return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return AppErrorMessage.forError(error);
   }
 
   @override

@@ -104,3 +104,7 @@ jobs:
       - name: Run mobile tests
         working-directory: mobile
         run: flutter test
+
+      - name: Build Android debug APK
+        working-directory: mobile
+        run: flutter build apk --debug
