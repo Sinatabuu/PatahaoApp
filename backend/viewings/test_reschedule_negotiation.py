@@ -116,6 +116,16 @@ class CustomerRescheduleNegotiationTests(APITestCase):
         )
 
     def test_customer_can_accept_partner_reschedule(self):
+        action_notification = Notification.objects.create(
+            user=self.customer,
+            title="Action required: viewing time changed",
+            message="Review the revised viewing time.",
+            notification_type=Notification.TYPE_VIEWING,
+            viewing=self.viewing,
+            action_label="Review new viewing time",
+            requires_action=True,
+        )
+
         response = self._post_as_customer(
             "viewing-accept-reschedule",
         )
@@ -150,6 +160,9 @@ class CustomerRescheduleNegotiationTests(APITestCase):
                 title="Customer accepted viewing time",
             ).exists()
         )
+        action_notification.refresh_from_db()
+        self.assertFalse(action_notification.requires_action)
+        self.assertTrue(action_notification.is_read)
 
     def test_first_decline_requests_one_more_partner_proposal(self):
         response = self._post_as_customer(
@@ -201,6 +214,15 @@ class CustomerRescheduleNegotiationTests(APITestCase):
                 "updated_at",
             ]
         )
+        schedule_notification = Notification.objects.create(
+            user=self.customer,
+            title="Action required: viewing time changed",
+            message="Review the final revised viewing time.",
+            notification_type=Notification.TYPE_VIEWING,
+            viewing=self.viewing,
+            action_label="Review new viewing time",
+            requires_action=True,
+        )
 
         response = self._post_as_customer(
             "viewing-decline-reschedule",
@@ -233,6 +255,19 @@ class CustomerRescheduleNegotiationTests(APITestCase):
         self.assertTrue(
             self.viewing.events.filter(
                 event_type=ViewingEvent.EventType.SCHEDULING_FAILED,
+            ).exists()
+        )
+        schedule_notification.refresh_from_db()
+        self.assertFalse(schedule_notification.requires_action)
+        self.assertTrue(schedule_notification.is_read)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.customer,
+                viewing=self.viewing,
+                title="Action required: protect your viewing fee",
+                action_label="Choose credit or refund",
+                requires_action=True,
+                is_read=False,
             ).exists()
         )
 
@@ -298,6 +333,19 @@ class CustomerRescheduleNegotiationTests(APITestCase):
                 metadata__proposal_number=2,
             ).exists()
         )
+        notification = Notification.objects.get(
+            user=self.customer,
+            viewing=self.viewing,
+            title="Action required: viewing time changed",
+        )
+        self.assertEqual(
+            notification.action_label,
+            "Review new viewing time",
+        )
+        self.assertTrue(notification.requires_action)
+        self.assertFalse(notification.is_read)
+        self.assertIn("final revised-time proposal", notification.message)
+        self.assertIn("fee remains protected", notification.message)
 
     def test_customer_can_choose_refund_after_scheduling_fails(self):
         self.viewing.status = Viewing.Status.SCHEDULING_FAILED

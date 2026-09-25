@@ -51,3 +51,13 @@ class Notification(models.Model):
         blank=True,
         default="",
     )
+
+    viewing = models.ForeignKey(
+        "viewings.Viewing",
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+        null=True,
+        blank=True,
+    )
+
+    requires_action = models.BooleanField(default=False)

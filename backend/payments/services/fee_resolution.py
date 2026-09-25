@@ -265,11 +265,21 @@ def fulfill_viewing_fee_resolution(
         },
     )
 
+    Notification.objects.filter(
+        user=viewing.customer,
+        viewing=viewing,
+        requires_action=True,
+    ).update(
+        requires_action=False,
+        is_read=True,
+    )
+
     Notification.objects.create(
         user=viewing.customer,
         title=notification_title,
         message=notification_message,
         notification_type=Notification.TYPE_PAYMENT,
+        viewing=viewing,
     )
 
     ActivityLog.objects.create(

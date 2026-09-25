@@ -3,12 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:mobile/foundation/app_error_message.dart';
+import 'package:mobile/models/notification.dart';
 import 'package:mobile/models/property.dart';
+import 'package:mobile/models/viewing.dart';
+import 'package:mobile/screens/customer_notifications_screen.dart';
 import 'package:mobile/screens/my_viewings_screen.dart';
 import 'package:mobile/screens/property_detail_screen.dart';
+import 'package:mobile/screens/viewing_details_screen.dart';
+import 'package:mobile/services/notification_service.dart';
 import 'package:mobile/services/property_service.dart';
 import 'package:mobile/services/favorite_service.dart';
 import 'package:mobile/services/deal_service.dart';
+import 'package:mobile/services/viewing_service.dart';
+import 'package:mobile/widgets/customer_viewing_action_alert.dart';
 import '../models/property_type_option.dart';
 import '../widgets/pata_hao_network_image.dart';
 import 'package:mobile/screens/saved_properties_screen.dart';
@@ -24,8 +31,11 @@ class PropertyListScreen extends StatefulWidget {
   State<PropertyListScreen> createState() => _PropertyListScreenState();
 }
 
-class _PropertyListScreenState extends State<PropertyListScreen> {
+class _PropertyListScreenState extends State<PropertyListScreen>
+    with WidgetsBindingObserver {
   final PropertyService _propertyService = PropertyService();
+  final ViewingService _viewingService = ViewingService();
+  final NotificationService _notificationService = const NotificationService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -36,14 +46,18 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
   double? _maximumPrice;
   bool _verifiedOnly = false;
   bool _hasPendingViewingOutcome = false;
+  int _unreadNotificationCount = 0;
   bool _isLoadingMore = false;
   bool _hasNextPage = false;
   int _nextPage = 2;
   int _totalPropertyCount = 0;
   int _feedGeneration = 0;
   Timer? _searchDebounce;
+  Timer? _customerAlertTimer;
   List<Property> _properties = <Property>[];
   List<Property> _recentSuccesses = <Property>[];
+  List<Viewing> _urgentViewingActions = <Viewing>[];
+  final Set<String> _shownViewingActionPrompts = <String>{};
   late Future<PropertyFeedPage> _propertiesFuture;
   late Future<List<PropertyTypeOption>> _propertyTypesFuture;
 
@@ -51,23 +65,38 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
   void initState() {
     super.initState();
 
+    WidgetsBinding.instance.addObserver(this);
     _loadProperties();
     _loadPropertyTypes();
     _scrollController.addListener(_handleScroll);
 
     if (widget.onLogout != null) {
       _loadPendingViewingOutcome();
+      _loadCustomerAlerts();
+      _customerAlertTimer = Timer.periodic(
+        const Duration(seconds: 60),
+        (_) => _loadCustomerAlerts(),
+      );
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchDebounce?.cancel();
+    _customerAlertTimer?.cancel();
     _scrollController
       ..removeListener(_handleScroll)
       ..dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && widget.onLogout != null) {
+      _loadCustomerAlerts();
+    }
   }
 
   void _loadProperties() {
@@ -134,9 +163,99 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
     }
   }
 
+  Future<List<Viewing>> _loadViewingsSafely() async {
+    try {
+      return await _viewingService.getMyViewings();
+    } catch (error) {
+      debugPrint('CUSTOMER URGENT VIEWINGS ERROR: $error');
+      return <Viewing>[];
+    }
+  }
+
+  Future<List<AppNotification>> _loadNotificationsSafely() async {
+    try {
+      return await _notificationService.fetchNotifications();
+    } catch (error) {
+      debugPrint('CUSTOMER NOTIFICATIONS ERROR: $error');
+      return <AppNotification>[];
+    }
+  }
+
+  Future<void> _loadCustomerAlerts({bool showPrompt = true}) async {
+    if (widget.onLogout == null) {
+      return;
+    }
+
+    final results = await Future.wait<dynamic>([
+      _loadViewingsSafely(),
+      _loadNotificationsSafely(),
+    ]);
+
+    if (!mounted) {
+      return;
+    }
+
+    final viewings = results[0] as List<Viewing>;
+    final notifications = results[1] as List<AppNotification>;
+    final urgentViewings = viewings
+        .where(
+          (viewing) =>
+              viewing.canRespondToReschedule || viewing.requiresFeeResolution,
+        )
+        .toList(growable: false);
+
+    setState(() {
+      _urgentViewingActions = urgentViewings;
+      _unreadNotificationCount = notifications
+          .where((notification) => !notification.isRead)
+          .length;
+    });
+
+    if (showPrompt && urgentViewings.isNotEmpty) {
+      _scheduleViewingActionPrompt(urgentViewings.first);
+    }
+  }
+
+  String _viewingActionPromptKey(Viewing viewing) {
+    return <String>[
+      viewing.id.toString(),
+      viewing.effectiveBookingStatus,
+      viewing.proposedDate ?? '',
+      viewing.proposedTime ?? '',
+      viewing.rescheduleDeclineCount.toString(),
+    ].join(':');
+  }
+
+  void _scheduleViewingActionPrompt(Viewing viewing) {
+    final promptKey = _viewingActionPromptKey(viewing);
+
+    if (!_shownViewingActionPrompts.add(promptKey)) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+
+      final shouldReview = await showCustomerViewingActionDialog(
+        context,
+        viewing: viewing,
+      );
+
+      if (shouldReview && mounted) {
+        await _openViewingAction(viewing);
+      }
+    });
+  }
+
   Future<void> _refreshProperties() async {
     setState(_loadProperties);
-    await _propertiesFuture;
+    await Future.wait<dynamic>([
+      _propertiesFuture,
+      if (widget.onLogout != null) _loadPendingViewingOutcome(),
+      if (widget.onLogout != null) _loadCustomerAlerts(),
+    ]);
   }
 
   void _reloadProperties() {
@@ -263,6 +382,35 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
     }
 
     await _loadPendingViewingOutcome();
+    await _loadCustomerAlerts();
+  }
+
+  Future<void> _openViewingAction(Viewing viewing) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ViewingDetailsScreen(viewingId: viewing.id),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadCustomerAlerts();
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const CustomerNotificationsScreen(),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadCustomerAlerts(showPrompt: false);
   }
 
   void _openMyDeals() {
@@ -626,118 +774,153 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pata Hao')),
-      body: FutureBuilder<PropertyFeedPage>(
-        future: _propertiesFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      appBar: AppBar(
+        title: const Text('Pata Hao'),
+        actions: [
+          if (widget.onLogout != null)
+            IconButton(
+              tooltip: 'Notifications',
+              onPressed: _openNotifications,
+              icon: Badge(
+                isLabelVisible: _unreadNotificationCount > 0,
+                label: Text('$_unreadNotificationCount'),
+                child: const Icon(Icons.notifications_outlined),
+              ),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_urgentViewingActions.isNotEmpty)
+            CustomerViewingActionAlert(
+              viewing: _urgentViewingActions.first,
+              totalActions: _urgentViewingActions.length,
+              onReview: () => _openViewingAction(_urgentViewingActions.first),
+            ),
+          Expanded(
+            child: FutureBuilder<PropertyFeedPage>(
+              future: _propertiesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.cloud_off, size: 52),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Could not load properties',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.cloud_off, size: 52),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Could not load properties',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            AppErrorMessage.forError(snapshot.error),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              setState(_loadProperties);
+                            },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try Again'),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      AppErrorMessage.forError(snapshot.error),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        setState(_loadProperties);
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Try Again'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
+                  );
+                }
 
-          return RefreshIndicator(
-            onRefresh: _refreshProperties,
-            child: CustomScrollView(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _PropertySearchHeader(
-                    controller: _searchController,
-                    selectedListingType: _selectedListingType,
-                    activeFilterCount: _activeFilterCount,
-                    resultCount: _totalPropertyCount,
-                    onSearchChanged: _handleSearchChanged,
-                    onListingTypeChanged: (value) {
-                      setState(() {
-                        _selectedListingType = value;
-                        _loadProperties();
-                      });
-                    },
-                    onOpenFilters: _openFilters,
-                    onClearFilters: _clearFilters,
-                  ),
-                ),
-
-                if (_recentSuccesses.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: _RecentSuccessStrip(properties: _recentSuccesses),
-                  ),
-
-                if (_properties.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _NoMatchingProperties(onClearFilters: _clearFilters),
-                  ),
-
-                if (_properties.isNotEmpty)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        final property = _properties[index];
-
-                        return _PropertyCard(
-                          property: property,
-                          mediaUrl: _mediaUrl(property),
-                          location: _location(property),
-                          price: _formatPrice(property),
-                        );
-                      }, childCount: _properties.length),
-                    ),
-                  ),
-
-                if (_isLoadingMore)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: Center(
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(strokeWidth: 3),
+                return RefreshIndicator(
+                  onRefresh: _refreshProperties,
+                  child: CustomScrollView(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _PropertySearchHeader(
+                          controller: _searchController,
+                          selectedListingType: _selectedListingType,
+                          activeFilterCount: _activeFilterCount,
+                          resultCount: _totalPropertyCount,
+                          onSearchChanged: _handleSearchChanged,
+                          onListingTypeChanged: (value) {
+                            setState(() {
+                              _selectedListingType = value;
+                              _loadProperties();
+                            });
+                          },
+                          onOpenFilters: _openFilters,
+                          onClearFilters: _clearFilters,
                         ),
                       ),
-                    ),
+
+                      if (_recentSuccesses.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: _RecentSuccessStrip(
+                            properties: _recentSuccesses,
+                          ),
+                        ),
+
+                      if (_properties.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _NoMatchingProperties(
+                            onClearFilters: _clearFilters,
+                          ),
+                        ),
+
+                      if (_properties.isNotEmpty)
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                          sliver: SliverList(
+                            delegate: SliverChildBuilderDelegate((
+                              context,
+                              index,
+                            ) {
+                              final property = _properties[index];
+
+                              return _PropertyCard(
+                                property: property,
+                                mediaUrl: _mediaUrl(property),
+                                location: _location(property),
+                                price: _formatPrice(property),
+                              );
+                            }, childCount: _properties.length),
+                          ),
+                        ),
+
+                      if (_isLoadingMore)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 24),
+                            child: Center(
+                              child: SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-              ],
+                );
+              },
             ),
-          );
-        },
+          ),
+        ],
       ),
       bottomNavigationBar: widget.onLogout == null
           ? null
@@ -756,11 +939,15 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                 ),
                 NavigationDestination(
                   icon: Badge(
-                    isLabelVisible: _hasPendingViewingOutcome,
+                    isLabelVisible:
+                        _hasPendingViewingOutcome ||
+                        _urgentViewingActions.isNotEmpty,
                     child: const Icon(Icons.calendar_month_outlined),
                   ),
                   selectedIcon: Badge(
-                    isLabelVisible: _hasPendingViewingOutcome,
+                    isLabelVisible:
+                        _hasPendingViewingOutcome ||
+                        _urgentViewingActions.isNotEmpty,
                     child: const Icon(Icons.calendar_month),
                   ),
                   label: 'Viewings',
@@ -1248,11 +1435,9 @@ class _PropertyCardState extends State<_PropertyCard> {
         _property = previousProperty;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppErrorMessage.forError(error)),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppErrorMessage.forError(error))));
     } finally {
       if (mounted) {
         setState(() {

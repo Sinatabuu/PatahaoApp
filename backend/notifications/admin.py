@@ -8,12 +8,15 @@ class NotificationAdmin(admin.ModelAdmin):
         "title",
         "user",
         "notification_type",
+        "viewing",
+        "requires_action",
         "is_read",
         "created_at",
     )
 
     list_filter = (
         "notification_type",
+        "requires_action",
         "is_read",
         "created_at",
     )

@@ -8,7 +8,9 @@ class AppNotification {
     required this.isRead,
     required this.createdAt,
     required this.governanceCaseId,
+    required this.viewingId,
     required this.actionLabel,
+    required this.requiresAction,
   });
 
   final int id;
@@ -20,7 +22,9 @@ class AppNotification {
   final String createdAt;
 
   final int? governanceCaseId;
+  final int? viewingId;
   final String actionLabel;
+  final bool requiresAction;
 
   bool get hasGovernanceAction {
     return governanceCaseId != null &&
@@ -28,8 +32,13 @@ class AppNotification {
         actionLabel.trim().isNotEmpty;
   }
 
+  bool get hasViewingAction {
+    return viewingId != null && viewingId! > 0;
+  }
+
   factory AppNotification.fromJson(Map<String, dynamic> json) {
     final governanceCase = _toNullableInt(json['governance_case']);
+    final viewing = _toNullableInt(json['viewing']);
 
     return AppNotification(
       id: _toInt(json['id']),
@@ -40,7 +49,9 @@ class AppNotification {
       isRead: json['is_read'] == true,
       createdAt: json['created_at']?.toString() ?? '',
       governanceCaseId: governanceCase,
+      viewingId: viewing,
       actionLabel: json['action_label']?.toString().trim() ?? '',
+      requiresAction: json['requires_action'] == true,
     );
   }
 
@@ -54,7 +65,9 @@ class AppNotification {
       isRead: isRead ?? this.isRead,
       createdAt: createdAt,
       governanceCaseId: governanceCaseId,
+      viewingId: viewingId,
       actionLabel: actionLabel,
+      requiresAction: requiresAction,
     );
   }
 

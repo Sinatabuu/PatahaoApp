@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../foundation/app_error_message.dart';
 import '../models/notification.dart';
 import '../services/notification_service.dart';
+import 'viewing_details_screen.dart';
 
 class CustomerNotificationsScreen extends StatefulWidget {
   const CustomerNotificationsScreen({super.key});
@@ -64,6 +65,18 @@ class _CustomerNotificationsScreenState
     }
 
     if (!mounted) return;
+
+    if (item.hasViewingAction) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ViewingDetailsScreen(viewingId: item.viewingId!),
+        ),
+      );
+
+      if (!mounted) return;
+      await _refresh();
+      return;
+    }
 
     await showDialog<void>(
       context: context,
@@ -336,6 +349,34 @@ class _CustomerNotificationsScreenState
                                     height: 1.4,
                                   ),
                                 ),
+                                if (item.requiresAction ||
+                                    item.actionLabel.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: item.requiresAction
+                                          ? const Color(0xFFFFF3CD)
+                                          : const Color(0xFFE8F5E9),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      item.actionLabel.isNotEmpty
+                                          ? item.actionLabel
+                                          : 'Action required',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: item.requiresAction
+                                            ? const Color(0xFF92400E)
+                                            : const Color(0xFF166534),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 if (_date(item.createdAt).isNotEmpty) ...[
                                   const SizedBox(height: 9),
                                   Text(

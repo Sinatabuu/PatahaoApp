@@ -241,6 +241,60 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 notification_type=Notification.TYPE_VIEWING,
             )
 
+    def _notify_customer_of_reschedule(self, viewing):
+        proposal_number = viewing.reschedule_decline_count + 1
+        proposed_date = viewing.proposed_date.strftime("%d %B %Y")
+        proposed_time = viewing.proposed_time.strftime("%I:%M %p").lstrip(
+            "0"
+        )
+        proposal_note = (
+            "This is the final revised-time proposal."
+            if proposal_number >= Viewing.MAX_RESCHEDULE_DECLINES
+            else "The partner may make one final proposal if you decline."
+        )
+
+        Notification.objects.create(
+            user=viewing.customer,
+            title="Action required: viewing time changed",
+            message=(
+                f"The partner proposed {proposed_date} at {proposed_time} "
+                f"for {viewing.property.title}. Review the new time and "
+                f"accept or decline it. {proposal_note} Your paid viewing "
+                "fee remains protected."
+            ),
+            notification_type=Notification.TYPE_VIEWING,
+            viewing=viewing,
+            action_label="Review new viewing time",
+            requires_action=True,
+        )
+
+    def _resolve_customer_viewing_notifications(self, viewing):
+        Notification.objects.filter(
+            user=viewing.customer,
+            viewing=viewing,
+            requires_action=True,
+        ).update(
+            requires_action=False,
+            is_read=True,
+        )
+
+    def _notify_customer_of_fee_resolution(self, viewing):
+        Notification.objects.create(
+            user=viewing.customer,
+            title="Action required: protect your viewing fee",
+            message=(
+                f"A viewing time could not be agreed for "
+                f"{viewing.property.title}. Your KES "
+                f"{viewing.fee_amount:.2f} payment remains protected. "
+                "Open the viewing to choose transferable viewing credit "
+                "or a full refund."
+            ),
+            notification_type=Notification.TYPE_PAYMENT,
+            viewing=viewing,
+            action_label="Choose credit or refund",
+            requires_action=True,
+        )
+
     def _require_confirmed_viewing(self, viewing):
         if viewing.status != Viewing.Status.CONFIRMED:
             raise ValidationError(
@@ -565,6 +619,8 @@ class ViewingViewSet(viewsets.ModelViewSet):
             },
         )
 
+        self._notify_customer_of_reschedule(viewing)
+
         ActivityLog.objects.create(
             actor=request.user,
             action="viewing_reschedule_proposed",
@@ -635,6 +691,8 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 "updated_at",
             ]
         )
+
+        self._resolve_customer_viewing_notifications(viewing)
 
         viewing.record_event(
             event_type=(
@@ -739,6 +797,8 @@ class ViewingViewSet(viewsets.ModelViewSet):
             ]
         )
 
+        self._resolve_customer_viewing_notifications(viewing)
+
         event_metadata = {
             "decline_count": decline_count,
             "maximum_declines": Viewing.MAX_RESCHEDULE_DECLINES,
@@ -772,6 +832,7 @@ class ViewingViewSet(viewsets.ModelViewSet):
                     "decline_count": decline_count,
                 },
             )
+            self._notify_customer_of_fee_resolution(viewing)
 
         self._notify_assigned_partner(
             viewing,
@@ -871,6 +932,7 @@ class ViewingViewSet(viewsets.ModelViewSet):
                     }
                 )
 
+            self._resolve_customer_viewing_notifications(viewing)
             serializer = self.get_serializer(viewing)
 
             return Response(
@@ -890,6 +952,8 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 "updated_at",
             ]
         )
+
+        self._resolve_customer_viewing_notifications(viewing)
 
         choice_label = viewing.get_fee_resolution_choice_display()
 
@@ -913,6 +977,7 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 f"{viewing.property.title} was recorded for processing."
             ),
             notification_type=Notification.TYPE_PAYMENT,
+            viewing=viewing,
         )
 
         ActivityLog.objects.create(

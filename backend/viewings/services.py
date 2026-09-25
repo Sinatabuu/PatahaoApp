@@ -75,6 +75,15 @@ def send_partner_decline_to_fee_resolution(
         },
     )
 
+    Notification.objects.filter(
+        user=viewing.customer,
+        viewing=viewing,
+        requires_action=True,
+    ).update(
+        requires_action=False,
+        is_read=True,
+    )
+
     Notification.objects.create(
         user=viewing.customer,
         title="Action required: choose fee resolution",
@@ -85,7 +94,9 @@ def send_partner_decline_to_fee_resolution(
             "transferable viewing credit or a full refund."
         ),
         notification_type=Notification.TYPE_VIEWING,
+        viewing=viewing,
         action_label="Choose credit or refund",
+        requires_action=True,
     )
 
     ActivityLog.objects.create(
