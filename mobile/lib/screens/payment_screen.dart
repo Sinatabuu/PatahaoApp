@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import '../foundation/app_error_message.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
+import '../models/viewing_credit.dart';
 import '../services/payment_service.dart';
 import 'payment_success_screen.dart';
 
 class PaymentScreen extends StatefulWidget {
-  const PaymentScreen({super.key, required this.viewing});
+  const PaymentScreen({super.key, required this.viewing, this.paymentService});
 
   final Viewing viewing;
+  final PaymentService? paymentService;
 
   @override
   State<PaymentScreen> createState() {
@@ -23,10 +25,43 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   final TextEditingController _phoneController = TextEditingController();
 
-  final PaymentService _paymentService = PaymentService();
+  late final PaymentService _paymentService;
 
   bool _isProcessing = false;
+  bool _isLoadingCredit = true;
+  bool _useViewingCredit = false;
   String _paymentMessage = '';
+  String _creditError = '';
+  ViewingCreditBalance? _creditBalance;
+  Payment? _existingPayment;
+
+  double get _availableCredit => _creditBalance?.availableAmount ?? 0;
+
+  double get _creditToApply {
+    if (_existingPayment != null) {
+      return _existingPayment!.creditAppliedAmount;
+    }
+
+    if (!_useViewingCredit || _availableCredit <= 0) {
+      return 0;
+    }
+
+    return _availableCredit < widget.viewing.feeAmount
+        ? _availableCredit
+        : widget.viewing.feeAmount;
+  }
+
+  double get _cashDue =>
+      _existingPayment?.cashAmount ?? widget.viewing.feeAmount - _creditToApply;
+
+  bool get _requiresMpesa => _cashDue > 0.001;
+
+  @override
+  void initState() {
+    super.initState();
+    _paymentService = widget.paymentService ?? PaymentService();
+    _loadViewingCredit();
+  }
 
   @override
   void dispose() {
@@ -47,14 +82,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     setState(() {
       _isProcessing = true;
-      _paymentMessage = 'Creating your secure M-Pesa payment...';
+      _paymentMessage = _existingPayment != null
+          ? 'Resuming your protected viewing payment...'
+          : _useViewingCredit
+          ? 'Applying your protected viewing credit...'
+          : 'Creating your secure M-Pesa payment...';
     });
 
     try {
-      final Payment createdPayment = await _paymentService.createPayment(
-        viewingId: widget.viewing.id,
-        phoneNumber: _phoneController.text.trim(),
-      );
+      final Payment createdPayment =
+          _existingPayment ??
+          await _paymentService.createPayment(
+            viewingId: widget.viewing.id,
+            phoneNumber: _phoneController.text.trim(),
+            useViewingCredit: _useViewingCredit,
+          );
+
+      if (mounted && _existingPayment == null) {
+        setState(() {
+          _existingPayment = createdPayment;
+          _useViewingCredit = createdPayment.usedViewingCredit;
+        });
+      }
 
       final createdStatus = createdPayment.status.trim().toLowerCase();
 
@@ -65,6 +114,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
        * an old completed payment. We do not pretend that a new STK
        * Push occurred.
        */
+      if ((createdStatus == 'successful' || createdStatus == 'paid') &&
+          createdPayment.fullyCoveredByCredit) {
+        await _openPaymentSuccess(createdPayment);
+        return;
+      }
+
       if (createdStatus == 'successful' || createdStatus == 'paid') {
         throw Exception(
           'This viewing already has a completed payment. '
@@ -72,9 +127,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         );
       }
 
-      if (createdStatus == 'failed' ||
-          createdStatus == 'cancelled' ||
-          createdStatus == 'expired') {
+      if (createdStatus == 'cancelled' || createdStatus == 'expired') {
         throw Exception('The payment record could not be prepared for M-Pesa.');
       }
 
@@ -83,7 +136,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
 
       setState(() {
-        _paymentMessage = 'Sending the M-Pesa request to your phone...';
+        _paymentMessage = createdPayment.usedViewingCredit
+            ? 'Credit applied. Sending KES '
+                  '${createdPayment.cashAmount.toStringAsFixed(0)} '
+                  'M-Pesa request to your phone...'
+            : 'Sending the M-Pesa request to your phone...';
       });
 
       final Payment initiatedPayment = await _paymentService
@@ -154,32 +211,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
            * Fetch the official viewing receipt after the backend
            * has received and processed the Safaricom callback.
            */
-          Payment confirmedPayment = currentPayment;
-
-          try {
-            confirmedPayment = await _paymentService.getViewingReceipt(
-              viewingId: widget.viewing.id,
-            );
-          } catch (_) {
-            /*
-             * The payment status is already successful.
-             * If the separate receipt endpoint is briefly delayed,
-             * use the successful payment response.
-             */
-          }
-
-          if (!mounted) {
-            return;
-          }
-
-          await Navigator.of(context).pushReplacement(
-            MaterialPageRoute<void>(
-              builder: (_) => PaymentSuccessScreen(
-                viewing: widget.viewing,
-                payment: confirmedPayment,
-              ),
-            ),
-          );
+          await _openPaymentSuccess(currentPayment);
 
           return;
         }
@@ -253,10 +285,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
     });
 
     try {
-      final createdPayment = await _paymentService.createPayment(
-        viewingId: widget.viewing.id,
-        phoneNumber: _phoneController.text.trim(),
-      );
+      final createdPayment =
+          _existingPayment ??
+          await _paymentService.createPayment(
+            viewingId: widget.viewing.id,
+            phoneNumber: _phoneController.text.trim(),
+            useViewingCredit: _useViewingCredit,
+          );
+
+      if (mounted && _existingPayment == null) {
+        setState(() {
+          _existingPayment = createdPayment;
+          _useViewingCredit = createdPayment.usedViewingCredit;
+        });
+      }
+
+      if (createdPayment.isSuccessful && createdPayment.fullyCoveredByCredit) {
+        await _openPaymentSuccess(createdPayment);
+        return;
+      }
 
       if (!mounted) {
         return;
@@ -266,33 +313,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _paymentMessage = 'Completing the development payment...';
       });
 
-      final completedPayment =
-          await _paymentService.completeDevelopmentPayment(
-            paymentId: createdPayment.id,
-          );
-
-      Payment confirmedPayment = completedPayment;
-
-      try {
-        confirmedPayment = await _paymentService.getViewingReceipt(
-          viewingId: widget.viewing.id,
-        );
-      } catch (_) {
-        // The completed payment response is safe to display as a receipt.
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      await Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => PaymentSuccessScreen(
-            viewing: widget.viewing,
-            payment: confirmedPayment,
-          ),
-        ),
+      final completedPayment = await _paymentService.completeDevelopmentPayment(
+        paymentId: createdPayment.id,
       );
+
+      await _openPaymentSuccess(completedPayment);
     } catch (error) {
       if (!mounted) {
         return;
@@ -316,6 +341,74 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
     }
   }
+
+  Future<void> _loadViewingCredit() async {
+    try {
+      Payment? existingPayment;
+      final viewingStatus = widget.viewing.status.trim().toLowerCase();
+
+      if (viewingStatus == 'payment_processing' ||
+          viewingStatus == 'payment_failed') {
+        existingPayment = await _paymentService.fetchViewingPayment(
+          viewingId: widget.viewing.id,
+        );
+      }
+
+      final balance = await _paymentService.fetchViewingCreditBalance();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (existingPayment != null &&
+          existingPayment.phoneNumber.trim().isNotEmpty) {
+        _phoneController.text = existingPayment.phoneNumber;
+      }
+
+      setState(() {
+        _existingPayment = existingPayment;
+        _creditBalance = balance;
+        _useViewingCredit = existingPayment?.usedViewingCredit ?? false;
+        _creditError = '';
+        _isLoadingCredit = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _creditError = _cleanError(error);
+        _isLoadingCredit = false;
+      });
+    }
+  }
+
+  Future<void> _openPaymentSuccess(Payment payment) async {
+    Payment confirmedPayment = payment;
+
+    try {
+      confirmedPayment = await _paymentService.getViewingReceipt(
+        viewingId: widget.viewing.id,
+      );
+    } catch (_) {
+      // A successful payment response is itself a valid receipt fallback.
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => PaymentSuccessScreen(
+          viewing: widget.viewing,
+          payment: confirmedPayment,
+        ),
+      ),
+    );
+  }
+
   String _paymentFailureMessage(Payment payment) {
     final failureReason = payment.failureReason.trim();
 
@@ -341,6 +434,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   String? _validatePhoneNumber(String? value) {
+    if (!_requiresMpesa) {
+      return null;
+    }
+
     if (value == null || value.trim().isEmpty) {
       return 'Enter your M-Pesa phone number.';
     }
@@ -365,10 +462,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final creditToApply = _creditToApply;
+    final cashDue = _cashDue;
     final paymentButtonText = _isProcessing
-        ? 'Waiting for M-Pesa...'
-        : 'Pay KES '
-              '${widget.viewing.feeAmount.toStringAsFixed(0)}';
+        ? (_requiresMpesa ? 'Waiting for M-Pesa...' : 'Applying Credit...')
+        : _existingPayment != null && _requiresMpesa
+        ? 'Resume M-Pesa · KES ${cashDue.toStringAsFixed(0)}'
+        : _useViewingCredit && !_requiresMpesa
+        ? 'Use KES ${creditToApply.toStringAsFixed(0)} Credit'
+        : _useViewingCredit
+        ? 'Use KES ${creditToApply.toStringAsFixed(0)} + '
+              'Pay KES ${cashDue.toStringAsFixed(0)}'
+        : 'Pay KES ${widget.viewing.feeAmount.toStringAsFixed(0)}';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Viewing Payment')),
@@ -423,29 +528,134 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'M-Pesa phone number',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _phoneController,
-                  enabled: !_isProcessing,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    hintText: '0712345678',
-                    prefixIcon: Icon(Icons.phone_android),
-                    border: OutlineInputBorder(),
+                if (_isLoadingCredit)
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(18),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text('Checking your viewing credit...'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (_creditBalance?.hasCredit == true ||
+                    _existingPayment?.usedViewingCredit == true)
+                  Card(
+                    color: const Color(0xFFF0FDF4),
+                    child: SwitchListTile.adaptive(
+                      value: _useViewingCredit,
+                      onChanged: _isProcessing || _existingPayment != null
+                          ? null
+                          : (value) {
+                              setState(() {
+                                _useViewingCredit = value;
+                              });
+                            },
+                      secondary: const Icon(
+                        Icons.account_balance_wallet_outlined,
+                        color: Color(0xFF166534),
+                      ),
+                      title: Text(
+                        _existingPayment?.usedViewingCredit == true
+                            ? 'Viewing credit already applied '
+                                  '(KES ${creditToApply.toStringAsFixed(0)})'
+                            : 'Use viewing credit '
+                                  '(KES ${_availableCredit.toStringAsFixed(0)} '
+                                  'available)',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          _existingPayment?.usedViewingCredit == true
+                              ? 'This credit is protected in this payment. '
+                                    'KES ${_availableCredit.toStringAsFixed(0)} '
+                                    'remains available.'
+                              : _useViewingCredit
+                              ? 'KES ${creditToApply.toStringAsFixed(0)} will '
+                                    'be used. KES '
+                                    '${(_availableCredit - creditToApply).toStringAsFixed(0)} '
+                                    'will remain.'
+                              : 'Your credit will stay available for a future '
+                                    'viewing.',
+                        ),
+                      ),
+                    ),
+                  )
+                else if (_creditError.isNotEmpty)
+                  Card(
+                    color: const Color(0xFFFFFBEB),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'We could not check your viewing credit.',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'You can continue with M-Pesa or try checking '
+                            'again.',
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            onPressed: _isProcessing
+                                ? null
+                                : () {
+                                    setState(() {
+                                      _isLoadingCredit = true;
+                                      _creditError = '';
+                                    });
+                                    _loadViewingCredit();
+                                  },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Check Again'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  validator: _validatePhoneNumber,
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'An M-Pesa payment request will be sent '
-                  'to this phone. Enter your M-Pesa PIN on '
-                  'the phone to complete payment.',
-                  style: TextStyle(color: Colors.black54, height: 1.4),
-                ),
+                if (_requiresMpesa) ...[
+                  const SizedBox(height: 24),
+                  const Text(
+                    'M-Pesa phone number',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _phoneController,
+                    enabled: !_isProcessing,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      hintText: '0712345678',
+                      prefixIcon: Icon(Icons.phone_android),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: _validatePhoneNumber,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    _useViewingCredit
+                        ? 'After applying your credit, an M-Pesa request for '
+                              'KES ${cashDue.toStringAsFixed(0)} will be sent '
+                              'to this phone.'
+                        : 'An M-Pesa payment request will be sent to this '
+                              'phone. Enter your M-Pesa PIN on the phone to '
+                              'complete payment.',
+                    style: const TextStyle(color: Colors.black54, height: 1.4),
+                  ),
+                ],
                 if (_paymentMessage.isNotEmpty) ...[
                   const SizedBox(height: 20),
                   Container(
@@ -482,21 +692,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 SizedBox(
                   height: 56,
                   child: FilledButton.icon(
-                    onPressed: _isProcessing ? null : _pay,
+                    onPressed: _isProcessing || _isLoadingCredit ? null : _pay,
                     icon: _isProcessing
                         ? const SizedBox(
                             width: 22,
                             height: 22,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.lock_outline),
+                        : Icon(
+                            _useViewingCredit
+                                ? Icons.account_balance_wallet_outlined
+                                : Icons.lock_outline,
+                          ),
                     label: Text(
                       paymentButtonText,
                       style: const TextStyle(fontSize: 18),
                     ),
                   ),
                 ),
-                if (kDebugMode) ...[
+                if (kDebugMode && _requiresMpesa) ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: _isProcessing
@@ -509,10 +723,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   const Text(
                     'Development only — no M-Pesa request is sent.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
                   ),
                 ],
               ],

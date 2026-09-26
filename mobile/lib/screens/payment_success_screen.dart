@@ -25,6 +25,29 @@ class PaymentSuccessScreen extends StatelessWidget {
     return paymentSucceeded ? 'Viewing Confirmed' : 'Payment Pending';
   }
 
+  String get confirmationMessage {
+    if (!paymentSucceeded) {
+      return 'Your payment is still being processed. '
+          'The viewing will be confirmed after payment succeeds.';
+    }
+
+    if (payment.fullyCoveredByCredit) {
+      return 'Your ${payment.currency} '
+          '${payment.amount.toStringAsFixed(0)} viewing fee was covered by '
+          'viewing credit. No M-Pesa payment was needed.';
+    }
+
+    if (payment.usedViewingCredit) {
+      return '${payment.currency} '
+          '${payment.creditAppliedAmount.toStringAsFixed(0)} viewing credit '
+          'was applied and ${payment.currency} '
+          '${payment.cashAmount.toStringAsFixed(0)} was paid by M-Pesa.';
+    }
+
+    return 'Your ${payment.currency} '
+        '${payment.amount.toStringAsFixed(0)} viewing fee was received.';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -58,11 +81,7 @@ class PaymentSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                paymentSucceeded
-                    ? 'Your ${payment.currency} '
-                          '${payment.amount.toStringAsFixed(0)} viewing fee was received.'
-                    : 'Your payment is still being processed. '
-                          'The viewing will be confirmed after payment succeeds.',
+                confirmationMessage,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 16, color: Colors.black54),
               ),
@@ -85,10 +104,24 @@ class PaymentSuccessScreen extends StatelessWidget {
                         value: viewing.requestedTime,
                       ),
                       _ReceiptRow(
-                        label: 'Amount',
+                        label: 'Total viewing fee',
                         value:
                             '${payment.currency} ${payment.amount.toStringAsFixed(2)}',
                       ),
+                      if (payment.usedViewingCredit)
+                        _ReceiptRow(
+                          label: 'Viewing credit applied',
+                          value:
+                              '${payment.currency} '
+                              '${payment.creditAppliedAmount.toStringAsFixed(2)}',
+                        ),
+                      if (payment.usedViewingCredit)
+                        _ReceiptRow(
+                          label: 'M-Pesa amount',
+                          value:
+                              '${payment.currency} '
+                              '${payment.cashAmount.toStringAsFixed(2)}',
+                        ),
                       _ReceiptRow(
                         label: 'Payment status',
                         value: payment.status.toUpperCase(),

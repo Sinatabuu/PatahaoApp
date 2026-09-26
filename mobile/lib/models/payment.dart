@@ -4,6 +4,8 @@ class Payment {
     required this.viewingId,
     required this.payerId,
     required this.amount,
+    required this.creditAppliedAmount,
+    required this.cashAmount,
     required this.currency,
     required this.phoneNumber,
     required this.paymentMethod,
@@ -17,6 +19,7 @@ class Payment {
     required this.paidAt,
     required this.createdAt,
     required this.updatedAt,
+    required this.creditRedemptions,
     this.refundReference = '',
     this.refundNotes = '',
     this.refundedAt = '',
@@ -27,6 +30,8 @@ class Payment {
   final int viewingId;
   final int payerId;
   final double amount;
+  final double creditAppliedAmount;
+  final double cashAmount;
   final String currency;
   final String phoneNumber;
   final String paymentMethod;
@@ -54,13 +59,22 @@ class Payment {
 
   final String createdAt;
   final String updatedAt;
+  final List<PaymentCreditRedemption> creditRedemptions;
 
   factory Payment.fromJson(Map<String, dynamic> json) {
+    final amount = _parseDouble(json['amount']);
+    final creditAppliedAmount = _parseDouble(json['credit_applied_amount']);
+    final cashAmount = json.containsKey('cash_amount')
+        ? _parseDouble(json['cash_amount'])
+        : amount - creditAppliedAmount;
+
     return Payment(
       id: _parseInt(json['id']),
       viewingId: _parseInt(json['viewing']),
       payerId: _parseInt(json['payer']),
-      amount: _parseDouble(json['amount']),
+      amount: amount,
+      creditAppliedAmount: creditAppliedAmount,
+      cashAmount: cashAmount,
       currency: json['currency']?.toString() ?? 'KES',
       phoneNumber: json['phone_number']?.toString() ?? '',
       paymentMethod:
@@ -76,6 +90,7 @@ class Payment {
       paidAt: json['paid_at']?.toString() ?? '',
       createdAt: json['created_at']?.toString() ?? '',
       updatedAt: json['updated_at']?.toString() ?? '',
+      creditRedemptions: _parseCreditRedemptions(json['credit_redemptions']),
       refundReference: json['refund_reference']?.toString() ?? '',
       refundNotes: json['refund_notes']?.toString() ?? '',
       refundedAt: json['refunded_at']?.toString() ?? '',
@@ -95,6 +110,10 @@ class Payment {
   bool get isRefunded {
     return status.trim().toLowerCase() == 'refunded';
   }
+
+  bool get usedViewingCredit => creditAppliedAmount > 0;
+
+  bool get fullyCoveredByCredit => usedViewingCredit && cashAmount <= 0;
 
   bool get hasReceipt {
     return isSuccessful || isRefunded;
@@ -150,5 +169,39 @@ class Payment {
     }
 
     return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static List<PaymentCreditRedemption> _parseCreditRedemptions(dynamic value) {
+    if (value is! List) {
+      return const <PaymentCreditRedemption>[];
+    }
+
+    return value
+        .whereType<Map>()
+        .map(
+          (item) =>
+              PaymentCreditRedemption.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .toList(growable: false);
+  }
+}
+
+class PaymentCreditRedemption {
+  const PaymentCreditRedemption({
+    required this.reference,
+    required this.creditReference,
+    required this.amount,
+  });
+
+  final String reference;
+  final String creditReference;
+  final double amount;
+
+  factory PaymentCreditRedemption.fromJson(Map<String, dynamic> json) {
+    return PaymentCreditRedemption(
+      reference: json['reference']?.toString() ?? '',
+      creditReference: json['credit_reference']?.toString() ?? '',
+      amount: Payment._parseDouble(json['amount']),
+    );
   }
 }

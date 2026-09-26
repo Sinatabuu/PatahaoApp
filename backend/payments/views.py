@@ -4,17 +4,24 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 
+from core.models import ActivityLog
 from viewings.models import Viewing, ViewingEvent
 from notifications.models import Notification
 
-from .models import Payment, PaymentAttempt
-from .serializers import PaymentSerializer
+from .models import (
+    Payment,
+    PaymentAttempt,
+    ViewingCredit,
+    ViewingCreditRedemption,
+)
+from .serializers import PaymentSerializer, ViewingCreditSerializer
 from .services import MpesaAPIError, MpesaClient
 
 
@@ -86,7 +93,7 @@ def _legacy_payment_attempt(payment):
     defaults = {
         "status": PaymentAttempt.Status.PROCESSING,
         "merchant_request_id": payment.merchant_request_id,
-        "requested_amount": payment.amount,
+        "requested_amount": payment.cash_amount,
         "phone_number": payment.phone_number,
         "provider_response_code": payment.provider_response_code,
         "provider_response_description": (
@@ -241,6 +248,10 @@ def _complete_payment(
                     payment.provider_receipt_number
                 ),
                 "amount": str(payment.amount),
+                "credit_applied_amount": str(
+                    payment.credit_applied_amount
+                ),
+                "cash_amount": str(payment.cash_amount),
                 "currency": payment.currency,
             },
         )
@@ -281,6 +292,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 "viewing",
                 "viewing__property",
             )
+            .prefetch_related("credit_redemptions__credit")
             .order_by("-created_at")
         )
 
@@ -302,6 +314,30 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
+        raw_viewing_id = request.data.get("viewing")
+
+        try:
+            viewing_id = int(raw_viewing_id)
+        except (TypeError, ValueError):
+            viewing_id = None
+
+        if viewing_id is not None:
+            existing_payment = (
+                Payment.objects.select_for_update()
+                .prefetch_related("credit_redemptions__credit")
+                .filter(
+                    viewing_id=viewing_id,
+                    payer=request.user,
+                )
+                .first()
+            )
+
+            if existing_payment is not None:
+                return Response(
+                    self.get_serializer(existing_payment).data,
+                    status=status.HTTP_200_OK,
+                )
+
         serializer = self.get_serializer(
             data=request.data,
         )
@@ -346,15 +382,79 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            payment = serializer.save(
-                payer=request.user,
-                viewing=viewing,
-                amount=viewing.fee_amount,
-                currency="KES",
-                purpose="viewing_fee",
-                status=Payment.Status.PENDING,
+        validated_data = dict(serializer.validated_data)
+        use_viewing_credit = validated_data.pop(
+            "use_viewing_credit",
+            False,
+        )
+        phone_number = validated_data.get("phone_number", "")
+        credit_amount = Decimal("0.00")
+        credits = []
+
+        if use_viewing_credit:
+            credits = list(
+                ViewingCredit.objects.select_for_update()
+                .filter(
+                    customer=request.user,
+                    currency="KES",
+                    status=ViewingCredit.Status.ACTIVE,
+                    remaining_amount__gt=Decimal("0.00"),
+                )
+                .order_by("issued_at", "id")
             )
+            available_credit = sum(
+                (credit.remaining_amount for credit in credits),
+                Decimal("0.00"),
+            )
+
+            if available_credit <= Decimal("0.00"):
+                return Response(
+                    {
+                        "detail": (
+                            "You do not have available viewing credit."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            credit_amount = min(
+                viewing.fee_amount,
+                available_credit,
+            )
+
+        cash_amount = viewing.fee_amount - credit_amount
+
+        if cash_amount > Decimal("0.00") and not phone_number:
+            return Response(
+                {
+                    "phone_number": [
+                        "Enter an M-Pesa phone number for the remaining "
+                        f"KES {cash_amount:.2f}."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payment_method = (
+            Payment.PaymentMethod.VIEWING_CREDIT
+            if cash_amount == Decimal("0.00")
+            else Payment.PaymentMethod.MPESA
+        )
+
+        try:
+            with transaction.atomic():
+                payment = Payment.objects.create(
+                    payer=request.user,
+                    viewing=viewing,
+                    amount=viewing.fee_amount,
+                    credit_applied_amount=credit_amount,
+                    cash_amount=cash_amount,
+                    currency="KES",
+                    phone_number=phone_number,
+                    payment_method=payment_method,
+                    purpose="viewing_fee",
+                    status=Payment.Status.PENDING,
+                )
 
         except IntegrityError:
             existing = (
@@ -378,25 +478,141 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
             raise
 
-        viewing.status = (
-            Viewing.Status.PAYMENT_PROCESSING
-        )
+        remaining_to_apply = credit_amount
 
-        viewing.payment_reference = (
-            payment.payment_reference
-        )
+        for credit in credits:
+            if remaining_to_apply <= Decimal("0.00"):
+                break
 
-        viewing.save(
-            update_fields=[
-                "status",
-                "payment_reference",
-                "updated_at",
-            ]
-        )
+            applied_amount = min(
+                credit.remaining_amount,
+                remaining_to_apply,
+            )
+            credit.remaining_amount -= applied_amount
+
+            if credit.remaining_amount == Decimal("0.00"):
+                credit.status = ViewingCredit.Status.CONSUMED
+
+            credit.save(
+                update_fields=[
+                    "remaining_amount",
+                    "status",
+                    "updated_at",
+                ]
+            )
+            ViewingCreditRedemption.objects.create(
+                credit=credit,
+                payment=payment,
+                viewing=viewing,
+                amount=applied_amount,
+            )
+            remaining_to_apply -= applied_amount
+
+        if remaining_to_apply != Decimal("0.00"):
+            raise IntegrityError(
+                "The viewing credit balance changed before it could be used."
+            )
+
+        if credit_amount > Decimal("0.00"):
+            remaining_credit = (
+                ViewingCredit.objects.filter(
+                    customer=request.user,
+                    currency="KES",
+                    status=ViewingCredit.Status.ACTIVE,
+                    remaining_amount__gt=Decimal("0.00"),
+                ).aggregate(total=Sum("remaining_amount"))["total"]
+                or Decimal("0.00")
+            )
+            payment_instruction = (
+                "No M-Pesa charge is needed."
+                if cash_amount == Decimal("0.00")
+                else (
+                    f"Complete the remaining KES {cash_amount:.2f} "
+                    "through M-Pesa."
+                )
+            )
+            Notification.objects.create(
+                user=request.user,
+                title="Viewing credit applied",
+                message=(
+                    f"KES {credit_amount:.2f} of viewing credit was applied "
+                    f"to {viewing.property.title}. {payment_instruction} "
+                    f"Available credit remaining: KES "
+                    f"{remaining_credit:.2f}."
+                ),
+                notification_type=Notification.TYPE_PAYMENT,
+                viewing=viewing,
+            )
+            ActivityLog.objects.create(
+                actor=request.user,
+                action="viewing_credit_redeemed",
+                entity_type="Viewing",
+                entity_id=str(viewing.pk),
+                description=(
+                    f"Applied KES {credit_amount:.2f} viewing credit to "
+                    f"{viewing.property.title}; KES {cash_amount:.2f} "
+                    "remained payable in cash."
+                ),
+            )
+
+        if cash_amount == Decimal("0.00"):
+            _complete_payment(
+                payment,
+                viewing,
+                provider_receipt=(
+                    f"CREDIT-{payment.payment_reference}"
+                ),
+                transaction_date=timezone.now(),
+                provider_transaction_id=payment.payment_reference,
+                actor=request.user,
+            )
+            payment.refresh_from_db()
+        else:
+            viewing.status = Viewing.Status.PAYMENT_PROCESSING
+            viewing.payment_reference = payment.payment_reference
+            viewing.save(
+                update_fields=[
+                    "status",
+                    "payment_reference",
+                    "updated_at",
+                ]
+            )
 
         return Response(
             self.get_serializer(payment).data,
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="credit-balance",
+    )
+    def credit_balance(self, request):
+        credits = (
+            ViewingCredit.objects.filter(
+                customer=request.user,
+                currency="KES",
+                status=ViewingCredit.Status.ACTIVE,
+                remaining_amount__gt=Decimal("0.00"),
+            )
+            .select_related("source_viewing__property")
+            .order_by("issued_at", "id")
+        )
+        total = credits.aggregate(
+            total=Sum("remaining_amount"),
+        )["total"] or Decimal("0.00")
+
+        return Response(
+            {
+                "currency": "KES",
+                "available_amount": f"{total:.2f}",
+                "credits": ViewingCreditSerializer(
+                    credits,
+                    many=True,
+                    context={"request": request},
+                ).data,
+            }
         )
 
     @action(
@@ -426,6 +642,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
             .get(pk=pk)
         )
 
+        if payment.status == Payment.Status.SUCCESSFUL:
+            return Response(
+                self.get_serializer(payment).data
+            )
+
         if (
             payment.payment_method
             != Payment.PaymentMethod.MPESA
@@ -438,14 +659,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if (
-            payment.status
-            == Payment.Status.SUCCESSFUL
-        ):
-            return Response(
-                self.get_serializer(payment).data
             )
 
         if (
@@ -483,7 +696,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             request_payload, provider_response = (
                 MpesaClient().stk_push(
                     phone_number=payment.phone_number,
-                    amount=payment.amount,
+                    amount=payment.cash_amount,
                     account_reference=(
                         payment.payment_reference
                     ),
@@ -559,7 +772,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
                     status=PaymentAttempt.Status.PROCESSING,
                     merchant_request_id=merchant_request_id,
                     checkout_request_id=checkout_request_id,
-                    requested_amount=payment.amount,
+                    requested_amount=payment.cash_amount,
                     phone_number=payment.phone_number,
                     provider_response_code=str(
                         provider_response.get(
@@ -740,7 +953,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             defaults={
                 "payment": payment,
                 "status": PaymentAttempt.Status.PROCESSING,
-                "requested_amount": payment.amount,
+                "requested_amount": payment.cash_amount,
                 "phone_number": payment.phone_number,
                 "provider_request_payload": {
                     "development_simulation": True,
@@ -751,7 +964,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
         attempt.status = PaymentAttempt.Status.SUCCESSFUL
         attempt.provider_receipt_number = mock_receipt
-        attempt.callback_amount = payment.amount
+        attempt.callback_amount = payment.cash_amount
         attempt.phone_number = payment.phone_number
         attempt.provider_response_code = "0"
         attempt.provider_response_description = (
@@ -1303,7 +1516,7 @@ def mpesa_callback(request):
 
         if (
             callback_amount is None
-            or callback_amount != payment.amount
+            or callback_amount != payment.cash_amount
         ):
             _mark_attempt_for_review(
                 attempt,

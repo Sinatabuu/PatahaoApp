@@ -4,10 +4,84 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/payment.dart';
+import '../models/viewing_credit.dart';
 import 'auth_service.dart';
 import 'property_service.dart';
 
 class PaymentService {
+  /// Loads the authenticated customer's spendable viewing-credit balance.
+  Future<ViewingCreditBalance> fetchViewingCreditBalance() async {
+    final token = await _validAccessToken();
+    final response = await http
+        .get(
+          Uri.parse('${PropertyService.baseUrl}/api/payments/credit-balance/'),
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        )
+        .timeout(const Duration(seconds: 30));
+    final decoded = _decode(response.body);
+
+    if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
+      return ViewingCreditBalance.fromJson(decoded);
+    }
+
+    throw Exception(
+      _extractError(
+        decoded,
+        fallback: 'Unable to load your viewing-credit balance.',
+      ),
+    );
+  }
+
+  /// Loads the existing payment intent for a viewing, when one exists.
+  Future<Payment?> fetchViewingPayment({required int viewingId}) async {
+    final token = await _validAccessToken();
+    final uri = Uri.parse('${PropertyService.baseUrl}/api/payments/').replace(
+      queryParameters: <String, String>{'viewing': viewingId.toString()},
+    );
+    final response = await http
+        .get(
+          uri,
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        )
+        .timeout(const Duration(seconds: 30));
+    final decoded = _decode(response.body);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractError(
+          decoded,
+          fallback: 'Unable to resume this viewing payment.',
+        ),
+      );
+    }
+
+    final List<dynamic> results;
+
+    if (decoded is List) {
+      results = decoded;
+    } else if (decoded is Map && decoded['results'] is List) {
+      results = List<dynamic>.from(decoded['results'] as List);
+    } else {
+      throw const FormatException(
+        'The viewing payment API returned an unexpected format.',
+      );
+    }
+
+    for (final item in results) {
+      if (item is Map) {
+        return Payment.fromJson(Map<String, dynamic>.from(item));
+      }
+    }
+
+    return null;
+  }
+
   /// Loads all payments belonging to the authenticated customer.
   Future<List<Payment>> fetchPayments() async {
     final token = await _validAccessToken();
@@ -68,14 +142,19 @@ class PaymentService {
   Future<Payment> createPayment({
     required int viewingId,
     required String phoneNumber,
+    bool useViewingCredit = false,
   }) async {
     final token = await _validAccessToken();
-    final normalizedPhone = _normalizePhoneNumber(phoneNumber);
+    final cleanPhone = phoneNumber.trim();
+    final normalizedPhone = cleanPhone.isEmpty && useViewingCredit
+        ? ''
+        : _normalizePhoneNumber(cleanPhone);
 
     final requestBody = <String, dynamic>{
       'viewing': viewingId,
       'phone_number': normalizedPhone,
       'provider': 'mpesa',
+      'use_viewing_credit': useViewingCredit,
     };
 
     debugPrint('CREATE PAYMENT REQUEST: ${jsonEncode(requestBody)}');
@@ -210,13 +289,9 @@ class PaymentService {
   }
 
   /// Completes a payment only in Flutter and Django development mode.
-  Future<Payment> completeDevelopmentPayment({
-    required int paymentId,
-  }) async {
+  Future<Payment> completeDevelopmentPayment({required int paymentId}) async {
     if (!kDebugMode) {
-      throw Exception(
-        'Test payments are available only in development.',
-      );
+      throw Exception('Test payments are available only in development.');
     }
 
     final token = await _validAccessToken();
@@ -236,12 +311,9 @@ class PaymentService {
 
     final decoded = _decode(response.body);
 
-    debugPrint(
-      'DEVELOPMENT PAYMENT STATUS: ${response.statusCode}',
-    );
+    debugPrint('DEVELOPMENT PAYMENT STATUS: ${response.statusCode}');
 
-    if (response.statusCode == 200 &&
-        decoded is Map<String, dynamic>) {
+    if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
       return Payment.fromJson(decoded);
     }
 
@@ -252,6 +324,7 @@ class PaymentService {
       ),
     );
   }
+
   Future<String> _validAccessToken() async {
     final token = await AuthService.instance.getAccessToken();
 

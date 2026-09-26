@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/services/staff_viewing_admin_service.dart';
+import 'package:mobile/widgets/staff_fee_resolution_dialog.dart';
 
 class StaffViewingDetailScreen extends StatefulWidget {
   const StaffViewingDetailScreen({
@@ -256,97 +257,11 @@ class _StaffViewingDetailScreenState
       return;
     }
 
-    final referenceController = TextEditingController();
-    final notesController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
     final isRefund = choice == 'refund';
-
-    Map<String, String>? result;
-
-    try {
-      result = await showDialog<Map<String, String>>(
-        context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            title: Text(
-              isRefund
-                  ? 'Confirm full refund'
-                  : 'Issue viewing credit',
-            ),
-            content: Form(
-              key: formKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      isRefund
-                          ? 'First complete the refund with the payment '
-                              'provider. Then enter its refund reference so '
-                              'Pata HAO records evidence of the returned money.'
-                          : 'This will create one transferable viewing credit '
-                              'for the customer using the paid fee.',
-                    ),
-                    if (isRefund) ...[
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: referenceController,
-                        decoration: const InputDecoration(
-                          labelText: 'Provider refund reference',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if ((value ?? '').trim().isEmpty) {
-                            return 'Enter the completed refund reference.';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: notesController,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Internal notes (optional)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (formKey.currentState?.validate() != true) {
-                    return;
-                  }
-
-                  Navigator.pop(
-                    dialogContext,
-                    <String, String>{
-                      'provider_reference': referenceController.text.trim(),
-                      'notes': notesController.text.trim(),
-                    },
-                  );
-                },
-                child: Text(
-                  isRefund ? 'Record Refund' : 'Issue Credit',
-                ),
-              ),
-            ],
-          );
-        },
-      );
-    } finally {
-      referenceController.dispose();
-      notesController.dispose();
-    }
+    final result = await showStaffFeeResolutionDialog(
+      context,
+      isRefund: isRefund,
+    );
 
     if (result == null || !mounted) {
       return;
@@ -359,8 +274,8 @@ class _StaffViewingDetailScreenState
     try {
       await StaffViewingAdminService.instance.processFeeResolution(
         viewingId: widget.viewingId,
-        providerReference: result['provider_reference'] ?? '',
-        notes: result['notes'] ?? '',
+        providerReference: result.providerReference,
+        notes: result.notes,
       );
 
       if (!mounted) {

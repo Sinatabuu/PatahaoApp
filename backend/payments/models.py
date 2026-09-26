@@ -2,6 +2,7 @@ from decimal import Decimal
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -25,6 +26,7 @@ class Payment(models.Model):
         MOBILE_MONEY = "mobile_money", "Mobile money"
         MPESA = "mpesa", "M-Pesa"
         AIRTEL_MONEY = "airtel_money", "Airtel Money"
+        VIEWING_CREDIT = "viewing_credit", "Pata Hao viewing credit"
 
     viewing = models.OneToOneField(
         "viewings.Viewing",
@@ -44,6 +46,20 @@ class Payment(models.Model):
         max_digits=10,
         decimal_places=2,
         default=STANDARD_VIEWING_FEE,
+        editable=False,
+    )
+
+    credit_applied_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        editable=False,
+    )
+
+    cash_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
         editable=False,
     )
 
@@ -224,6 +240,23 @@ class Payment(models.Model):
         ]
 
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(credit_applied_amount__gte=Decimal("0.00")),
+                name="pay_credit_applied_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(cash_amount__gte=Decimal("0.00")),
+                name="pay_cash_amount_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        amount=models.F("credit_applied_amount")
+                        + models.F("cash_amount")
+                    )
+                ),
+                name="pay_amount_breakdown_matches",
+            ),
             models.UniqueConstraint(
                 fields=["payment_reference"],
                 condition=~models.Q(payment_reference=""),
@@ -260,6 +293,14 @@ class Payment(models.Model):
             self.payment_reference = (
                 self.generate_payment_reference()
             )
+
+        if (
+            self._state.adding
+            and self.cash_amount == Decimal("0.00")
+            and self.credit_applied_amount == Decimal("0.00")
+            and self.payment_method != self.PaymentMethod.VIEWING_CREDIT
+        ):
+            self.cash_amount = self.amount
 
         super().save(*args, **kwargs)
 
@@ -585,4 +626,81 @@ class ViewingCredit(models.Model):
         return (
             f"{self.credit_reference} - "
             f"{self.remaining_amount} {self.currency}"
+        )
+
+
+class ViewingCreditRedemption(models.Model):
+    credit = models.ForeignKey(
+        ViewingCredit,
+        on_delete=models.PROTECT,
+        related_name="redemptions",
+    )
+
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="credit_redemptions",
+    )
+
+    viewing = models.ForeignKey(
+        "viewings.Viewing",
+        on_delete=models.PROTECT,
+        related_name="credit_redemptions",
+    )
+
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        editable=False,
+    )
+
+    redemption_reference = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        editable=False,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=Decimal("0.00")),
+                name="viewcredit_redemption_positive",
+            ),
+            models.UniqueConstraint(
+                fields=["credit", "payment"],
+                name="viewcredit_once_per_payment",
+            ),
+        ]
+
+    @staticmethod
+    def generate_redemption_reference():
+        year = timezone.localdate().year
+        random_part = uuid.uuid4().hex[:10].upper()
+
+        return f"PHCR-{year}-{random_part}"
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError(
+                "Viewing credit redemption records are immutable."
+            )
+
+        if not self.redemption_reference:
+            self.redemption_reference = self.generate_redemption_reference()
+
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Viewing credit redemption records cannot be deleted."
+        )
+
+    def __str__(self):
+        return (
+            f"{self.redemption_reference} - "
+            f"{self.amount} {self.credit.currency}"
         )

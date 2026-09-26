@@ -6,7 +6,12 @@ from django.db import transaction
 from django.utils import timezone
 from .views import _complete_payment
 
-from .models import Payment, PaymentAttempt, ViewingCredit
+from .models import (
+    Payment,
+    PaymentAttempt,
+    ViewingCredit,
+    ViewingCreditRedemption,
+)
 
 
 @admin.action(description="DEV ONLY: Mark selected payments successful")
@@ -97,6 +102,8 @@ class PaymentAdmin(admin.ModelAdmin):
         "payer",
         "purpose",
         "amount",
+        "credit_applied_amount",
+        "cash_amount",
         "currency",
         "payment_method",
         "status",
@@ -117,6 +124,8 @@ class PaymentAdmin(admin.ModelAdmin):
     search_fields = (
         "payment_reference",
         "receipt_number",
+        "credit_applied_amount",
+        "cash_amount",
         "provider_transaction_id",
         "provider_receipt_number",
         "phone_number",
@@ -127,6 +136,8 @@ class PaymentAdmin(admin.ModelAdmin):
     readonly_fields = (
         "payment_reference",
         "receipt_number",
+        "credit_applied_amount",
+        "cash_amount",
         "paid_at",
         "refund_reference",
         "refund_notes",
@@ -253,6 +264,39 @@ class ViewingCreditAdmin(admin.ModelAdmin):
         "issued_by",
         "issued_at",
         "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ViewingCreditRedemption)
+class ViewingCreditRedemptionAdmin(admin.ModelAdmin):
+    list_display = (
+        "redemption_reference",
+        "credit",
+        "viewing",
+        "payment",
+        "amount",
+        "created_at",
+    )
+    search_fields = (
+        "redemption_reference",
+        "credit__credit_reference",
+        "payment__payment_reference",
+        "viewing__property__title",
+        "credit__customer__email",
+    )
+    readonly_fields = (
+        "credit",
+        "payment",
+        "viewing",
+        "amount",
+        "redemption_reference",
+        "created_at",
     )
 
     def has_add_permission(self, request):

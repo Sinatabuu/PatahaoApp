@@ -8,6 +8,12 @@ from .models import Payment, ViewingCredit
 
 
 class PaymentSerializer(serializers.ModelSerializer):
+    use_viewing_credit = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=False,
+    )
+
     provider = serializers.ChoiceField(
         source="payment_method",
         choices=Payment.PaymentMethod.choices,
@@ -30,6 +36,8 @@ class PaymentSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    credit_redemptions = serializers.SerializerMethodField()
+
     class Meta:
         model = Payment
 
@@ -40,6 +48,8 @@ class PaymentSerializer(serializers.ModelSerializer):
             "property_title",
             "payer",
             "amount",
+            "credit_applied_amount",
+            "cash_amount",
             "currency",
             "phone_number",
             "provider",
@@ -51,6 +61,8 @@ class PaymentSerializer(serializers.ModelSerializer):
             "provider_receipt_number",
             "receipt_number",
             "failure_reason",
+            "credit_redemptions",
+            "use_viewing_credit",
             "initiated_at",
             "paid_at",
             "failed_at",
@@ -65,6 +77,8 @@ class PaymentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "payer",
             "amount",
+            "credit_applied_amount",
+            "cash_amount",
             "currency",
             "purpose",
             "status",
@@ -73,6 +87,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "provider_receipt_number",
             "receipt_number",
             "failure_reason",
+            "credit_redemptions",
             "initiated_at",
             "paid_at",
             "failed_at",
@@ -115,6 +130,9 @@ class PaymentSerializer(serializers.ModelSerializer):
             str(value),
         )
 
+        if not cleaned:
+            return ""
+
         if cleaned.startswith("0") and len(cleaned) == 10:
             cleaned = f"254{cleaned[1:]}"
 
@@ -145,8 +163,11 @@ class PaymentSerializer(serializers.ModelSerializer):
             "",
         )
 
+        use_viewing_credit = attrs.get("use_viewing_credit", False)
+
         if (
             payment_method == Payment.PaymentMethod.MPESA
+            and not use_viewing_credit
             and not phone_number.startswith("254")
         ):
             raise serializers.ValidationError(
@@ -158,6 +179,16 @@ class PaymentSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+    def get_credit_redemptions(self, payment):
+        return [
+            {
+                "reference": redemption.redemption_reference,
+                "credit_reference": redemption.credit.credit_reference,
+                "amount": str(redemption.amount),
+            }
+            for redemption in payment.credit_redemptions.all()
+        ]
 
 
 class ViewingCreditSerializer(serializers.ModelSerializer):

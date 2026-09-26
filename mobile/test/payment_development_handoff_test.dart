@@ -1,7 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/models/viewing.dart';
+import 'package:mobile/models/viewing_credit.dart';
 import 'package:mobile/screens/payment_screen.dart';
+import 'package:mobile/services/payment_service.dart';
+
+class _NoCreditPaymentService extends PaymentService {
+  @override
+  Future<ViewingCreditBalance> fetchViewingCreditBalance() async {
+    return const ViewingCreditBalance(
+      currency: 'KES',
+      availableAmount: 0,
+      credits: <ViewingCredit>[],
+    );
+  }
+}
 
 void main() {
   testWidgets('development payment option is clearly marked', (tester) async {
@@ -27,10 +40,14 @@ void main() {
     );
 
     await tester.pumpWidget(
-      const MaterialApp(
-        home: PaymentScreen(viewing: viewing),
+      MaterialApp(
+        home: PaymentScreen(
+          viewing: viewing,
+          paymentService: _NoCreditPaymentService(),
+        ),
       ),
     );
+    await tester.pumpAndSettle();
 
     expect(find.text('Viewing Payment'), findsOneWidget);
     expect(find.text('Pay KES 400'), findsOneWidget);
