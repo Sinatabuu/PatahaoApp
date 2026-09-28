@@ -8,6 +8,7 @@ import '../models/viewing_feedback.dart';
 import '../services/payment_service.dart';
 import '../services/property_service.dart';
 import '../services/viewing_service.dart';
+import 'payment_screen.dart';
 import 'payment_success_screen.dart';
 import 'viewing_feedback_screen.dart';
 
@@ -30,6 +31,7 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
   late Future<Viewing> _viewingFuture;
   late Future<ViewingFeedback?> _feedbackFuture;
   bool _isLoadingReceipt = false;
+  bool _isOpeningPayment = false;
   bool _isRespondingToProposal = false;
   bool _isChoosingFeeResolution = false;
 
@@ -256,6 +258,34 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
       if (mounted) {
         setState(() {
           _isRespondingToProposal = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openPayment(Viewing viewing) async {
+    if (_isOpeningPayment) {
+      return;
+    }
+
+    setState(() {
+      _isOpeningPayment = true;
+    });
+
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PaymentScreen(viewing: viewing),
+        ),
+      );
+
+      if (mounted) {
+        await _refreshViewing();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOpeningPayment = false;
         });
       }
     }
@@ -680,6 +710,31 @@ class _ViewingDetailsScreenState extends State<ViewingDetailsScreen> {
                           : viewing.paymentReference,
                       selectable: true,
                     ),
+                    if (viewing.requiresPaymentAction) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _isOpeningPayment
+                              ? null
+                              : () => _openPayment(viewing),
+                          icon: _isOpeningPayment
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.payments_outlined),
+                          label: Text(
+                            _isOpeningPayment
+                                ? 'Opening payment...'
+                                : viewing.paymentActionLabel,
+                          ),
+                        ),
+                      ),
+                    ],
                     if (viewing.paymentReference.trim().isNotEmpty) ...[
                       const SizedBox(height: 14),
                       SizedBox(

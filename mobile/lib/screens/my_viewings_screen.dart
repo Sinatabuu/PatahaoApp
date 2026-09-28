@@ -8,6 +8,7 @@ import '../services/deal_service.dart';
 import '../services/payment_service.dart';
 import '../services/viewing_service.dart';
 import 'customer_deal_confirmation_screen.dart';
+import 'payment_screen.dart';
 import 'payment_success_screen.dart';
 import 'viewing_details_screen.dart';
 
@@ -85,6 +86,18 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
     );
 
     if (!mounted || updatedDeal == null) {
+      return;
+    }
+
+    await _refresh();
+  }
+
+  Future<void> _openPayment(Viewing viewing) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => PaymentScreen(viewing: viewing)),
+    );
+
+    if (!mounted) {
       return;
     }
 
@@ -379,6 +392,9 @@ class _MyViewingsScreenState extends State<MyViewingsScreen> {
               statusIcon: _statusIcon(viewing.status),
               formattedDate: _formatDate(viewing.requestedDate),
               formattedTime: _formatTime(viewing.requestedTime),
+              onPayment: viewing.requiresPaymentAction
+                  ? () => _openPayment(viewing)
+                  : null,
               onConfirmOutcome: deal == null
                   ? null
                   : () => _openConfirmation(deal),
@@ -569,6 +585,7 @@ class _ViewingCard extends StatefulWidget {
     required this.statusIcon,
     required this.formattedDate,
     required this.formattedTime,
+    required this.onPayment,
     required this.onConfirmOutcome,
   });
 
@@ -580,6 +597,7 @@ class _ViewingCard extends StatefulWidget {
   final IconData statusIcon;
   final String formattedDate;
   final String formattedTime;
+  final Future<void> Function()? onPayment;
   final Future<void> Function()? onConfirmOutcome;
 
   @override
@@ -590,7 +608,30 @@ class _ViewingCardState extends State<_ViewingCard> {
   final PaymentService _paymentService = PaymentService();
 
   bool _isLoadingReceipt = false;
+  bool _isOpeningPayment = false;
   bool _isOpeningConfirmation = false;
+
+  Future<void> _openPayment() async {
+    final action = widget.onPayment;
+
+    if (action == null || _isOpeningPayment) {
+      return;
+    }
+
+    setState(() {
+      _isOpeningPayment = true;
+    });
+
+    try {
+      await action();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOpeningPayment = false;
+        });
+      }
+    }
+  }
 
   Future<void> _openReceipt() async {
     final knownPayment = widget.payment;
@@ -869,6 +910,27 @@ class _ViewingCardState extends State<_ViewingCard> {
                   ],
                 ),
               ),
+              if (widget.onPayment != null) ...[
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _isOpeningPayment ? null : _openPayment,
+                    icon: _isOpeningPayment
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.payments_outlined),
+                    label: Text(
+                      _isOpeningPayment
+                          ? 'Opening payment...'
+                          : widget.viewing.paymentActionLabel,
+                    ),
+                  ),
+                ),
+              ],
               if (hasReceipt) ...[
                 const SizedBox(height: 18),
                 SizedBox(

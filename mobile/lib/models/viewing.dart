@@ -231,6 +231,26 @@ class Viewing {
     return effectiveBookingStatus == 'payment_processing';
   }
 
+  bool get requiresPaymentAction {
+    return const {
+      'pending_payment',
+      'payment_pending',
+      'payment_processing',
+      'payment_failed',
+    }.contains(status.trim().toLowerCase());
+  }
+
+  String get paymentActionLabel {
+    switch (status.trim().toLowerCase()) {
+      case 'payment_processing':
+        return 'Resume Payment';
+      case 'payment_failed':
+        return 'Retry Payment';
+      default:
+        return 'Continue to Payment';
+    }
+  }
+
   bool get hasProposedSchedule {
     return proposedDate != null || proposedTime != null;
   }

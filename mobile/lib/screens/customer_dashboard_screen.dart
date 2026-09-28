@@ -239,14 +239,8 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     return displayName.split(RegExp(r'\s+')).first;
   }
 
-  String _cleanStatus(String status) {
-    return status.trim().toLowerCase();
-  }
-
   bool _isPendingPayment(Viewing viewing) {
-    final status = _cleanStatus(viewing.status);
-
-    return status == 'pending_payment' || status == 'payment_pending';
+    return viewing.requiresPaymentAction;
   }
 
   @override

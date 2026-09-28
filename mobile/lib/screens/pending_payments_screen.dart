@@ -31,9 +31,7 @@ class _PendingPaymentsScreenState extends State<PendingPaymentsScreen> {
     final viewings = await _viewingService.getMyViewings();
 
     final pendingViewings = viewings.where((viewing) {
-      final status = viewing.status.trim().toLowerCase();
-
-      return status == 'pending_payment' || status == 'payment_processing';
+      return viewing.requiresPaymentAction;
     }).toList();
 
     pendingViewings.sort((first, second) => second.id.compareTo(first.id));
@@ -66,10 +64,14 @@ class _PendingPaymentsScreenState extends State<PendingPaymentsScreen> {
   String _formatStatus(String status) {
     switch (status.trim().toLowerCase()) {
       case 'pending_payment':
+      case 'payment_pending':
         return 'Awaiting Payment';
 
       case 'payment_processing':
         return 'Payment Processing';
+
+      case 'payment_failed':
+        return 'Payment Failed';
 
       default:
         return status
@@ -256,6 +258,10 @@ class _PendingPaymentCard extends StatelessWidget {
     return viewing.status.trim().toLowerCase() == 'payment_processing';
   }
 
+  bool get isFailed {
+    return viewing.status.trim().toLowerCase() == 'payment_failed';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -311,6 +317,7 @@ class _PendingPaymentCard extends StatelessWidget {
                 _PaymentStatusBadge(
                   label: formattedStatus,
                   isProcessing: isProcessing,
+                  isFailed: isFailed,
                 ),
               ],
             ),
@@ -350,6 +357,9 @@ class _PendingPaymentCard extends StatelessWidget {
               isProcessing
                   ? 'A payment attempt already exists. '
                         'Continue safely from the same reservation.'
+                  : isFailed
+                  ? 'The previous payment did not complete. '
+                        'Try again from the same reservation.'
                   : 'Complete the viewing fee to submit '
                         'your request to the property partner.',
               style: const TextStyle(color: Colors.black54, height: 1.4),
@@ -370,10 +380,12 @@ class _PendingPaymentCard extends StatelessWidget {
                 icon: Icon(
                   isProcessing
                       ? Icons.refresh_rounded
+                      : isFailed
+                      ? Icons.replay_rounded
                       : Icons.lock_outline_rounded,
                 ),
                 label: Text(
-                  isProcessing ? 'Resume Payment' : 'Continue to Payment',
+                  viewing.paymentActionLabel,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -389,18 +401,27 @@ class _PendingPaymentCard extends StatelessWidget {
 }
 
 class _PaymentStatusBadge extends StatelessWidget {
-  const _PaymentStatusBadge({required this.label, required this.isProcessing});
+  const _PaymentStatusBadge({
+    required this.label,
+    required this.isProcessing,
+    required this.isFailed,
+  });
 
   final String label;
   final bool isProcessing;
+  final bool isFailed;
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = isProcessing
+    final backgroundColor = isFailed
+        ? const Color(0xFFFEE2E2)
+        : isProcessing
         ? const Color(0xFFDBEAFE)
         : const Color(0xFFFEF3C7);
 
-    final foregroundColor = isProcessing
+    final foregroundColor = isFailed
+        ? const Color(0xFFB91C1C)
+        : isProcessing
         ? const Color(0xFF1D4ED8)
         : const Color(0xFF92400E);
 
