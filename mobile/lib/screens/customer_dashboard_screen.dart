@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../foundation/app_error_message.dart';
 import '../models/favorite.dart';
+import '../models/notification.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
 import '../models/viewing_credit.dart';
 import '../services/auth_service.dart';
 import '../services/favorite_service.dart';
+import '../services/notification_service.dart';
 import '../services/payment_service.dart';
 import '../services/viewing_service.dart';
+import 'customer_notifications_screen.dart';
 import 'customer_profile_screen.dart';
 import 'customer_receipts_screen.dart';
 import 'customer_viewing_credit_screen.dart';
@@ -31,6 +34,7 @@ class CustomerDashboardScreen extends StatefulWidget {
 
 class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   final PaymentService _paymentService = PaymentService();
+  final NotificationService _notificationService = const NotificationService();
   final ViewingService _viewingService = ViewingService();
 
   late Future<_CustomerDashboardData> _dashboardFuture;
@@ -52,6 +56,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       _loadViewingsSafely(),
       _loadPaymentsSafely(),
       _loadViewingCreditSafely(),
+      _loadNotificationsSafely(),
     ]);
 
     final user = results[0] as AuthUser?;
@@ -59,6 +64,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     final viewings = results[2] as List<Viewing>;
     final payments = results[3] as List<Payment>;
     final viewingCredit = results[4] as ViewingCreditBalance?;
+    final notifications = results[5] as List<AppNotification>;
 
     return _CustomerDashboardData(
       user: user,
@@ -66,6 +72,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       viewings: viewings,
       payments: payments,
       viewingCredit: viewingCredit,
+      notifications: notifications,
     );
   }
 
@@ -116,6 +123,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       debugPrint('CUSTOMER DASHBOARD VIEWING CREDIT ERROR: $error');
 
       return null;
+    }
+  }
+
+  Future<List<AppNotification>> _loadNotificationsSafely() async {
+    try {
+      return await _notificationService.fetchNotifications();
+    } catch (error) {
+      debugPrint('CUSTOMER DASHBOARD NOTIFICATIONS ERROR: $error');
+
+      return <AppNotification>[];
     }
   }
 
@@ -175,6 +192,20 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     await _refreshDashboard();
   }
 
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const CustomerNotificationsScreen(),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _refreshDashboard();
+  }
+
   Future<void> _openProfile() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -201,21 +232,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     }
 
     await _refreshDashboard();
-  }
-
-  Future<void> _showComingSoon(String feature) async {
-    if (!mounted) {
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$feature is being prepared for the next '
-          'customer-experience phase.',
-        ),
-      ),
-    );
   }
 
   Future<void> _showLogoutDialog() async {
@@ -318,6 +334,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                 viewings: <Viewing>[],
                 payments: <Payment>[],
                 viewingCredit: null,
+                notifications: <AppNotification>[],
               );
 
           final pendingPayments = data.viewings
@@ -331,6 +348,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           final nextActionViewing = pendingPayments.isNotEmpty
               ? pendingPayments.first
               : null;
+          final unreadNotificationCount = data.notifications
+              .where((notification) => !notification.isRead)
+              .length;
 
           return RefreshIndicator(
             onRefresh: _refreshDashboard,
@@ -407,7 +427,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
                 const SizedBox(height: 24),
 
-                _DashboardListTile(
+                CustomerDashboardListTile(
                   icon: Icons.settings_outlined,
                   title: 'Settings',
                   subtitle: 'Manage notifications and preferences.',
@@ -416,16 +436,21 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
                 const SizedBox(height: 10),
 
-                _DashboardListTile(
+                CustomerDashboardListTile(
                   icon: Icons.notifications_outlined,
                   title: 'Notifications',
-                  subtitle: 'Viewing confirmations and important updates.',
-                  onTap: () => _showComingSoon('Notifications'),
+                  subtitle: unreadNotificationCount > 0
+                      ? '$unreadNotificationCount unread '
+                            '${unreadNotificationCount == 1 ? 'update' : 'updates'}. '
+                            'Tap to review.'
+                      : 'Viewing confirmations and important updates.',
+                  badgeCount: unreadNotificationCount,
+                  onTap: _openNotifications,
                 ),
 
                 const SizedBox(height: 10),
 
-                _DashboardListTile(
+                CustomerDashboardListTile(
                   icon: Icons.person_outline,
                   title: 'My Profile',
                   subtitle: 'Review your account and contact information.',
@@ -447,6 +472,7 @@ class _CustomerDashboardData {
     required this.viewings,
     required this.payments,
     required this.viewingCredit,
+    required this.notifications,
   });
 
   final AuthUser? user;
@@ -454,6 +480,7 @@ class _CustomerDashboardData {
   final List<Viewing> viewings;
   final List<Payment> payments;
   final ViewingCreditBalance? viewingCredit;
+  final List<AppNotification> notifications;
 }
 
 class _WelcomeCard extends StatelessWidget {
@@ -698,18 +725,21 @@ class _StartJourneyCard extends StatelessWidget {
   }
 }
 
-class _DashboardListTile extends StatelessWidget {
-  const _DashboardListTile({
+class CustomerDashboardListTile extends StatelessWidget {
+  const CustomerDashboardListTile({
+    super.key,
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -747,6 +777,29 @@ class _DashboardListTile extends StatelessWidget {
                   ],
                 ),
               ),
+              if (badgeCount > 0) ...[
+                const SizedBox(width: 10),
+                Container(
+                  constraints: const BoxConstraints(minWidth: 26),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFB91C1C),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    badgeCount > 99 ? '99+' : '$badgeCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
               const Icon(Icons.chevron_right_rounded, color: Colors.black38),
             ],
           ),
