@@ -162,6 +162,21 @@ class _PropertyDetailContent extends StatelessWidget {
         .join(' ');
   }
 
+  String get aboutDescription {
+    final description = property.description.trim();
+
+    if (description.isNotEmpty) {
+      return description;
+    }
+
+    if (property.isCompletedTransaction) {
+      return 'This successful transaction was completed through Pata Hao.';
+    }
+
+    return 'Contact the property partner and request a viewing to receive '
+        'more information about this property.';
+  }
+
   String _mediaUrl(String path) {
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return path;
@@ -263,6 +278,60 @@ class _PropertyDetailContent extends StatelessWidget {
                               ),
                             ],
                           ),
+                          if (property.bedrooms > 0 ||
+                              property.bathrooms > 0) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                if (property.bedrooms > 0)
+                                  Expanded(
+                                    child: _DetailBox(
+                                      icon: Icons.bed_outlined,
+                                      label:
+                                          '${property.bedrooms} bedroom${property.bedrooms == 1 ? '' : 's'}',
+                                    ),
+                                  ),
+                                if (property.bedrooms > 0 &&
+                                    property.bathrooms > 0)
+                                  const SizedBox(width: 12),
+                                if (property.bathrooms > 0)
+                                  Expanded(
+                                    child: _DetailBox(
+                                      icon: Icons.bathtub_outlined,
+                                      label:
+                                          '${property.bathrooms} bathroom${property.bathrooms == 1 ? '' : 's'}',
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (property.hasFloorArea ||
+                              property.hasLandArea) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                if (property.hasFloorArea)
+                                  Expanded(
+                                    child: _DetailBox(
+                                      icon: Icons.square_foot_outlined,
+                                      label:
+                                          'Floor ${property.formattedFloorArea}',
+                                    ),
+                                  ),
+                                if (property.hasFloorArea &&
+                                    property.hasLandArea)
+                                  const SizedBox(width: 12),
+                                if (property.hasLandArea)
+                                  Expanded(
+                                    child: _DetailBox(
+                                      icon: Icons.landscape_outlined,
+                                      label:
+                                          'Plot ${property.formattedLandArea}',
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 24),
 
                           if (property.amenities.isNotEmpty) ...[
@@ -280,13 +349,7 @@ class _PropertyDetailContent extends StatelessWidget {
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            property.isCompletedTransaction
-                                ? ('This successful transaction '
-                                      'was completed through Pata Hao.')
-                                : ('Contact the property partner '
-                                      'and request a viewing to receive '
-                                      'more information about this '
-                                      'property.'),
+                            aboutDescription,
                             style: const TextStyle(
                               fontSize: 15,
                               height: 1.5,

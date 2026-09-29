@@ -1,7 +1,9 @@
 from datetime import timedelta
+from decimal import Decimal
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -59,6 +61,18 @@ class Property(models.Model):
         (TYPE_OFFICE, "Office"),
         (TYPE_SHOP, "Shop"),
         (TYPE_WAREHOUSE, "Warehouse"),
+    ]
+
+    AREA_UNIT_SQUARE_FEET = "sq_ft"
+    AREA_UNIT_SQUARE_METRES = "sq_m"
+    AREA_UNIT_ACRES = "acres"
+    AREA_UNIT_HECTARES = "hectares"
+
+    AREA_UNIT_CHOICES = [
+        (AREA_UNIT_SQUARE_FEET, "Square feet"),
+        (AREA_UNIT_SQUARE_METRES, "Square metres"),
+        (AREA_UNIT_ACRES, "Acres"),
+        (AREA_UNIT_HECTARES, "Hectares"),
     ]
 
     LISTING_RENT = "rent"
@@ -187,6 +201,33 @@ class Property(models.Model):
 
     bedrooms = models.PositiveIntegerField(default=0)
     bathrooms = models.PositiveIntegerField(default=0)
+
+    floor_area = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Indoor or built-up floor area.",
+    )
+    floor_area_unit = models.CharField(
+        max_length=12,
+        choices=AREA_UNIT_CHOICES,
+        default=AREA_UNIT_SQUARE_FEET,
+    )
+    land_area = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.0001"))],
+        help_text="Plot or land area.",
+    )
+    land_area_unit = models.CharField(
+        max_length=12,
+        choices=AREA_UNIT_CHOICES,
+        default=AREA_UNIT_ACRES,
+    )
 
     description = models.TextField()
 

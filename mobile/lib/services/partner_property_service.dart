@@ -951,6 +951,10 @@ class PartnerPropertyService {
     required double longitude,
     required int bedrooms,
     required int bathrooms,
+    double? floorArea,
+    String floorAreaUnit = 'sq_ft',
+    double? landArea,
+    String landAreaUnit = 'acres',
     required String description,
   }) async {
     final uri = Uri.parse(
@@ -979,6 +983,14 @@ class PartnerPropertyService {
                 'longitude': longitude.toString(),
                 'bedrooms': bedrooms,
                 'bathrooms': bathrooms,
+                if (floorArea != null) ...{
+                  'floor_area': floorArea.toStringAsFixed(2),
+                  'floor_area_unit': floorAreaUnit,
+                },
+                if (landArea != null) ...{
+                  'land_area': landArea.toStringAsFixed(4),
+                  'land_area_unit': landAreaUnit,
+                },
                 'description': description.trim(),
               }),
             )

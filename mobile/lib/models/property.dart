@@ -159,6 +159,10 @@ class Property {
   final String estate;
   final int bedrooms;
   final int bathrooms;
+  final String floorArea;
+  final String floorAreaUnit;
+  final String landArea;
+  final String landAreaUnit;
   final String description;
   final String status;
   final String partnerRole;
@@ -187,6 +191,10 @@ class Property {
     required this.estate,
     required this.bedrooms,
     required this.bathrooms,
+    this.floorArea = '',
+    this.floorAreaUnit = 'sq_ft',
+    this.landArea = '',
+    this.landAreaUnit = 'acres',
     required this.description,
     required this.verificationReturnReason,
     required this.status,
@@ -226,6 +234,10 @@ class Property {
       estate: json['estate']?.toString() ?? '',
       bedrooms: _toInt(json['bedrooms']),
       bathrooms: _toInt(json['bathrooms']),
+      floorArea: json['floor_area']?.toString() ?? '',
+      floorAreaUnit: json['floor_area_unit']?.toString() ?? 'sq_ft',
+      landArea: json['land_area']?.toString() ?? '',
+      landAreaUnit: json['land_area_unit']?.toString() ?? 'acres',
       description: json['description']?.toString() ?? '',
       status: json['status']?.toString() ?? '',
       partnerRole: json['partner_role']?.toString() ?? '',
@@ -316,6 +328,18 @@ class Property {
     final suffix = listingType.toLowerCase() == 'rent' ? ' / month' : '';
 
     return 'KES $formattedAmount$suffix';
+  }
+
+  bool get hasFloorArea => _isPositiveMeasurement(floorArea);
+
+  bool get hasLandArea => _isPositiveMeasurement(landArea);
+
+  String get formattedFloorArea {
+    return _formatMeasurement(floorArea, floorAreaUnit);
+  }
+
+  String get formattedLandArea {
+    return _formatMeasurement(landArea, landAreaUnit);
   }
 
   String get locationLabel {
@@ -456,6 +480,10 @@ class Property {
     String? estate,
     int? bedrooms,
     int? bathrooms,
+    String? floorArea,
+    String? floorAreaUnit,
+    String? landArea,
+    String? landAreaUnit,
     String? description,
     String? status,
     String? partnerRole,
@@ -484,6 +512,10 @@ class Property {
       estate: estate ?? this.estate,
       bedrooms: bedrooms ?? this.bedrooms,
       bathrooms: bathrooms ?? this.bathrooms,
+      floorArea: floorArea ?? this.floorArea,
+      floorAreaUnit: floorAreaUnit ?? this.floorAreaUnit,
+      landArea: landArea ?? this.landArea,
+      landAreaUnit: landAreaUnit ?? this.landAreaUnit,
       description: description ?? this.description,
       status: status ?? this.status,
       partnerRole: partnerRole ?? this.partnerRole,
@@ -513,6 +545,36 @@ class Property {
     }
 
     return DateTime.tryParse(rawValue);
+  }
+
+  static bool _isPositiveMeasurement(String value) {
+    final measurement = double.tryParse(value.trim());
+
+    return measurement != null && measurement > 0;
+  }
+
+  static String _formatMeasurement(String value, String unit) {
+    final measurement = double.tryParse(value.trim());
+
+    if (measurement == null || measurement <= 0) {
+      return '';
+    }
+
+    var numericLabel = measurement.toStringAsFixed(4);
+    numericLabel = numericLabel.replaceFirst(RegExp(r'\.?0+$'), '');
+    numericLabel = numericLabel.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (match) => ',',
+    );
+
+    final unitLabel = switch (unit.trim().toLowerCase()) {
+      'sq_m' => 'm²',
+      'acres' => measurement == 1 ? 'acre' : 'acres',
+      'hectares' => measurement == 1 ? 'hectare' : 'hectares',
+      _ => 'sq ft',
+    };
+
+    return '$numericLabel $unitLabel';
   }
 
   static int _toInt(dynamic value) {

@@ -35,12 +35,16 @@ class _PartnerNewPropertyFormScreenState
   final _addressController = TextEditingController();
   final _bedroomsController = TextEditingController();
   final _bathroomsController = TextEditingController();
+  final _floorAreaController = TextEditingController();
+  final _landAreaController = TextEditingController();
   final _descriptionController = TextEditingController();
 
   late Future<List<PropertyTypeOption>> _propertyTypesFuture;
 
   String? _propertyType;
   String _listingType = 'rent';
+  String _floorAreaUnit = 'sq_ft';
+  String _landAreaUnit = 'acres';
 
   bool _isSubmitting = false;
   String? _errorMessage;
@@ -63,6 +67,8 @@ class _PartnerNewPropertyFormScreenState
     _addressController.dispose();
     _bedroomsController.dispose();
     _bathroomsController.dispose();
+    _floorAreaController.dispose();
+    _landAreaController.dispose();
     _descriptionController.dispose();
 
     super.dispose();
@@ -116,6 +122,81 @@ class _PartnerNewPropertyFormScreenState
     }
 
     return null;
+  }
+
+  String? _optionalAreaValidator(String? value, {required double minimum}) {
+    final rawValue = value?.replaceAll(',', '').trim() ?? '';
+
+    if (rawValue.isEmpty) {
+      return null;
+    }
+
+    final area = double.tryParse(rawValue);
+
+    if (area == null || area < minimum) {
+      return 'Enter a valid property size.';
+    }
+
+    return null;
+  }
+
+  double? _optionalArea(TextEditingController controller) {
+    final rawValue = controller.text.replaceAll(',', '').trim();
+
+    if (rawValue.isEmpty) {
+      return null;
+    }
+
+    return double.tryParse(rawValue);
+  }
+
+  Widget _buildAreaInput({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required String unit,
+    required double minimum,
+    required List<DropdownMenuItem<String>> units,
+    required ValueChanged<String> onUnitChanged,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 3,
+          child: TextFormField(
+            controller: controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              border: const OutlineInputBorder(),
+            ),
+            validator: (value) {
+              return _optionalAreaValidator(value, minimum: minimum);
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: DropdownButtonFormField<String>(
+            initialValue: unit,
+            decoration: const InputDecoration(
+              labelText: 'Unit',
+              border: OutlineInputBorder(),
+            ),
+            items: units,
+            onChanged: (value) {
+              if (value != null) {
+                onUnitChanged(value);
+              }
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   String _cleanError(Object error) {
@@ -229,6 +310,8 @@ class _PartnerNewPropertyFormScreenState
     );
     final bedrooms = int.tryParse(_bedroomsController.text.trim());
     final bathrooms = int.tryParse(_bathroomsController.text.trim());
+    final floorArea = _optionalArea(_floorAreaController);
+    final landArea = _optionalArea(_landAreaController);
 
     if (price == null || bedrooms == null || bathrooms == null) {
       return;
@@ -259,6 +342,10 @@ class _PartnerNewPropertyFormScreenState
           longitude: widget.longitude,
           bedrooms: bedrooms,
           bathrooms: bathrooms,
+          floorArea: floorArea,
+          floorAreaUnit: _floorAreaUnit,
+          landArea: landArea,
+          landAreaUnit: _landAreaUnit,
           description: _descriptionController.text,
         );
       } catch (createError) {
@@ -642,6 +729,64 @@ class _PartnerNewPropertyFormScreenState
                   ),
                 ),
               ],
+            ),
+
+            const SizedBox(height: 20),
+
+            const Text(
+              'Property measurements',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 6),
+
+            const Text(
+              'Optional, but strongly recommended. Accurate size information '
+              'helps serious customers compare properties.',
+              style: TextStyle(color: Colors.black54, height: 1.4),
+            ),
+
+            const SizedBox(height: 12),
+
+            _buildAreaInput(
+              controller: _floorAreaController,
+              label: 'Floor / built-up area',
+              hint: 'Example: 1200',
+              unit: _floorAreaUnit,
+              minimum: 0.01,
+              units: const [
+                DropdownMenuItem(value: 'sq_ft', child: Text('sq ft')),
+                DropdownMenuItem(value: 'sq_m', child: Text('m²')),
+              ],
+              onUnitChanged: (value) {
+                setState(() {
+                  _floorAreaUnit = value;
+                });
+              },
+            ),
+
+            const SizedBox(height: 12),
+
+            _buildAreaInput(
+              controller: _landAreaController,
+              label: 'Plot / land area',
+              hint: 'Example: 0.125',
+              unit: _landAreaUnit,
+              minimum: 0.0001,
+              units: const [
+                DropdownMenuItem(value: 'sq_ft', child: Text('sq ft')),
+                DropdownMenuItem(value: 'sq_m', child: Text('m²')),
+                DropdownMenuItem(value: 'acres', child: Text('acres')),
+                DropdownMenuItem(value: 'hectares', child: Text('hectares')),
+              ],
+              onUnitChanged: (value) {
+                setState(() {
+                  _landAreaUnit = value;
+                });
+              },
             ),
 
             const SizedBox(height: 20),

@@ -163,6 +163,16 @@ class _StaffPropertyDetailScreenState extends State<StaffPropertyDetailScreen> {
               _InfoRow(label: 'Location', value: property.locationLabel),
               _InfoRow(label: 'Bedrooms', value: '${property.bedrooms}'),
               _InfoRow(label: 'Bathrooms', value: '${property.bathrooms}'),
+              if (property.hasFloorArea)
+                _InfoRow(
+                  label: 'Floor area',
+                  value: property.formattedFloorArea,
+                ),
+              if (property.hasLandArea)
+                _InfoRow(
+                  label: 'Plot / land area',
+                  value: property.formattedLandArea,
+                ),
             ],
           ),
 

@@ -775,6 +775,10 @@ class PropertyAdmin(admin.ModelAdmin):
                 "fields": (
                     "bedrooms",
                     "bathrooms",
+                    "floor_area",
+                    "floor_area_unit",
+                    "land_area",
+                    "land_area_unit",
                     "amenities",
                 )
             },

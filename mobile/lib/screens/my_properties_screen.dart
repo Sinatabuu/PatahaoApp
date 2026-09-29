@@ -807,6 +807,18 @@ class PartnerPropertyWorkspaceScreen extends StatelessWidget {
                   label: 'Bathrooms',
                   value: property.bathrooms.toString(),
                 ),
+                if (property.hasFloorArea)
+                  _DetailRow(
+                    icon: Icons.square_foot_outlined,
+                    label: 'Floor area',
+                    value: property.formattedFloorArea,
+                  ),
+                if (property.hasLandArea)
+                  _DetailRow(
+                    icon: Icons.landscape_outlined,
+                    label: 'Plot / land area',
+                    value: property.formattedLandArea,
+                  ),
                 _DetailRow(
                   icon: Icons.location_on_outlined,
                   label: 'Location',
@@ -1158,6 +1170,25 @@ class _WorkspaceSummary extends StatelessWidget {
                 ),
               ],
             ),
+            if (property.hasFloorArea || property.hasLandArea) ...[
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  if (property.hasFloorArea)
+                    Chip(
+                      avatar: const Icon(Icons.square_foot_outlined, size: 18),
+                      label: Text('Floor ${property.formattedFloorArea}'),
+                    ),
+                  if (property.hasLandArea)
+                    Chip(
+                      avatar: const Icon(Icons.landscape_outlined, size: 18),
+                      label: Text('Plot ${property.formattedLandArea}'),
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1447,6 +1478,26 @@ class _PartnerPropertyPreviewScreen extends StatelessWidget {
                       avatar: const Icon(Icons.bathtub_outlined, size: 18),
                       label: Text('${property.bathrooms} bathrooms'),
                     ),
+                    if (property.hasFloorArea)
+                      Chip(
+                        avatar: const Icon(
+                          Icons.square_foot_outlined,
+                          size: 18,
+                        ),
+                        label: Text(
+                          'Floor ${property.formattedFloorArea}',
+                        ),
+                      ),
+                    if (property.hasLandArea)
+                      Chip(
+                        avatar: const Icon(
+                          Icons.landscape_outlined,
+                          size: 18,
+                        ),
+                        label: Text(
+                          'Plot ${property.formattedLandArea}',
+                        ),
+                      ),
                     Chip(
                       avatar: const Icon(
                         Icons.photo_library_outlined,
