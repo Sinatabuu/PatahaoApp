@@ -4,12 +4,14 @@ import '../foundation/app_error_message.dart';
 import '../models/favorite.dart';
 import '../models/payment.dart';
 import '../models/viewing.dart';
+import '../models/viewing_credit.dart';
 import '../services/auth_service.dart';
 import '../services/favorite_service.dart';
 import '../services/payment_service.dart';
 import '../services/viewing_service.dart';
 import 'customer_profile_screen.dart';
 import 'customer_receipts_screen.dart';
+import 'customer_viewing_credit_screen.dart';
 
 import 'pending_payments_screen.dart';
 import 'property_list_screen.dart';
@@ -49,18 +51,21 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       _loadFavoritesSafely(),
       _loadViewingsSafely(),
       _loadPaymentsSafely(),
+      _loadViewingCreditSafely(),
     ]);
 
     final user = results[0] as AuthUser?;
     final favorites = results[1] as List<Favorite>;
     final viewings = results[2] as List<Viewing>;
     final payments = results[3] as List<Payment>;
+    final viewingCredit = results[4] as ViewingCreditBalance?;
 
     return _CustomerDashboardData(
       user: user,
       favorites: favorites,
       viewings: viewings,
       payments: payments,
+      viewingCredit: viewingCredit,
     );
   }
 
@@ -104,6 +109,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     }
   }
 
+  Future<ViewingCreditBalance?> _loadViewingCreditSafely() async {
+    try {
+      return await _paymentService.fetchViewingCreditBalance();
+    } catch (error) {
+      debugPrint('CUSTOMER DASHBOARD VIEWING CREDIT ERROR: $error');
+
+      return null;
+    }
+  }
+
   Future<void> _refreshDashboard() async {
     setState(_loadDashboard);
 
@@ -137,6 +152,20 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   Future<void> _openReceipts() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const CustomerReceiptsScreen()),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _refreshDashboard();
+  }
+
+  Future<void> _openViewingCredit(ViewingCreditBalance? balance) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CustomerViewingCreditScreen(initialBalance: balance),
+      ),
     );
 
     if (!mounted) {
@@ -288,6 +317,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                 favorites: <Favorite>[],
                 viewings: <Viewing>[],
                 payments: <Payment>[],
+                viewingCredit: null,
               );
 
           final pendingPayments = data.viewings
@@ -358,6 +388,13 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                   ],
                 ),
 
+                const SizedBox(height: 12),
+
+                ViewingCreditSummaryCard(
+                  balance: data.viewingCredit,
+                  onTap: () => _openViewingCredit(data.viewingCredit),
+                ),
+
                 const SizedBox(height: 24),
 
                 if (nextActionViewing != null)
@@ -409,12 +446,14 @@ class _CustomerDashboardData {
     required this.favorites,
     required this.viewings,
     required this.payments,
+    required this.viewingCredit,
   });
 
   final AuthUser? user;
   final List<Favorite> favorites;
   final List<Viewing> viewings;
   final List<Payment> payments;
+  final ViewingCreditBalance? viewingCredit;
 }
 
 class _WelcomeCard extends StatelessWidget {

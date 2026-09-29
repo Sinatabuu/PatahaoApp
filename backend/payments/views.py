@@ -589,17 +589,21 @@ class PaymentViewSet(viewsets.ModelViewSet):
         url_path="credit-balance",
     )
     def credit_balance(self, request):
+        available_credits = ViewingCredit.objects.filter(
+            customer=request.user,
+            currency="KES",
+            status=ViewingCredit.Status.ACTIVE,
+            remaining_amount__gt=Decimal("0.00"),
+        )
         credits = (
             ViewingCredit.objects.filter(
                 customer=request.user,
                 currency="KES",
-                status=ViewingCredit.Status.ACTIVE,
-                remaining_amount__gt=Decimal("0.00"),
             )
             .select_related("source_viewing__property")
-            .order_by("issued_at", "id")
+            .order_by("-issued_at", "-id")
         )
-        total = credits.aggregate(
+        total = available_credits.aggregate(
             total=Sum("remaining_amount"),
         )["total"] or Decimal("0.00")
 

@@ -51,6 +51,20 @@ class ViewingCredit {
   final String status;
   final String issuedAt;
 
+  double get usedAmount {
+    final used = amount - remainingAmount;
+
+    if (used <= 0) {
+      return 0;
+    }
+
+    return used > amount ? amount : used;
+  }
+
+  bool get isConsumed {
+    return status.trim().toLowerCase() == 'consumed' || remainingAmount <= 0;
+  }
+
   factory ViewingCredit.fromJson(Map<String, dynamic> json) {
     return ViewingCredit(
       id: _toInt(json['id']),

@@ -135,6 +135,35 @@ class ViewingCreditRedemptionTests(APITestCase):
             self.credit.credit_reference,
         )
 
+    def test_credit_balance_keeps_consumed_credit_in_customer_activity(self):
+        self.credit.remaining_amount = Decimal("0.00")
+        self.credit.status = ViewingCredit.Status.CONSUMED
+        self.credit.save(
+            update_fields=[
+                "remaining_amount",
+                "status",
+                "updated_at",
+            ]
+        )
+
+        response = self.client.get("/api/payments/credit-balance/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["available_amount"], "0.00")
+        self.assertEqual(len(response.data["credits"]), 1)
+        self.assertEqual(
+            response.data["credits"][0]["credit_reference"],
+            self.credit.credit_reference,
+        )
+        self.assertEqual(
+            response.data["credits"][0]["remaining_amount"],
+            "0.00",
+        )
+        self.assertEqual(
+            response.data["credits"][0]["status"],
+            ViewingCredit.Status.CONSUMED,
+        )
+
     def test_available_credit_is_not_used_without_customer_opt_in(self):
         response = self.client.post(
             "/api/payments/",
