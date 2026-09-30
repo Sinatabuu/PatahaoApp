@@ -337,6 +337,79 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
     );
   }
 
+  Future<void> _completeViewing(PartnerDashboardViewing viewing) async {
+    final notesController = TextEditingController();
+
+    final shouldComplete = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Complete viewing'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Confirm that the physical viewing of '
+                  '${viewing.propertyTitle} has finished.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: notesController,
+                  minLines: 3,
+                  maxLines: 5,
+                  maxLength: 2000,
+                  decoration: const InputDecoration(
+                    labelText: 'Completion notes (optional)',
+                    hintText: 'Example: Customer attended and viewed the property.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Completing the viewing creates the protected introduction '
+                  'record and opens the property outcome step.',
+                  style: TextStyle(color: Colors.black54, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.task_alt),
+              label: const Text('Complete Viewing'),
+            ),
+          ],
+        );
+      },
+    );
+
+    final notes = notesController.text.trim();
+    notesController.dispose();
+
+    if (shouldComplete != true || !mounted) {
+      return;
+    }
+
+    await _runViewingAction(
+      viewingId: viewing.id,
+      successMessage: 'Viewing completed. Confirm the property outcome next.',
+      action: () {
+        return PartnerDashboardService.instance.completeViewing(
+          viewingId: viewing.id,
+          completionNotes: notes,
+        );
+      },
+    );
+  }
+
   Future<void> _confirmPartnerOutcome(PartnerDashboardViewing viewing) async {
     final dealId = viewing.dealId;
 
@@ -650,6 +723,7 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
                 onConfirm: () => _confirmViewing(viewing),
                 onReschedule: () => _rescheduleViewing(viewing),
                 onDecline: () => _declineViewing(viewing),
+                onComplete: () => _completeViewing(viewing),
                 onConfirmOutcome: () => _confirmPartnerOutcome(viewing),
               ),
             ),
@@ -1609,6 +1683,7 @@ class _ViewingCard extends StatelessWidget {
     required this.onConfirm,
     required this.onReschedule,
     required this.onDecline,
+    required this.onComplete,
     required this.onConfirmOutcome,
   });
 
@@ -1619,6 +1694,7 @@ class _ViewingCard extends StatelessWidget {
   final Future<void> Function() onConfirm;
   final Future<void> Function() onReschedule;
   final Future<void> Function() onDecline;
+  final Future<void> Function() onComplete;
   final Future<void> Function() onConfirmOutcome;
 
   @override
@@ -1626,6 +1702,7 @@ class _ViewingCard extends StatelessWidget {
     final customerName = viewing.customerName.isEmpty
         ? viewing.customerEmail
         : viewing.customerName;
+    final canComplete = viewing.canCompleteOn(DateTime.now());
     debugPrint(
       'PARTNER VIEWING: '
       'id=${viewing.id} '
@@ -1799,17 +1876,6 @@ class _ViewingCard extends StatelessWidget {
               ),
             ],
 
-            const SizedBox(height: 14),
-
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: isProcessing ? null : onOpen,
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Open Viewing'),
-              ),
-            ),
-
             if (viewing.dealId != null &&
                 viewing.ownerConfirmationStatusLabel.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -1903,6 +1969,49 @@ class _ViewingCard extends StatelessWidget {
                 ),
               ],
             ],
+            if (viewing.status == 'confirmed') ...[
+              const SizedBox(height: 16),
+              if (isProcessing)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
+              else ...[
+                const Text(
+                  'After the customer has viewed the property, complete the '
+                  'viewing here.',
+                  style: TextStyle(color: Colors.black54, height: 1.4),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: canComplete ? onComplete : null,
+                    icon: const Icon(Icons.task_alt),
+                    label: const Text('Complete Viewing'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E8B28),
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.black12,
+                      disabledForegroundColor: Colors.black45,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+                if (!canComplete) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Available on or after ${viewing.effectiveDate}.',
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ],
+            ],
             if (viewing.status == 'completed') ...[
               const SizedBox(height: 16),
 
@@ -1949,6 +2058,15 @@ class _ViewingCard extends StatelessWidget {
                   ),
                 ),
             ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: isProcessing ? null : onOpen,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('View Details'),
+              ),
+            ),
           ],
         ),
       ),

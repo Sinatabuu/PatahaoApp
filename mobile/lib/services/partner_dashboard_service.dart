@@ -140,42 +140,6 @@ class PartnerDashboardService {
     );
   }
 
-  Future<void> markEnRoute({required int viewingId, String notes = ''}) async {
-    final response = await _authenticatedRequest(
-      method: 'POST',
-      path: '/api/viewings/$viewingId/partner-en-route/',
-      body: <String, dynamic>{'notes': notes.trim()},
-    );
-
-    _ensureActionSucceeded(
-      response,
-      fallback: 'Unable to mark the partner as en route.',
-    );
-  }
-
-  Future<void> markArrived({required int viewingId, String notes = ''}) async {
-    final response = await _authenticatedRequest(
-      method: 'POST',
-      path: '/api/viewings/$viewingId/partner-arrived/',
-      body: <String, dynamic>{'notes': notes.trim()},
-    );
-
-    _ensureActionSucceeded(
-      response,
-      fallback: 'Unable to record the partner arrival.',
-    );
-  }
-
-  Future<void> startViewing({required int viewingId, String notes = ''}) async {
-    final response = await _authenticatedRequest(
-      method: 'POST',
-      path: '/api/viewings/$viewingId/start-viewing/',
-      body: <String, dynamic>{'notes': notes.trim()},
-    );
-
-    _ensureActionSucceeded(response, fallback: 'Unable to start this viewing.');
-  }
-
   Future<void> completeViewing({
     required int viewingId,
     required String completionNotes,

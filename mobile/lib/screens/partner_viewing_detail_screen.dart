@@ -286,49 +286,6 @@ class _PartnerViewingDetailScreenState
     );
   }
 
-  Future<void> _markEnRoute() async {
-    await _runAction(
-      confirmationTitle: 'Start journey',
-      confirmationMessage:
-          'Confirm that you are now travelling to the property.',
-      successMessage: 'Customer can now see that you are en route.',
-      action: () {
-        return PartnerDashboardService.instance.markEnRoute(
-          viewingId: _viewing.id,
-        );
-      },
-    );
-  }
-
-  Future<void> _markArrived() async {
-    await _runAction(
-      confirmationTitle: 'Confirm arrival',
-      confirmationMessage:
-          'Confirm that you have arrived at the viewing location.',
-      successMessage: 'Arrival recorded successfully.',
-      action: () {
-        return PartnerDashboardService.instance.markArrived(
-          viewingId: _viewing.id,
-        );
-      },
-    );
-  }
-
-  Future<void> _startViewing() async {
-    await _runAction(
-      confirmationTitle: 'Start viewing',
-      confirmationMessage:
-          'Confirm that the customer is present and the property viewing '
-          'is beginning.',
-      successMessage: 'Viewing started.',
-      action: () {
-        return PartnerDashboardService.instance.startViewing(
-          viewingId: _viewing.id,
-        );
-      },
-    );
-  }
-
   Future<void> _completeViewing() async {
     final notes = await _requestText(
       title: 'Complete viewing',
@@ -500,9 +457,6 @@ class _PartnerViewingDetailScreenState
                     onConfirm: _confirmViewing,
                     onReschedule: _rescheduleViewing,
                     onDecline: _declineViewing,
-                    onEnRoute: _markEnRoute,
-                    onArrived: _markArrived,
-                    onStart: _startViewing,
                     onComplete: _completeViewing,
                   ),
                   const SizedBox(height: 30),
@@ -624,12 +578,6 @@ class _StatusHeader extends StatelessWidget {
                       _StatusChip(
                         text: viewing.status,
                         color: _bookingStatusColor(viewing.status),
-                      ),
-                      _StatusChip(
-                        text: viewing.operationalStatus,
-                        color: _operationalStatusColor(
-                          viewing.operationalStatus,
-                        ),
                       ),
                     ],
                   ),
@@ -890,9 +838,6 @@ class _ActionCard extends StatelessWidget {
     required this.onConfirm,
     required this.onReschedule,
     required this.onDecline,
-    required this.onEnRoute,
-    required this.onArrived,
-    required this.onStart,
     required this.onComplete,
   });
 
@@ -902,9 +847,6 @@ class _ActionCard extends StatelessWidget {
   final VoidCallback onConfirm;
   final VoidCallback onReschedule;
   final VoidCallback onDecline;
-  final VoidCallback onEnRoute;
-  final VoidCallback onArrived;
-  final VoidCallback onStart;
   final VoidCallback onComplete;
 
   @override
@@ -915,6 +857,7 @@ class _ActionCard extends StatelessWidget {
         status == 'paid_awaiting_partner';
 
     final confirmed = status == 'confirmed';
+    final canComplete = viewing.canCompleteOn(DateTime.now());
     final completed = status == 'completed';
     final cancelled = status == 'cancelled' || status == 'declined';
     final waitingForCustomer = status == 'reschedule_proposed';
@@ -1014,8 +957,18 @@ class _ActionCard extends StatelessWidget {
           _PrimaryActionButton(
             label: 'Complete Viewing',
             icon: Icons.task_alt,
-            onPressed: isLoading ? null : onComplete,
+            onPressed: isLoading || !canComplete ? null : onComplete,
           ),
+          if (!canComplete) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Available on or after ${viewing.effectiveDate}.',
+              style: const TextStyle(
+                color: Colors.black54,
+                fontSize: 13,
+              ),
+            ),
+          ],
         ] else
           const _FinishedMessage(
             icon: Icons.info_outline,
@@ -1234,26 +1187,6 @@ Color _bookingStatusColor(String status) {
     case 'cancelled':
     case 'declined':
       return Colors.red.shade700;
-
-    default:
-      return Colors.blueGrey.shade700;
-  }
-}
-
-Color _operationalStatusColor(String status) {
-  switch (status) {
-    case 'viewing_in_progress':
-    case 'viewing_started':
-      return Colors.deepPurple.shade700;
-
-    case 'partner_arrived':
-      return Colors.green.shade700;
-
-    case 'partner_en_route':
-      return Colors.orange.shade800;
-
-    case 'idle':
-      return Colors.blueGrey.shade700;
 
     default:
       return Colors.blueGrey.shade700;

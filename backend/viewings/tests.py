@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import timedelta, time
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
@@ -8,6 +8,7 @@ from django.core.exceptions import (
     ValidationError as DjangoValidationError,
 )
 from django.urls import reverse
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -62,13 +63,15 @@ class ViewingCompletionDealHandoffTests(APITestCase):
             status=Property.STATUS_DRAFT,
         )
 
+        scheduled_date = timezone.localdate()
+
         self.viewing = Viewing.objects.create(
             customer=self.customer,
             property=self.property,
             assigned_partner=self.partner,
-            requested_date=date(2027, 1, 20),
+            requested_date=scheduled_date,
             requested_time=time(10, 30),
-            confirmed_date=date(2027, 1, 20),
+            confirmed_date=scheduled_date,
             confirmed_time=time(10, 30),
             payment_reference="TEST-PAID-VIEWING-001",
             status=Viewing.Status.CONFIRMED,
@@ -210,3 +213,36 @@ class ViewingCompletionDealHandoffTests(APITestCase):
                 ),
             ).exists()
         )
+
+    def test_future_viewing_cannot_be_completed_early(self):
+        future_date = timezone.localdate() + timedelta(days=1)
+        self.viewing.requested_date = future_date
+        self.viewing.confirmed_date = future_date
+        self.viewing.save(
+            update_fields=[
+                "requested_date",
+                "confirmed_date",
+                "updated_at",
+            ]
+        )
+        self.client.force_authenticate(user=self.partner_user)
+
+        response = self.client.post(
+            reverse(
+                "viewing-complete-viewing",
+                kwargs={"pk": self.viewing.pk},
+            ),
+            {"completion_notes": "Too early."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["scheduled_date"],
+            (
+                "This viewing cannot be completed before its scheduled "
+                f"date, {future_date.isoformat()}."
+            ),
+        )
+        self.viewing.refresh_from_db()
+        self.assertEqual(self.viewing.status, Viewing.Status.CONFIRMED)

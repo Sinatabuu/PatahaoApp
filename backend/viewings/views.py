@@ -307,6 +307,21 @@ class ViewingViewSet(viewsets.ModelViewSet):
                 }
             )
 
+    def _require_scheduled_date_reached(self, viewing):
+        scheduled_date = viewing.confirmed_date or viewing.requested_date
+        current_date = timezone.localdate()
+
+        if scheduled_date and scheduled_date > current_date:
+            raise ValidationError(
+                {
+                    "scheduled_date": (
+                        "This viewing cannot be completed before its "
+                        f"scheduled date, {scheduled_date.isoformat()}."
+                    ),
+                    "current_date": current_date.isoformat(),
+                }
+            )
+
     @transaction.atomic
     def perform_create(self, serializer):
         property_obj = serializer.validated_data["property"]
@@ -1402,7 +1417,7 @@ class ViewingViewSet(viewsets.ModelViewSet):
 
         viewing = self._get_partner_viewing(pk)
         self._require_confirmed_viewing(viewing)
-
+        self._require_scheduled_date_reached(viewing)
 
         self._ensure_event_not_recorded(
             viewing,

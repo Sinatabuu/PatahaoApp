@@ -642,6 +642,31 @@ class PartnerDashboardViewing {
         requestedTime;
   }
 
+  bool canCompleteOn(DateTime currentDate) {
+    if (effectiveBookingStatus != 'confirmed') {
+      return false;
+    }
+
+    final scheduledDate = DateTime.tryParse(effectiveDate.trim());
+
+    if (scheduledDate == null) {
+      return true;
+    }
+
+    final scheduledDay = DateTime(
+      scheduledDate.year,
+      scheduledDate.month,
+      scheduledDate.day,
+    );
+    final currentDay = DateTime(
+      currentDate.year,
+      currentDate.month,
+      currentDate.day,
+    );
+
+    return !scheduledDay.isAfter(currentDay);
+  }
+
   String get friendlyStatus {
     switch (effectiveBookingStatus) {
       case 'pending_payment':
