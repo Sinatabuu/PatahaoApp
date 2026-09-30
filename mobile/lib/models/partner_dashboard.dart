@@ -419,6 +419,8 @@ class PartnerDashboardViewing {
     this.feeResolutionProcessedAt,
     this.feeResolutionProcessed = false,
     this.requiresFeeResolution = false,
+    this.ownerConfirmationStatus = '',
+    this.ownerConfirmationStatusLabel = '',
     
     this.proposedDate,
     this.proposedTime,
@@ -487,6 +489,8 @@ class PartnerDashboardViewing {
 
   final int? dealId;
   final bool partnerOutcomeSubmitted;
+  final String ownerConfirmationStatus;
+  final String ownerConfirmationStatusLabel;
   
 
   factory PartnerDashboardViewing.fromJson(
@@ -569,6 +573,12 @@ class PartnerDashboardViewing {
 
       partnerOutcomeSubmitted:
           json['partner_outcome_submitted'] == true,
+      ownerConfirmationStatus: _asString(
+        json['owner_confirmation_status'],
+      ),
+      ownerConfirmationStatusLabel: _asString(
+        json['owner_confirmation_status_label'],
+      ),
       proposedTime: _asNullableString(
         json['proposed_time'],
       ),

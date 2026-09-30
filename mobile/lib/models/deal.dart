@@ -26,6 +26,8 @@ class Deal {
   final bool customerOutcomeSubmitted;
   final bool partnerConfirmed;
   final bool ownerConfirmed;
+  final String ownerConfirmationStatus;
+  final String ownerConfirmationStatusLabel;
 
   const Deal({
     required this.id,
@@ -48,6 +50,8 @@ class Deal {
     required this.customerConfirmed,
     required this.partnerConfirmed,
     required this.ownerConfirmed,
+    required this.ownerConfirmationStatus,
+    required this.ownerConfirmationStatusLabel,
   });
 
   factory Deal.fromJson(Map<String, dynamic> json) {
@@ -87,6 +91,10 @@ class Deal {
           json['partner_confirmed'] == true,
       ownerConfirmed:
           json['owner_confirmed'] == true,
+      ownerConfirmationStatus:
+          json['owner_confirmation_status']?.toString() ?? '',
+      ownerConfirmationStatusLabel:
+          json['owner_confirmation_status_label']?.toString() ?? '',
     );
   }
 

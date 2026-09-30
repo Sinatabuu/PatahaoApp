@@ -110,10 +110,14 @@ def partner_viewings_queryset(partner):
             "property",
             "property__partner",
             "assigned_partner",
+            "deal",
+            "deal__property",
         )
         .prefetch_related(
             "events",
             "events__actor",
+            "deal__outcomes",
+            "deal__owner_confirmation_tokens",
         )
         .filter(
             Q(assigned_partner=partner)

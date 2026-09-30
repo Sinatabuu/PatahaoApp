@@ -6,6 +6,7 @@ from django.utils import timezone
 from payments.models import Payment
 from introductions.models import ProtectedIntroduction
 from mandates.models import PropertyMandate
+from notifications.models import Notification
 from governance.services import (
     enforce_partner_operational_access,
 )
@@ -25,6 +26,74 @@ SUCCESS_OUTCOMES = {
     DealOutcome.Outcome.RENTED,
     DealOutcome.Outcome.PURCHASED,
 }
+
+OWNER_CONFIRMATION_STATUS_LABELS = {
+    "awaiting_staff": "Awaiting Pata Hao staff",
+    "sent_to_owner": "Sent to owner",
+    "link_expired": "Owner link expired",
+    "confirmed": "Owner confirmed transaction",
+    "response_recorded": "Owner response recorded",
+    "not_required": "Owner confirmation not required",
+}
+
+
+def get_owner_confirmation_status(deal):
+    """Return a safe owner-confirmation lifecycle projection.
+
+    This deliberately excludes the token, owner identity, contact details,
+    mandate details, and owner notes so it is safe for customer and partner
+    deal responses.
+    """
+
+    owner_outcome = next(
+        (
+            item
+            for item in deal.outcomes.all()
+            if item.reporter == DealOutcome.Reporter.OWNER
+        ),
+        None,
+    )
+
+    if owner_outcome is not None:
+        expected_success_outcome = (
+            DealOutcome.Outcome.PURCHASED
+            if deal.property.listing_type == "sale"
+            else DealOutcome.Outcome.RENTED
+        )
+        status_code = (
+            "confirmed"
+            if owner_outcome.outcome == expected_success_outcome
+            else "response_recorded"
+        )
+    else:
+        latest_token = next(
+            iter(deal.owner_confirmation_tokens.all()),
+            None,
+        )
+
+        if latest_token is not None and latest_token.is_usable:
+            status_code = "sent_to_owner"
+        elif (
+            latest_token is not None
+            and latest_token.used_at is None
+            and latest_token.revoked_at is None
+            and latest_token.expires_at <= timezone.now()
+        ):
+            status_code = "link_expired"
+        elif deal.status in {
+            Deal.Status.AGREED,
+            Deal.Status.CANCELLED,
+            Deal.Status.COMPLETED,
+            Deal.Status.COMMISSION_PAID,
+        }:
+            status_code = "not_required"
+        else:
+            status_code = "awaiting_staff"
+
+    return {
+        "code": status_code,
+        "label": OWNER_CONFIRMATION_STATUS_LABELS[status_code],
+    }
 
 @transaction.atomic
 def evaluate_deal_outcomes(deal_id):
@@ -468,13 +537,18 @@ def issue_owner_confirmation_token(
     """
     Issue a single-use owner confirmation token.
 
-    Only staff or the deal's approved partner may issue it.
+    Only Pata Hao staff may issue it.
     Older unused tokens for the deal are revoked.
     """
 
     if actor is None or not actor.is_authenticated:
         raise ValidationError(
             "An authenticated actor is required."
+        )
+
+    if not actor.is_staff:
+        raise ValidationError(
+            "Only Pata Hao staff may issue owner confirmation."
         )
 
     deal = (
@@ -488,31 +562,9 @@ def issue_owner_confirmation_token(
         .get(pk=deal_id)
     )
 
-    actor_partner = getattr(
-        actor,
-        "partner_profile",
-        None,
-    )
-
-    is_assigned_partner = (
-        actor_partner is not None
-        and actor_partner.pk == deal.partner_id
-    )
-
-    if not actor.is_staff and not is_assigned_partner:
-        raise ValidationError(
-            "Only Pata Hao staff or the assigned partner "
-            "may issue owner confirmation."
-        )
-    if is_assigned_partner:
-        enforce_partner_operational_access(
-            actor_partner,
-            operation="issue_owner_confirmation",
-        )
-
     governance = evaluate_owner_confirmation_governance(
-    deal,
-)
+        deal,
+    )
 
     if not governance["eligible"]:
         raise ValidationError(
@@ -764,6 +816,31 @@ def submit_owner_outcome(
 
     evaluated_deal = evaluate_deal_outcomes(
         deal.id,
+    )
+
+    expected_success_outcome = (
+        DealOutcome.Outcome.PURCHASED
+        if deal.property.listing_type == "sale"
+        else DealOutcome.Outcome.RENTED
+    )
+
+    if owner_outcome.outcome == expected_success_outcome:
+        notification_message = (
+            f"The verified owner confirmed the transaction for "
+            f"{deal.property.title}."
+        )
+    else:
+        notification_message = (
+            f"The verified owner submitted a response for "
+            f"{deal.property.title}. Open the completed viewing "
+            "to see the confirmation status."
+        )
+
+    Notification.objects.create(
+        user=deal.partner.user,
+        title="Owner confirmation received",
+        message=notification_message,
+        notification_type=Notification.TYPE_DEAL,
     )
 
     return owner_outcome, evaluated_deal

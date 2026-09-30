@@ -8,6 +8,7 @@ import 'package:mobile/services/partner_commission_service.dart';
 import 'package:mobile/screens/partner_commission_settlement_detail_screen.dart';
 import 'package:mobile/screens/partner_transaction_history_screen.dart';
 import 'package:mobile/screens/partner_viewing_detail_screen.dart';
+import 'package:mobile/screens/customer_notifications_screen.dart';
 import 'package:mobile/screens/property_list_screen.dart';
 import 'package:mobile/screens/my_properties_screen.dart';
 import 'partner_post_property_screen.dart';
@@ -64,6 +65,18 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
     }
 
     await _refreshDashboard();
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const CustomerNotificationsScreen(),
+      ),
+    );
+
+    if (mounted) {
+      await _refreshDashboard();
+    }
   }
 
   Future<void> _refreshDashboard() async {
@@ -675,6 +688,11 @@ class _PartnerDashboardScreenState extends State<PartnerDashboardScreen> {
         title: const Text('Partner Command Center'),
         backgroundColor: Colors.white,
         actions: [
+          IconButton(
+            tooltip: 'Notifications',
+            onPressed: _openNotifications,
+            icon: const Icon(Icons.notifications_outlined),
+          ),
           IconButton(
             tooltip: 'Browse Properties',
             onPressed: _openBrowseProperties,
@@ -1791,6 +1809,50 @@ class _ViewingCard extends StatelessWidget {
                 label: const Text('Open Viewing'),
               ),
             ),
+
+            if (viewing.dealId != null &&
+                viewing.ownerConfirmationStatusLabel.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF6F8F6),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.verified_user_outlined,
+                      color: Color(0xFF14532D),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Owner confirmation',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(viewing.ownerConfirmationStatusLabel),
+                          const SizedBox(height: 3),
+                          const Text(
+                            'Pata Hao staff manages the secure owner link.',
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             if (viewing.status == 'paid_pending_partner') ...[
               const SizedBox(height: 16),

@@ -5,6 +5,7 @@ from .models import (
     Deal,
     DealOutcome,
 )
+from .services import get_owner_confirmation_status
 
 
 class DealOutcomeSerializer(serializers.ModelSerializer):
@@ -64,6 +65,8 @@ class DealSerializer(serializers.ModelSerializer):
     customer_outcome_submitted = serializers.SerializerMethodField()
     partner_name = serializers.SerializerMethodField()
     commission_invoice = serializers.SerializerMethodField()
+    owner_confirmation_status = serializers.SerializerMethodField()
+    owner_confirmation_status_label = serializers.SerializerMethodField()
 
     property_title = serializers.CharField(
         source="property.title",
@@ -90,10 +93,7 @@ class DealSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
-    outcomes = DealOutcomeSerializer(
-        many=True,
-        read_only=True,
-    )
+    outcomes = serializers.SerializerMethodField()
 
     class Meta:
         model = Deal
@@ -126,6 +126,8 @@ class DealSerializer(serializers.ModelSerializer):
             "customer_outcome_submitted",
             "partner_confirmed",
             "owner_confirmed",
+            "owner_confirmation_status",
+            "owner_confirmation_status_label",
             "customer_confirmed_at",
             "partner_confirmed_at",
             "owner_confirmed_at",
@@ -143,10 +145,41 @@ class DealSerializer(serializers.ModelSerializer):
         ]
 
         read_only_fields = fields
+
     def get_customer_outcome_submitted(self, deal):
-        return deal.outcomes.filter(
-            reporter=DealOutcome.Reporter.CUSTOMER,
-        ).exists()
+        return any(
+            outcome.reporter == DealOutcome.Reporter.CUSTOMER
+            for outcome in deal.outcomes.all()
+        )
+
+    def get_owner_confirmation_status(self, deal):
+        return get_owner_confirmation_status(deal)["code"]
+
+    def get_owner_confirmation_status_label(self, deal):
+        return get_owner_confirmation_status(deal)["label"]
+
+    def get_outcomes(self, deal):
+        request = self.context.get("request")
+        outcomes = list(deal.outcomes.all())
+
+        if request is None:
+            outcomes = []
+        elif not request.user.is_staff:
+            reporter = (
+                DealOutcome.Reporter.PARTNER
+                if getattr(request.user, "role", None) == "partner"
+                else DealOutcome.Reporter.CUSTOMER
+            )
+            outcomes = [
+                outcome
+                for outcome in outcomes
+                if outcome.reporter == reporter
+            ]
+
+        return DealOutcomeSerializer(
+            outcomes,
+            many=True,
+        ).data
 
     def get_customer_name(self, deal):
         full_name = deal.customer.get_full_name().strip()

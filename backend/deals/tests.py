@@ -33,6 +33,7 @@ from mandates.models import (
     PropertyMandate,
     PropertyOwner,
 )
+from notifications.models import Notification
 from partners.models import Partner
 from properties.models import Property
 from viewings.models import Viewing
@@ -51,7 +52,9 @@ from .services import (
     create_deal_from_pic,
     ensure_commission_invoice_for_due_deal,
     evaluate_deal_outcomes,
+    issue_owner_confirmation_token,
     record_commission_receipt,
+    submit_owner_outcome,
 )
 User = get_user_model()
 
@@ -1644,6 +1647,190 @@ class DealCompletionCommissionTests(
             platform_share.percentage_of_total,
             Decimal("80.0000"),
         )
+
+class OwnerConfirmationWorkflowTests(
+    DealCompletionCommissionTests
+):
+    test_converted_pic_reuses_its_existing_deal = None
+    test_inactive_pic_without_deal_remains_rejected = None
+    test_agreed_deal_completion_allocates_commission = None
+
+    def issue_url(self):
+        return reverse(
+            "deal-issue-owner-confirmation",
+            kwargs={"pk": self.deal.pk},
+        )
+
+    def test_partner_cannot_issue_owner_confirmation(self):
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = self.client.post(
+            self.issue_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertFalse(
+            OwnerConfirmationToken.objects.filter(
+                deal=self.deal,
+            ).exists()
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Only Pata Hao staff may issue owner confirmation.",
+        ):
+            issue_owner_confirmation_token(
+                deal_id=self.deal.id,
+                actor=self.partner_user,
+            )
+
+    def test_partner_dashboard_shows_safe_sent_status(self):
+        self.client.force_authenticate(
+            user=self.staff_user,
+        )
+
+        issue_response = self.client.post(
+            self.issue_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            issue_response.status_code,
+            status.HTTP_201_CREATED,
+            issue_response.data,
+        )
+
+        raw_token = issue_response.data[
+            "confirmation"
+        ][
+            "token"
+        ]
+
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        detail_response = self.client.get(
+            self.deal_detail_url(self.deal),
+        )
+
+        self.assertEqual(
+            detail_response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            detail_response.data["owner_confirmation_status"],
+            "sent_to_owner",
+        )
+        self.assertEqual(
+            detail_response.data[
+                "owner_confirmation_status_label"
+            ],
+            "Sent to owner",
+        )
+        self.assertNotIn(
+            raw_token,
+            str(detail_response.data),
+        )
+        self.assertNotIn(
+            self.owner.phone_number,
+            str(detail_response.data),
+        )
+
+        dashboard_response = self.client.get(
+            reverse("partner-dashboard"),
+        )
+
+        self.assertEqual(
+            dashboard_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        dashboard_viewing = next(
+            item
+            for item in dashboard_response.data["viewing_requests"]
+            if item["id"] == self.viewing.id
+        )
+
+        self.assertEqual(
+            dashboard_viewing["owner_confirmation_status"],
+            "sent_to_owner",
+        )
+        self.assertEqual(
+            dashboard_viewing[
+                "owner_confirmation_status_label"
+            ],
+            "Sent to owner",
+        )
+        self.assertNotIn(
+            raw_token,
+            str(dashboard_viewing),
+        )
+
+    def test_owner_response_notifies_partner_without_exposing_notes(self):
+        _token_record, raw_token = issue_owner_confirmation_token(
+            deal_id=self.deal.id,
+            actor=self.staff_user,
+        )
+
+        private_owner_note = "Private owner confirmation note."
+
+        submit_owner_outcome(
+            raw_token=raw_token,
+            outcome=DealOutcome.Outcome.RENTED,
+            notes=private_owner_note,
+        )
+
+        notification = Notification.objects.get(
+            user=self.partner_user,
+            notification_type=Notification.TYPE_DEAL,
+            title="Owner confirmation received",
+        )
+
+        self.assertIn(
+            self.rental_property.title,
+            notification.message,
+        )
+        self.assertNotIn(
+            private_owner_note,
+            notification.message,
+        )
+
+        self.client.force_authenticate(
+            user=self.partner_user,
+        )
+
+        response = self.client.get(
+            self.deal_detail_url(self.deal),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            response.data["owner_confirmation_status"],
+            "confirmed",
+        )
+        self.assertNotIn(
+            private_owner_note,
+            str(response.data),
+        )
+        self.assertFalse(
+            any(
+                item["reporter"] == DealOutcome.Reporter.OWNER
+                for item in response.data["outcomes"]
+            )
+        )
+
 
 class CommissionReceiptEvidenceTests(
     DealCompletionCommissionTests

@@ -52,7 +52,7 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
     Partner:
     - Can view only deals assigned to their partner profile.
     - Can submit only the partner outcome.
-    - Can issue owner confirmation for assigned deals.
+    - Can view a safe owner-confirmation lifecycle status.
 
     Staff:
     - Can view all deals.
@@ -87,6 +87,7 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
             )
             .prefetch_related(
                 "outcomes",
+                "owner_confirmation_tokens",
             )
             .order_by(
                 "-created_at",
@@ -413,9 +414,13 @@ class DealViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Issue a single-use owner confirmation token.
 
-        Only Pata Hao staff or the deal's assigned partner may
-        perform this action.
+        Only Pata Hao staff may perform this action.
         """
+
+        if not request.user.is_staff:
+            raise PermissionDenied(
+                "Only Pata Hao staff may issue owner confirmation."
+            )
 
         try:
             token_record, raw_token = (
@@ -1377,6 +1382,7 @@ class OwnerOutcomeSubmissionView(APIView):
             )
             .prefetch_related(
                 "outcomes",
+                "owner_confirmation_tokens",
             )
             .get(pk=evaluated_deal.pk)
         )

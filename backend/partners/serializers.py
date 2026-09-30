@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from deals.services import get_owner_confirmation_status
 from properties.models import Property
 from viewings.models import Viewing
 
@@ -81,6 +82,8 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
     deal_id = serializers.SerializerMethodField()
 
     partner_outcome_submitted = serializers.SerializerMethodField()
+    owner_confirmation_status = serializers.SerializerMethodField()
+    owner_confirmation_status_label = serializers.SerializerMethodField()
 
     fee_resolution_label = serializers.CharField(
         source="get_fee_resolution_choice_display",
@@ -103,6 +106,8 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
             "listing_type",
             "deal_id",
             "partner_outcome_submitted",
+            "owner_confirmation_status",
+            "owner_confirmation_status_label",
             "requested_date",
             "requested_time",
             "customer_message",
@@ -157,9 +162,26 @@ class PartnerDashboardViewingSerializer(serializers.ModelSerializer):
         if deal is None:
             return False
 
-        return deal.outcomes.filter(
-            reporter="partner",
-        ).exists()
+        return any(
+            outcome.reporter == "partner"
+            for outcome in deal.outcomes.all()
+        )
+
+    def get_owner_confirmation_status(self, viewing):
+        deal = getattr(viewing, "deal", None)
+
+        if deal is None:
+            return ""
+
+        return get_owner_confirmation_status(deal)["code"]
+
+    def get_owner_confirmation_status_label(self, viewing):
+        deal = getattr(viewing, "deal", None)
+
+        if deal is None:
+            return ""
+
+        return get_owner_confirmation_status(deal)["label"]
 
     def get_requires_fee_resolution(self, viewing):
         return (
