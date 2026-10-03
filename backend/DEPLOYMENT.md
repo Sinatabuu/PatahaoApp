@@ -48,6 +48,19 @@ Application logs are written to standard output. `DJANGO_LOG_LEVEL` accepts
 `CRITICAL`, `ERROR`, `WARNING`, `INFO`, or `DEBUG`; deployed environments
 default to `INFO`.
 
+## Application server and reverse proxy
+
+The repository includes reviewed staging templates in `backend/deploy/` for
+Gunicorn, systemd, Nginx, and the service environment. Gunicorn binds to
+loopback by default and trusts forwarded HTTPS headers only from local Nginx.
+Its 120-second request timeout safely exceeds the 45-second video-processing
+limit.
+
+The Nginx template accepts the documented 100 MB video limit plus multipart
+overhead. It serves only explicitly allowlisted public media directories and
+returns HTTP 404 for every other `/media/` path. This is essential because
+mandate and identity documents must never be exposed as public files.
+
 ## Sandbox-first M-Pesa rollout
 
 Keep real customer charges disabled until Pata HAO has its approved Safaricom

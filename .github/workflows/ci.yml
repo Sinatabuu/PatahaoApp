@@ -45,6 +45,10 @@ jobs:
         working-directory: backend
         run: python manage.py check
 
+      - name: Validate Gunicorn configuration
+        working-directory: backend
+        run: python -m gunicorn --check-config --config config/gunicorn.py config.wsgi:application
+
       - name: Validate production configuration boots safely
         working-directory: backend
         env:

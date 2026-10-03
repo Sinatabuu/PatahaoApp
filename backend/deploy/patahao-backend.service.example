@@ -1,0 +1,26 @@
+[Unit]
+Description=Pata HAO Django backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=patahao
+Group=www-data
+WorkingDirectory=/srv/patahao/current/backend
+EnvironmentFile=/etc/patahao/backend.env
+ExecStart=/srv/patahao/venv/bin/gunicorn --config config/gunicorn.py config.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/patahao/media
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

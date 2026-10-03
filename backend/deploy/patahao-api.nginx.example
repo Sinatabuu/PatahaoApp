@@ -1,0 +1,74 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.staging.example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.staging.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/api.staging.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.staging.example.com/privkey.pem;
+
+    client_max_body_size 105m;
+
+    location /static/ {
+        alias /srv/patahao/current/backend/staticfiles/;
+        access_log off;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800" always;
+    }
+
+    # Temporary staging-only public media allowlist. Mandate and identity
+    # documents are deliberately excluded and must never be exposed by Nginx.
+    location ^~ /media/property_photos/ {
+        alias /var/lib/patahao/media/property_photos/;
+        expires 1h;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    location ^~ /media/property_videos/ {
+        alias /var/lib/patahao/media/property_videos/;
+        expires 1h;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    location ^~ /media/property_video_thumbnails/ {
+        alias /var/lib/patahao/media/property_video_thumbnails/;
+        expires 1h;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    location ^~ /media/partner_profiles/ {
+        alias /var/lib/patahao/media/partner_profiles/;
+        expires 1h;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    # Fail closed for every unapproved media path, including mandates.
+    location ^~ /media/ {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+}
