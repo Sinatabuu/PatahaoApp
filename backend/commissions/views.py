@@ -172,7 +172,7 @@ class PartnerCommissionAgreementViewSet(
     def accept(self, request, pk=None):
         agreement = (
             self.get_queryset()
-            .select_for_update()
+            .select_for_update(of=("self",))
             .get(pk=pk)
         )
 
