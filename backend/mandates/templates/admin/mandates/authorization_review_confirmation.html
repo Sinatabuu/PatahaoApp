@@ -1,0 +1,93 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<h1>Confirm Authorization Review</h1>
+
+<p>
+    Review the property authorization carefully before approving.
+</p>
+
+<table>
+    <tr>
+        <th>Property</th>
+        <td>{{ review.property }}</td>
+    </tr>
+    <tr>
+        <th>Owner</th>
+        <td>{{ review.owner }}</td>
+    </tr>
+    <tr>
+        <th>Authorization</th>
+        <td>{{ review.mandate_number }}</td>
+    </tr>
+    <tr>
+        <th>Listing type</th>
+        <td>{% if is_sale %}Sale{% else %}Rental{% endif %}</td>
+    </tr>
+</table>
+
+<h2>Authorization Evidence</h2>
+
+{% if evidence %}
+    <ul>
+        {% for item in evidence %}
+            <li>
+                {{ item.document }}
+                {% if item.required %}(Required){% endif %}
+                —
+                <a href="{{ item.url }}"
+                   target="_blank"
+                   rel="noopener">
+                    Open evidence
+                </a>
+            </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p>No evidence documents attached.</p>
+{% endif %}
+
+<form method="post">
+    {% csrf_token %}
+
+    {{ form.non_field_errors }}
+
+    <fieldset>
+        <legend>Evidence inspection acknowledgment</legend>
+        {{ form.reviewed_document_ids.errors }}
+        {{ form.reviewed_document_ids }}
+    </fieldset>
+
+    <p>
+        {{ form.confirm_review.errors }}
+        {{ form.confirm_review }}
+        {{ form.confirm_review.label_tag }}
+    </p>
+
+    <input type="hidden"
+           name="action"
+           value="complete_selected_authorization_reviews">
+
+    <input type="hidden"
+           name="_selected_action"
+           value="{{ review.pk }}">
+
+    <input type="hidden"
+           name="confirmation_token"
+           value="{{ confirmation_token }}">
+
+    <input type="hidden"
+           name="confirm_authorization_review"
+           value="yes">
+
+    <div class="submit-row">
+        <input type="submit"
+               value="Approve authorization"
+               class="default">
+
+        <a href="{% url 'admin:mandates_authorizationreview_changelist' %}">
+            Cancel
+        </a>
+    </div>
+</form>
+{% endblock %}

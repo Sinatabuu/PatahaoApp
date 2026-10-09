@@ -141,6 +141,33 @@ class StaffAuthorizationReviewTests(TestCase):
 
         self.client = APIClient()
 
+    def get_admin_confirmation_token(self, mandate_id=None):
+        """Obtain the token from the real Admin confirmation screen."""
+        if mandate_id is None:
+            mandate_id = self.mandate.id
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(mandate_id)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(
+            response,
+            "admin/mandates/authorization_review_confirmation.html",
+        )
+
+        token = response.context["confirmation_token"]
+        self.assertTrue(token)
+        return token
+
     def test_submitted_authorization_is_visible_to_staff(self):
         self.client.force_authenticate(
             user=self.admin,
@@ -524,33 +551,423 @@ class StaffAuthorizationReviewTests(TestCase):
         )
 
     def test_django_admin_can_approve_authorization_review(self):
-        self.client.force_login(
-            self.admin,
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
         )
 
+        selection = {
+            "action": "complete_selected_authorization_reviews",
+            "_selected_action": [str(self.mandate.id)],
+        }
+
+        # Stage 1: Opening the action must not approve the mandate.
+        response = self.client.post(url, selection)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Confirm Authorization Review",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        # Stage 2: Administrator explicitly acknowledges evidence.
         response = self.client.post(
-            reverse(
-                "admin:mandates_authorizationreview_changelist",
-            ),
+            url,
             {
-                "action": (
-                    "complete_selected_authorization_reviews"
-                ),
-                "_selected_action": [
-                    str(self.mandate.id),
+                **selection,
+                "confirm_authorization_review": "yes",
+                "confirmation_token": self.get_admin_confirmation_token(),
+                "confirm_review": "on",
+                "reviewed_document_ids": [
+                    str(document_id)
+                    for document_id in self.reviewed_document_ids
                 ],
             },
             follow=True,
         )
 
+        self.assertEqual(response.status_code, 200)
+
+        self.mandate.refresh_from_db()
         self.assertEqual(
-            response.status_code,
-            200,
+            self.mandate.status,
+            PropertyMandate.Status.APPROVED,
+        )
+
+    def test_admin_cannot_approve_without_all_evidence_acknowledgments(self):
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(self.mandate.id)],
+                "confirm_authorization_review": "yes",
+                "confirmation_token": self.get_admin_confirmation_token(),
+                "confirm_review": "on",
+                "reviewed_document_ids": [
+                    str(document_id)
+                    for document_id in self.reviewed_document_ids[:-1]
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Acknowledge every required current evidence file.",
         )
 
         self.mandate.refresh_from_db()
 
         self.assertEqual(
             self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists()
+        )
+
+    def test_admin_rejects_unrecognized_evidence_document_id(self):
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(self.mandate.id)],
+                "confirm_authorization_review": "yes",
+                "confirmation_token": self.get_admin_confirmation_token(),
+                "confirm_review": "on",
+                "reviewed_document_ids": [
+                    *[
+                        str(document_id)
+                        for document_id in self.reviewed_document_ids
+                    ],
+                    "999999999",
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Select a valid choice",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+    def test_admin_cannot_approve_without_review_confirmation(self):
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(self.mandate.id)],
+                "confirm_authorization_review": "yes",
+                "confirmation_token": self.get_admin_confirmation_token(),
+                "reviewed_document_ids": [
+                    str(document_id)
+                    for document_id in self.reviewed_document_ids
+                ],
+                # Intentionally omit confirm_review.
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "This field is required.",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists()
+        )
+
+    def test_admin_can_approve_rental_without_sale_documents(self):
+        self.property.listing_type = Property.LISTING_RENT
+        self.property.save(update_fields=["listing_type"])
+
+        self.mandate.documents.all().delete()
+
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        selection = {
+            "action": "complete_selected_authorization_reviews",
+            "_selected_action": [str(self.mandate.id)],
+        }
+
+        response = self.client.post(url, selection)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Confirm Authorization Review")
+        self.assertContains(response, "Rental")
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        response = self.client.post(
+            url,
+            {
+                **selection,
+                "confirm_authorization_review": "yes",
+                "confirmation_token": self.get_admin_confirmation_token(),
+                "confirm_review": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
             PropertyMandate.Status.APPROVED,
+        )
+
+    def test_admin_rejects_missing_confirmation_token(self):
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(self.mandate.id)],
+                "confirm_authorization_review": "yes",
+                "confirm_review": "on",
+                "reviewed_document_ids": [
+                    str(document_id)
+                    for document_id in self.reviewed_document_ids
+                ],
+                # Intentionally omit confirmation_token.
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Invalid or expired authorization confirmation",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists()
+        )
+
+    def test_admin_rejects_expired_confirmation_token(self):
+        from unittest.mock import patch
+
+        from django.core import signing
+
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        # Generate a token that appears to be 20 minutes old.
+        with patch(
+            "django.core.signing.time.time",
+            return_value=1000000,
+        ):
+            expired_token = signing.dumps(
+                {
+                    "mandate_id": self.mandate.id,
+                    "reviewer_id": self.admin.pk,
+                },
+                salt="patahao-authorization-review",
+            )
+
+        with patch(
+            "django.core.signing.time.time",
+            return_value=1001200,
+        ):
+            response = self.client.post(
+                url,
+                {
+                    "action": "complete_selected_authorization_reviews",
+                    "_selected_action": [str(self.mandate.id)],
+                    "confirm_authorization_review": "yes",
+                    "confirmation_token": expired_token,
+                    "confirm_review": "on",
+                    "reviewed_document_ids": [
+                        str(document_id)
+                        for document_id in self.reviewed_document_ids
+                    ],
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Invalid or expired authorization confirmation",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists()
+        )
+
+    def test_admin_rejects_token_for_different_mandate(self):
+        from django.core import signing
+
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        mismatched_token = signing.dumps(
+            {
+                "mandate_id": self.mandate.id + 999,
+                "reviewer_id": self.admin.pk,
+            },
+            salt="patahao-authorization-review",
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(self.mandate.id)],
+                "confirm_authorization_review": "yes",
+                "confirmation_token": mismatched_token,
+                "confirm_review": "on",
+                "reviewed_document_ids": [
+                    str(document_id)
+                    for document_id in self.reviewed_document_ids
+                ],
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Authorization confirmation does not match",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists()
+        )
+
+    def test_admin_rejects_token_for_different_administrator(self):
+        from django.core import signing
+
+        self.client.force_login(self.admin)
+
+        url = reverse(
+            "admin:mandates_authorizationreview_changelist"
+        )
+
+        mismatched_token = signing.dumps(
+            {
+                "mandate_id": self.mandate.id,
+                "reviewer_id": self.admin.pk + 999,
+            },
+            salt="patahao-authorization-review",
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "action": "complete_selected_authorization_reviews",
+                "_selected_action": [str(self.mandate.id)],
+                "confirm_authorization_review": "yes",
+                "confirmation_token": mismatched_token,
+                "confirm_review": "on",
+                "reviewed_document_ids": [
+                    str(document_id)
+                    for document_id in self.reviewed_document_ids
+                ],
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Authorization confirmation does not match",
+        )
+
+        self.mandate.refresh_from_db()
+        self.assertEqual(
+            self.mandate.status,
+            PropertyMandate.Status.UNDER_REVIEW,
+        )
+
+        self.assertFalse(
+            self.mandate.documents.filter(
+                status=MandateDocument.Status.APPROVED,
+            ).exists()
         )

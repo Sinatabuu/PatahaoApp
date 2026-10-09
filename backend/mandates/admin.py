@@ -1,6 +1,7 @@
 import mimetypes
 
 from django import forms
+from django.core import signing
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -10,6 +11,8 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
+
+from properties.models import Property
 
 from .models import (
     AuthorizationReview,
@@ -58,6 +61,23 @@ class RejectMandateDocumentForm(forms.Form):
             "Explain specifically why this evidence cannot be accepted. "
             "The reason becomes part of the immutable mandate audit trail."
         ),
+    )
+
+
+
+class AuthorizationEvidenceReviewForm(forms.Form):
+    reviewed_document_ids = forms.MultipleChoiceField(
+        label="Evidence files personally inspected",
+        widget=forms.CheckboxSelectMultiple,
+        required=False,
+    )
+
+    confirm_review = forms.BooleanField(
+        label=(
+            "I confirm that I inspected the required evidence "
+            "and authorize this review decision."
+        ),
+        required=True,
     )
 
 
@@ -508,6 +528,7 @@ class AuthorizationReviewAdmin(PropertyMandateAdmin):
     ):
         return False
 
+
     @admin.action(
         description="Approve selected authorization reviews",
     )
@@ -516,42 +537,161 @@ class AuthorizationReviewAdmin(PropertyMandateAdmin):
         request,
         queryset,
     ):
-        approved = 0
-        failed = []
-
-        for review in queryset:
-            try:
-                complete_authorization_review(
-                    mandate_id=review.id,
-                    reviewer=request.user,
-                    reviewed_document_ids=(
-                        review.documents.filter(
-                            is_current=True,
-                        ).values_list(
-                            "id",
-                            flat=True,
-                        )
-                    ),
-                )
-                approved += 1
-            except Exception as error:
-                failed.append(
-                    f"{review.mandate_number}: {error}"
-                )
-
-        if approved:
+        if queryset.count() != 1:
             self.message_user(
                 request,
-                f"{approved} authorization review(s) approved.",
-                level=messages.SUCCESS,
-            )
-
-        for message in failed:
-            self.message_user(
-                request,
-                message,
+                "Select exactly one authorization to review.",
                 level=messages.ERROR,
             )
+            return
+
+        review = queryset.select_related(
+            "property",
+            "owner",
+        ).first()
+
+        confirmation_token = signing.dumps(
+            {
+                "mandate_id": review.id,
+                "reviewer_id": request.user.pk,
+            },
+            salt="patahao-authorization-review",
+        )
+
+        documents = list(
+            review.documents.filter(
+                is_current=True,
+            ).order_by("document_type", "id")
+        )
+
+        is_sale = (
+            review.property.listing_type
+            == Property.LISTING_SALE
+        )
+
+        required_types = {
+            MandateDocument.DocumentType.OWNER_ID,
+            MandateDocument.DocumentType.OWNERSHIP_PROOF,
+            MandateDocument.DocumentType.SIGNED_MANDATE,
+        } if is_sale else set()
+
+        required_documents = [
+            document
+            for document in documents
+            if document.document_type in required_types
+        ]
+
+        choices = [
+            (str(document.id), str(document))
+            for document in required_documents
+        ]
+
+        if request.POST.get("confirm_authorization_review") == "yes":
+            submitted_token = request.POST.get(
+                "confirmation_token", ""
+            )
+
+            try:
+                token_data = signing.loads(
+                    submitted_token,
+                    salt="patahao-authorization-review",
+                    max_age=900,
+                )
+            except signing.BadSignature:
+                self.message_user(
+                    request,
+                    "Invalid or expired authorization confirmation. "
+                    "Please restart the review.",
+                    level=messages.ERROR,
+                )
+                return redirect(
+                    "admin:mandates_authorizationreview_changelist"
+                )
+
+            if (
+                token_data.get("mandate_id") != review.id
+                or token_data.get("reviewer_id") != request.user.pk
+            ):
+                self.message_user(
+                    request,
+                    "Authorization confirmation does not match "
+                    "the selected mandate or administrator.",
+                    level=messages.ERROR,
+                )
+                return redirect(
+                    "admin:mandates_authorizationreview_changelist"
+                )
+
+            form = AuthorizationEvidenceReviewForm(
+                request.POST,
+            )
+            form.fields["reviewed_document_ids"].choices = choices
+
+            if form.is_valid():
+                acknowledged = {
+                    int(document_id)
+                    for document_id in form.cleaned_data[
+                        "reviewed_document_ids"
+                    ]
+                }
+                required_ids = {
+                    document.id
+                    for document in required_documents
+                }
+
+                if not required_ids.issubset(acknowledged):
+                    form.add_error(
+                        "reviewed_document_ids",
+                        "Acknowledge every required current evidence file.",
+                    )
+                else:
+                    try:
+                        complete_authorization_review(
+                            mandate_id=review.id,
+                            reviewer=request.user,
+                            reviewed_document_ids=acknowledged,
+                        )
+                    except Exception as error:
+                        form.add_error(None, str(error))
+                    else:
+                        self.message_user(
+                            request,
+                            "Authorization review approved.",
+                            level=messages.SUCCESS,
+                        )
+                        return redirect(
+                            "admin:mandates_authorizationreview_changelist"
+                        )
+        else:
+            form = AuthorizationEvidenceReviewForm()
+            form.fields["reviewed_document_ids"].choices = choices
+
+        evidence = [
+            {
+                "document": document,
+                "url": reverse(
+                    "admin:mandates_mandatedocument_evidence",
+                    args=[document.id],
+                ),
+                "required": document.document_type in required_types,
+            }
+            for document in documents
+        ]
+
+        return TemplateResponse(
+            request,
+            "admin/mandates/authorization_review_confirmation.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": "Confirm authorization review",
+                "review": review,
+                "evidence": evidence,
+                "form": form,
+                "is_sale": is_sale,
+                "confirmation_token": confirmation_token,
+                "action_checkbox_name": admin.helpers.ACTION_CHECKBOX_NAME,
+            },
+        )
 
 
 @admin.register(MandateDocument)

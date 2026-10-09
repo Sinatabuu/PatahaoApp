@@ -42,7 +42,7 @@ def complete_authorization_review(
 
     mandate = (
         PropertyMandate.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related(
             "property",
             "owner",
