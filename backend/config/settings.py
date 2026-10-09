@@ -296,6 +296,16 @@ STATIC_ROOT = Path(
     or BASE_DIR / "staticfiles"
 )
 
+MEDIA_STORAGE_BACKEND = os.environ.get(
+    "PATAHAO_MEDIA_STORAGE",
+    "filesystem",
+).strip().lower()
+
+if MEDIA_STORAGE_BACKEND not in {"filesystem", "r2"}:
+    raise ImproperlyConfigured(
+        "PATAHAO_MEDIA_STORAGE must be filesystem or r2."
+    )
+
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -304,6 +314,39 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+if MEDIA_STORAGE_BACKEND == "r2":
+    required = (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_STORAGE_BUCKET_NAME",
+        "AWS_S3_ENDPOINT_URL",
+    )
+
+    missing = [
+        name
+        for name in required
+        if not os.environ.get(name, "").strip()
+    ]
+
+    if missing:
+        raise ImproperlyConfigured(
+            "R2 storage requires: " + ", ".join(missing)
+        )
+
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "access_key": os.environ["AWS_ACCESS_KEY_ID"],
+            "secret_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+            "bucket_name": os.environ["AWS_STORAGE_BUCKET_NAME"],
+            "endpoint_url": os.environ["AWS_S3_ENDPOINT_URL"],
+            "region_name": "auto",
+            "default_acl": None,
+            "querystring_auth": True,
+            "file_overwrite": False,
+        },
+    }
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(
