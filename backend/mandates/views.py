@@ -204,7 +204,7 @@ class PropertyMandateViewSet(viewsets.ModelViewSet):
     def declare(self, request, pk=None):
         mandate = (
             self.get_queryset()
-            .select_for_update()
+            .select_for_update(of=("self",))
             .get(pk=pk)
         )
 
