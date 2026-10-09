@@ -414,7 +414,7 @@ def approve_and_publish_properties(
             with transaction.atomic():
                 locked_property = (
                     Property.objects
-                    .select_for_update()
+                    .select_for_update(of=("self",))
                     .select_related("partner")
                     .get(pk=property_obj.pk)
                 )
