@@ -31,12 +31,16 @@ class PropertyPhoto {
   final String image;
   final String caption;
   final bool isCover;
+  final String thumbnailUrl;
+  final String listingImageUrl;
 
   const PropertyPhoto({
     required this.id,
     required this.image,
     required this.caption,
     required this.isCover,
+    this.thumbnailUrl = '',
+    this.listingImageUrl = '',
   });
 
   factory PropertyPhoto.fromJson(Map<String, dynamic> json) {
@@ -50,6 +54,8 @@ class PropertyPhoto {
           : fallbackImage,
       caption: json['caption']?.toString() ?? '',
       isCover: json['is_cover'] == true,
+      thumbnailUrl: json['thumbnail_url']?.toString() ?? '',
+      listingImageUrl: json['listing_image_url']?.toString() ?? '',
     );
   }
 }
@@ -426,6 +432,30 @@ class Property {
 
   bool get hasVideo {
     return videos.any((video) => video.video.trim().isNotEmpty);
+  }
+
+  String? coverMediaUrlForWidth(int width) {
+    final video = coverVideo;
+
+    if (video != null && video.thumbnail.trim().isNotEmpty) {
+      return video.thumbnail;
+    }
+
+    final photo = coverPhoto;
+
+    if (photo == null) {
+      return null;
+    }
+
+    if (width <= 360 && photo.thumbnailUrl.trim().isNotEmpty) {
+      return photo.thumbnailUrl;
+    }
+
+    if (photo.listingImageUrl.trim().isNotEmpty) {
+      return photo.listingImageUrl;
+    }
+
+    return photo.image.trim().isNotEmpty ? photo.image : null;
   }
 
   String? get coverMediaUrl {
