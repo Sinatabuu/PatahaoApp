@@ -1,3 +1,8 @@
+from pathlib import Path
+from .photo_variants import (
+    generate_photo_variants,
+    prepare_replacement_variants,
+)
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -74,6 +79,8 @@ class PropertyAmenitySerializer(serializers.ModelSerializer):
 
 class PropertyPhotoSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+    listing_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyPhoto
@@ -81,22 +88,33 @@ class PropertyPhotoSerializer(serializers.ModelSerializer):
             "id",
             "image",
             "image_url",
+            "thumbnail_url",
+            "listing_image_url",
             "caption",
             "is_cover",
         ]
 
-    def get_image_url(self, obj):
-        request = self.context.get("request")
-
-        if not obj.image:
+    def _get_file_url(self, file_field):
+        if not file_field:
             return None
 
-        if request:
-            return request.build_absolute_uri(
-                obj.image.url,
-            )
+        url = file_field.url
+        request = self.context.get("request")
 
-        return obj.image.url
+        if request:
+            return request.build_absolute_uri(url)
+
+        return url
+
+    def get_image_url(self, obj):
+        return self._get_file_url(obj.image)
+
+    def get_thumbnail_url(self, obj):
+        return self._get_file_url(obj.thumbnail_image)
+
+    def get_listing_image_url(self, obj):
+        return self._get_file_url(obj.listing_image)
+
 
 
 class PartnerPropertyPhotoSerializer(
@@ -221,9 +239,51 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
         ).exists():
             validated_data["is_cover"] = True
 
-        photo = PropertyPhoto.objects.create(
-            **validated_data,
-        )
+        from django.db import transaction
+
+        try:
+            with transaction.atomic():
+                photo = PropertyPhoto.objects.create(
+                    **validated_data,
+                )
+
+                generate_photo_variants(photo)
+
+                photo.save(
+                    update_fields=[
+                        "thumbnail_image",
+                        "listing_image",
+                    ]
+                )
+        except Exception:
+            if "photo" in locals() and photo.pk:
+                original = photo.image
+
+                if original.name and getattr(
+                    original, "_committed", False
+                ):
+                    try:
+                        original.storage.delete(original.name)
+                    except Exception:
+                        # Preserve the original upload error.
+                        pass
+
+            for field_name in (
+                "thumbnail_image",
+                "listing_image",
+            ):
+                field = getattr(photo, field_name)
+
+                if field.name:
+                    try:
+                        field.storage.delete(field.name)
+                    except Exception:
+                        # Preserve the original upload/database error.
+                        pass
+
+                    field.name = None
+
+            raise
 
         if photo.is_cover:
             PropertyPhoto.objects.filter(
@@ -237,58 +297,136 @@ class PropertyPhotoUploadSerializer(serializers.ModelSerializer):
         return photo
 
     def update(self, instance, validated_data):
+        from django.db import transaction
+        from django.core.files.base import ContentFile
+
         replacing_image = "image" in validated_data
 
-        if replacing_image:
+        if not replacing_image:
+            instance.caption = validated_data.get(
+                "caption", instance.caption
+            )
+            instance.is_cover = validated_data.get(
+                "is_cover", instance.is_cover
+            )
+            instance.save()
+        else:
             self._add_quality_metadata(validated_data)
 
-        instance.caption = validated_data.get(
-            "caption",
-            instance.caption,
-        )
+            uploaded = validated_data["image"]
+            prepared = prepare_replacement_variants(uploaded)
 
-        instance.is_cover = validated_data.get(
-            "is_cover",
-            instance.is_cover,
-        )
+            old_values = {
+                field.name: getattr(instance, field.name)
+                for field in instance._meta.concrete_fields
+            }
 
-        if replacing_image:
-            instance.image = validated_data["image"]
-            instance.image_width = validated_data[
-                "image_width"
-            ]
-            instance.image_height = validated_data[
-                "image_height"
-            ]
-            instance.file_size = validated_data[
-                "file_size"
-            ]
-            instance.content_sha256 = validated_data[
-                "content_sha256"
-            ]
-            instance.quality_status = validated_data[
-                "quality_status"
-            ]
-            instance.quality_score = validated_data[
-                "quality_score"
-            ]
-            instance.quality_warnings = validated_data[
-                "quality_warnings"
-            ]
+            created_files = []
 
-        instance.save()
+            try:
+                original_field = instance._meta.get_field("image")
+                storage = original_field.storage
+
+                uploaded.seek(0)
+                original_name = storage.save(
+                    original_field.generate_filename(
+                        instance,
+                        uploaded.name,
+                    ),
+                    uploaded,
+                )
+                created_files.append((storage, original_name))
+
+                variant_names = {}
+
+                for kind, directory in (
+                    ("thumbnail", "property_photos/thumbnails"),
+                    ("listing", "property_photos/listings"),
+                ):
+                    field_name = (
+                        "thumbnail_image"
+                        if kind == "thumbnail"
+                        else "listing_image"
+                    )
+
+                    field = instance._meta.get_field(field_name)
+                    variant_storage = field.storage
+
+                    filename = (
+                        f"{directory}/"
+                        f"{Path(original_name).stem}_{kind}.jpg"
+                    )
+
+                    prepared[kind].seek(0)
+                    stored_name = variant_storage.save(
+                        filename,
+                        prepared[kind],
+                    )
+
+                    created_files.append(
+                        (variant_storage, stored_name)
+                    )
+                    variant_names[field_name] = stored_name
+
+                with transaction.atomic():
+                    instance.image = original_name
+
+                    for field_name, name in variant_names.items():
+                        setattr(instance, field_name, name)
+
+                    for field_name in (
+                        "image_width",
+                        "image_height",
+                        "file_size",
+                        "content_sha256",
+                        "quality_status",
+                        "quality_score",
+                        "quality_warnings",
+                    ):
+                        setattr(
+                            instance,
+                            field_name,
+                            validated_data[field_name],
+                        )
+
+                    instance.caption = validated_data.get(
+                        "caption", instance.caption
+                    )
+                    instance.is_cover = validated_data.get(
+                        "is_cover", instance.is_cover
+                    )
+
+                    instance.save()
+
+                    if instance.is_cover:
+                        PropertyPhoto.objects.filter(
+                            property=instance.property
+                        ).exclude(
+                            id=instance.id
+                        ).update(is_cover=False)
+
+            except Exception:
+                for field_name, value in old_values.items():
+                    setattr(instance, field_name, value)
+
+                for storage, name in reversed(created_files):
+                    try:
+                        storage.delete(name)
+                    except Exception:
+                        pass
+
+                raise
+
+            return instance
 
         if instance.is_cover:
             PropertyPhoto.objects.filter(
-                property=instance.property,
+                property=instance.property
             ).exclude(
-                id=instance.id,
-            ).update(
-                is_cover=False,
-            )
+                id=instance.id
+            ).update(is_cover=False)
 
         return instance
-
 
 class PropertyVideoSerializer(serializers.ModelSerializer):
     video_url = serializers.SerializerMethodField()

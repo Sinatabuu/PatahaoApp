@@ -72,6 +72,10 @@ jobs:
         working-directory: backend
         run: python manage.py makemigrations --check --dry-run
 
+      - name: Collect static files
+        working-directory: backend
+        run: python manage.py collectstatic --noinput
+
       - name: Run backend tests
         working-directory: backend
         run: python manage.py test -v 1
