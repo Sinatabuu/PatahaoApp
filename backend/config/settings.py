@@ -190,6 +190,9 @@ MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
 MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")
 MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY", "")
 MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL", "")
+MPESA_CALLBACK_TOKEN = os.environ.get(
+    "MPESA_CALLBACK_TOKEN", ""
+).strip()
 MPESA_TRANSACTION_TYPE = os.environ.get(
     "MPESA_TRANSACTION_TYPE",
     "CustomerPayBillOnline",
@@ -220,6 +223,7 @@ validate_mpesa_configuration(
     passkey=MPESA_PASSKEY,
     callback_url=MPESA_CALLBACK_URL,
     transaction_type=MPESA_TRANSACTION_TYPE,
+    callback_token=MPESA_CALLBACK_TOKEN,
 )
 
 DEFAULT_EMAIL_BACKEND = (

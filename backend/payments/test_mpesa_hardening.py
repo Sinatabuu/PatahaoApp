@@ -70,6 +70,26 @@ class MpesaHardeningTests(APITestCase):
             merchant_request_id="MERCHANT-HARDENING-001",
         )
 
+        # Simulate an independently verified Safaricom STK result.
+        # Individual security tests may override this mock.
+        self._mpesa_query_patcher = patch(
+            "payments.views.MpesaClient.query_stk_push"
+        )
+        self.mock_mpesa_query = self._mpesa_query_patcher.start()
+        self.addCleanup(self._mpesa_query_patcher.stop)
+
+        def verified_query(*, checkout_request_id):
+            return (
+                {"CheckoutRequestID": checkout_request_id},
+                {
+                    "ResponseCode": "0",
+                    "ResultCode": "0",
+                    "CheckoutRequestID": checkout_request_id,
+                },
+            )
+
+        self.mock_mpesa_query.side_effect = verified_query
+
     def _create_payment_attempt(
         self,
         *,
@@ -114,6 +134,46 @@ class MpesaHardeningTests(APITestCase):
         )
 
         return payment, attempt
+
+    def test_admin_post_cannot_modify_payment_attempt(self):
+        from django.urls import reverse
+
+        superuser = User.objects.create_superuser(
+            username="mpesa_security_superuser",
+            email="mpesa-security-admin@example.com",
+            password="test-pass-123",
+        )
+
+        self.client.force_login(superuser)
+
+        original_status = self.attempt.status
+
+        url = reverse(
+            "admin:payments_paymentattempt_change",
+            args=[self.attempt.pk],
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "status": PaymentAttempt.Status.SUCCESSFUL,
+                "provider_receipt_number": "FORGED-RECEIPT",
+                "_save": "Save",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        self.attempt.refresh_from_db()
+
+        self.assertEqual(
+            self.attempt.status,
+            original_status,
+        )
+        self.assertNotEqual(
+            self.attempt.provider_receipt_number,
+            "FORGED-RECEIPT",
+        )
 
     def _success_callback(
         self,
@@ -163,6 +223,109 @@ class MpesaHardeningTests(APITestCase):
                 }
             }
         }
+
+    @patch("payments.views.MpesaClient.query_stk_push")
+    def test_unverified_callback_cannot_complete_payment(
+        self,
+        mock_query,
+    ):
+        mock_query.side_effect = MpesaAPIError(
+            "Safaricom verification unavailable."
+        )
+
+        response = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.payment.refresh_from_db()
+        self.attempt.refresh_from_db()
+        self.payment.viewing.refresh_from_db()
+
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+        self.assertEqual(
+            self.attempt.status,
+            PaymentAttempt.Status.REVIEW_REQUIRED,
+        )
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.PROCESSING,
+        )
+        self.assertEqual(
+            self.attempt.provider_callback_payload,
+            self._success_callback(),
+        )
+        self.assertIn(
+            "Safaricom STK verification",
+            self.attempt.failure_reason,
+        )
+        self.assertNotEqual(
+            self.payment.viewing.status,
+            Viewing.Status.PAID_PENDING_PARTNER,
+        )
+        self.assertFalse(
+            ViewingEvent.objects.filter(
+                viewing=self.payment.viewing,
+                event_type=ViewingEvent.EventType.PAYMENT_RECEIVED,
+            ).exists()
+        )
+
+    @override_settings(MPESA_CALLBACK_TOKEN="test-callback-secret")
+    def test_callback_rejects_missing_token(self):
+        response = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.mock_mpesa_query.assert_not_called()
+        self.payment.refresh_from_db()
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    @override_settings(MPESA_CALLBACK_TOKEN="test-callback-secret")
+    def test_callback_rejects_incorrect_token(self):
+        response = self.client.post(
+            self.callback_url + "?token=incorrect",
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.mock_mpesa_query.assert_not_called()
+        self.payment.refresh_from_db()
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    @override_settings(MPESA_CALLBACK_TOKEN="test-callback-secret")
+    def test_callback_accepts_correct_token(self):
+        response = self.client.post(
+            self.callback_url + "?token=test-callback-secret",
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.mock_mpesa_query.assert_called_once()
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
 
     def test_verified_callback_completes_payment_and_attempt(self):
         response = self.client.post(
@@ -523,6 +686,257 @@ class MpesaHardeningTests(APITestCase):
         self.assertEqual(
             self.attempt.status,
             PaymentAttempt.Status.SUCCESSFUL,
+        )
+
+    def test_failed_second_attempt_cannot_downgrade_paid_payment(self):
+        first_callback = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+        self.assertEqual(first_callback.status_code, status.HTTP_200_OK)
+
+        self.payment.refresh_from_db()
+        self.payment.viewing.refresh_from_db()
+
+        original_receipt = self.payment.provider_receipt_number
+        self.assertEqual(self.payment.status, Payment.Status.SUCCESSFUL)
+
+        second_attempt = PaymentAttempt.objects.create(
+            payment=self.payment,
+            status=PaymentAttempt.Status.PROCESSING,
+            merchant_request_id="MERCHANT-HARDENING-002",
+            checkout_request_id="CHECKOUT-HARDENING-002",
+            requested_amount=self.payment.amount,
+            phone_number=self.payment.phone_number,
+        )
+
+        self.client.force_authenticate(user=self.staff)
+
+        with patch(
+            "payments.views.MpesaClient.query_stk_push",
+            return_value=(
+                {"CheckoutRequestID": second_attempt.checkout_request_id},
+                {
+                    "ResponseCode": "0",
+                    "ResultCode": "1032",
+                    "ResultDesc": "Request cancelled by user.",
+                },
+            ),
+        ):
+            response = self.client.post(
+                f"/api/payments/{self.payment.id}/reconcile/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.payment.refresh_from_db()
+        self.payment.viewing.refresh_from_db()
+        second_attempt.refresh_from_db()
+
+        self.assertEqual(self.payment.status, Payment.Status.SUCCESSFUL)
+        self.assertEqual(
+            self.payment.provider_receipt_number,
+            original_receipt,
+        )
+        self.assertEqual(
+            self.payment.viewing.status,
+            Viewing.Status.PAID_PENDING_PARTNER,
+        )
+        self.assertEqual(
+            second_attempt.status,
+            PaymentAttempt.Status.FAILED,
+        )
+
+    def test_staff_can_reconcile_specific_earlier_attempt(self):
+        newer_attempt = PaymentAttempt.objects.create(
+            payment=self.payment,
+            status=PaymentAttempt.Status.PROCESSING,
+            merchant_request_id="MERCHANT-HARDENING-NEW",
+            checkout_request_id="CHECKOUT-HARDENING-NEW",
+            requested_amount=self.payment.amount,
+            phone_number=self.payment.phone_number,
+        )
+
+        self.client.force_authenticate(user=self.staff)
+
+        with patch(
+            "payments.views.MpesaClient.query_stk_push",
+            return_value=(
+                {"CheckoutRequestID": self.attempt.checkout_request_id},
+                {
+                    "ResponseCode": "0",
+                    "ResultCode": "0",
+                    "ResultDesc": "Processed successfully.",
+                },
+            ),
+        ) as mock_query:
+            response = self.client.post(
+                f"/api/payments/{self.payment.id}/reconcile/",
+                {"attempt_reference": self.attempt.attempt_reference},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        mock_query.assert_called_once_with(
+            checkout_request_id=self.attempt.checkout_request_id,
+        )
+
+        self.attempt.refresh_from_db()
+        newer_attempt.refresh_from_db()
+        self.payment.refresh_from_db()
+
+        self.assertIsNotNone(self.attempt.reconciled_at)
+        self.assertIsNone(newer_attempt.reconciled_at)
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    def test_reconcile_rejects_attempt_from_another_payment(self):
+        from unittest.mock import patch
+
+        other_payment = Payment.objects.create(
+            payer=self.customer,
+            amount=self.payment.amount,
+            phone_number=self.payment.phone_number,
+        )
+        other_attempt = PaymentAttempt.objects.create(
+            payment=other_payment,
+            status=PaymentAttempt.Status.PROCESSING,
+            merchant_request_id="MERCHANT-OTHER-PAYMENT",
+            checkout_request_id="CHECKOUT-OTHER-PAYMENT",
+            requested_amount=other_payment.amount,
+            phone_number=other_payment.phone_number,
+        )
+
+        self.client.force_authenticate(user=self.staff)
+
+        with patch(
+            "payments.views.MpesaClient.query_stk_push"
+        ) as mock_query:
+            response = self.client.post(
+                f"/api/payments/{self.payment.id}/reconcile/",
+                {
+                    "attempt_reference":
+                        other_attempt.attempt_reference,
+                },
+                format="json",
+            )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        mock_query.assert_not_called()
+
+    def test_success_query_without_checkout_id(self):
+        self.mock_mpesa_query.return_value = (
+            {"CheckoutRequestID": self.attempt.checkout_request_id},
+            {
+                "ResponseCode": "0",
+                "ResultCode": "0",
+            },
+        )
+        self.mock_mpesa_query.side_effect = None
+
+        response = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.mock_mpesa_query.assert_called_once_with(
+            checkout_request_id=self.attempt.checkout_request_id,
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    def test_success_query_with_mismatched_checkout_id(self):
+        self.mock_mpesa_query.return_value = (
+            {"CheckoutRequestID": self.attempt.checkout_request_id},
+            {
+                "ResponseCode": "0",
+                "ResultCode": "0",
+                "CheckoutRequestID": "WRONG-CHECKOUT-ID",
+            },
+        )
+        self.mock_mpesa_query.side_effect = None
+
+        response = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.payment.refresh_from_db()
+        self.attempt.refresh_from_db()
+
+        self.assertEqual(
+            self.attempt.status,
+            PaymentAttempt.Status.REVIEW_REQUIRED,
+        )
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    @override_settings(
+        IS_PRODUCTION=True,
+        MPESA_LIVE_PAYMENTS_ENABLED=False,
+        MPESA_CALLBACK_TOKEN="",
+    )
+    def test_production_callback_blocked_when_live_disabled(self):
+        response = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        self.mock_mpesa_query.assert_not_called()
+
+        self.payment.refresh_from_db()
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
+        )
+
+    @override_settings(
+        IS_PRODUCTION=True,
+        MPESA_LIVE_PAYMENTS_ENABLED=True,
+        MPESA_CALLBACK_TOKEN="",
+    )
+    def test_production_callback_requires_configured_token(self):
+        response = self.client.post(
+            self.callback_url,
+            self._success_callback(),
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        self.mock_mpesa_query.assert_not_called()
+
+        self.payment.refresh_from_db()
+        self.assertNotEqual(
+            self.payment.status,
+            Payment.Status.SUCCESSFUL,
         )
 
     def test_non_staff_cannot_reconcile_payment(self):

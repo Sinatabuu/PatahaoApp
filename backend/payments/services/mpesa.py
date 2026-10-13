@@ -72,6 +72,7 @@ class MpesaClient:
             "Password",
             "SecurityCredential",
             "Authorization",
+            "CallBackURL",
         }:
             if key in safe_payload:
                 safe_payload[key] = "[REDACTED]"

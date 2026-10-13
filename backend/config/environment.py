@@ -257,6 +257,7 @@ def validate_mpesa_configuration(
     passkey,
     callback_url,
     transaction_type,
+    callback_token="",
 ):
     """Fail closed when live Daraja settings are incomplete or unsafe."""
 
@@ -312,6 +313,29 @@ def validate_mpesa_configuration(
             "Live M-Pesa payments require: "
             + ", ".join(missing_settings)
             + "."
+        )
+
+    if len(callback_token) < 32:
+        raise ImproperlyConfigured(
+            "Live M-Pesa payments require MPESA_CALLBACK_TOKEN "
+            "with at least 32 characters."
+        )
+
+    from urllib.parse import parse_qs, urlsplit
+
+    callback_parts = urlsplit(callback_url)
+    configured_tokens = parse_qs(
+        callback_parts.query,
+        keep_blank_values=True,
+    ).get("token", [])
+
+    if (
+        len(configured_tokens) != 1
+        or configured_tokens[0] != callback_token
+    ):
+        raise ImproperlyConfigured(
+            "Live M-Pesa callback URL must contain the "
+            "configured callback token."
         )
 
     if not callback_url.startswith("https://"):

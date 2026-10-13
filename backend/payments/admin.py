@@ -217,6 +217,27 @@ class PaymentAttemptAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
+    def get_fields(self, request, obj=None):
+        fields = list(super().get_fields(request, obj))
+
+        if not request.user.is_superuser:
+            sensitive_fields = {
+                "provider_request_payload",
+                "provider_response_payload",
+                "provider_callback_payload",
+                "provider_query_payload",
+            }
+            fields = [
+                field
+                for field in fields
+                if field not in sensitive_fields
+            ]
+
+        return fields
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
     def has_add_permission(self, request):
         return False
 

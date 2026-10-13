@@ -1034,14 +1034,50 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
         payment = self.get_queryset().get(pk=pk)
 
-        attempt = (
-            payment.attempts
-            .exclude(checkout_request_id="")
-            .order_by("-created_at", "-id")
-            .first()
-        )
+        attempt_reference = request.data.get("attempt_reference")
 
-        if attempt is None and payment.checkout_request_id:
+        if attempt_reference is not None:
+            if (
+                not isinstance(attempt_reference, str)
+                or not attempt_reference.strip()
+            ):
+                return Response(
+                    {"detail": "A valid attempt_reference is required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            attempt = (
+                payment.attempts
+                .filter(
+                    attempt_reference=attempt_reference.strip(),
+                )
+                .exclude(checkout_request_id="")
+                .first()
+            )
+
+            if attempt is None:
+                return Response(
+                    {
+                        "detail": (
+                            "No matching M-Pesa attempt exists "
+                            "for this payment."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            attempt = (
+                payment.attempts
+                .exclude(checkout_request_id="")
+                .order_by("-created_at", "-id")
+                .first()
+            )
+
+        if (
+            attempt_reference is None
+            and attempt is None
+            and payment.checkout_request_id
+        ):
             with transaction.atomic():
                 locked_payment = (
                     Payment.objects.select_for_update()
@@ -1273,6 +1309,42 @@ class PaymentViewSet(viewsets.ModelViewSet):
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def mpesa_callback(request):
+    # Fail closed before querying Safaricom or changing payment state.
+    if getattr(settings, "IS_PRODUCTION", False):
+        if not getattr(settings, "MPESA_LIVE_PAYMENTS_ENABLED", False):
+            return Response(
+                {"detail": "Live M-Pesa callbacks are disabled."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        if not getattr(settings, "MPESA_CALLBACK_TOKEN", ""):
+            return Response(
+                {"detail": "M-Pesa callback authentication is unavailable."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+    # Optional shared-secret protection for the callback endpoint.
+    # Configure the secret before enabling live M-Pesa payments.
+    callback_token = getattr(
+        settings,
+        "MPESA_CALLBACK_TOKEN",
+        "",
+    )
+
+    if callback_token:
+        from django.utils.crypto import constant_time_compare
+
+        supplied_token = request.query_params.get("token", "")
+
+        if not constant_time_compare(
+            supplied_token,
+            callback_token,
+        ):
+            return Response(
+                {"detail": "Unauthorized callback."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
     if not isinstance(request.data, dict):
         return _callback_response(
             accepted=False,
@@ -1313,6 +1385,69 @@ def mpesa_callback(request):
             accepted=False,
             description="Missing CheckoutRequestID",
         )
+
+    # Independently verify claimed successful payments with Safaricom.
+    # Never make the network request while holding database row locks.
+    raw_callback_result = callback.get("ResultCode")
+    try:
+        claimed_success = int(str(raw_callback_result)) == 0
+    except (TypeError, ValueError):
+        claimed_success = False
+
+    if claimed_success:
+        try:
+            _query_request, query_response = (
+                MpesaClient().query_stk_push(
+                    checkout_request_id=checkout_request_id,
+                )
+            )
+            returned_checkout_id = query_response.get(
+                "CheckoutRequestID"
+            )
+            verified_success = (
+                str(query_response.get("ResponseCode", "")) == "0"
+                and str(query_response.get("ResultCode", "")) == "0"
+                and (
+                    returned_checkout_id is None
+                    or str(returned_checkout_id) == checkout_request_id
+                )
+            )
+        except (MpesaAPIError, TypeError, AttributeError, ValueError):
+            verified_success = False
+
+        if not verified_success:
+            with transaction.atomic():
+                try:
+                    review_attempt = (
+                        PaymentAttempt.objects.select_for_update()
+                        .get(checkout_request_id=checkout_request_id)
+                    )
+                except PaymentAttempt.DoesNotExist:
+                    review_attempt = None
+
+                if review_attempt is not None:
+                    review_payment = (
+                        Payment.objects.select_for_update()
+                        .get(pk=review_attempt.payment_id)
+                    )
+
+                    if (
+                        review_attempt.status
+                        != PaymentAttempt.Status.SUCCESSFUL
+                        and review_payment.status
+                        != Payment.Status.SUCCESSFUL
+                    ):
+                        _mark_attempt_for_review(
+                            review_attempt,
+                            review_payment,
+                            reason=(
+                                "Safaricom STK verification did not "
+                                "confirm a successful payment."
+                            ),
+                            callback_payload=request.data,
+                        )
+
+            return _callback_response()
 
     with transaction.atomic():
         try:
