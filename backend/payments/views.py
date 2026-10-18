@@ -642,7 +642,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
         payment = (
             self.get_queryset()
-            .select_for_update()
+            .select_for_update(of=("self",))
             .get(pk=pk)
         )
 
