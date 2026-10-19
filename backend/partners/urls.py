@@ -1,4 +1,5 @@
 from django.urls import path
+from .recruitment import apply, application_status
 
 from .views import (
     AdminPartnerDetailView,
@@ -20,6 +21,8 @@ from .views import (
 
 
 urlpatterns = [
+    path("partner-applications/", apply, name="partner-application"),
+    path("partner-applications/status/", application_status, name="partner-application-status"),
     path(
         "partners/dashboard/",
         PartnerDashboardView.as_view(),

@@ -158,3 +158,5 @@ class Partner(models.Model):
             self.verification_status == self.STATUS_APPROVED
             and self.is_active
         )
+# Recruitment stays separate from operational Partner accounts.
+from .recruitment_models import PartnerApplication  # noqa: E402,F401
