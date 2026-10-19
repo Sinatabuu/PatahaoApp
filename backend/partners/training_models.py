@@ -85,7 +85,7 @@ class TrainingAssessment(models.Model):
 class TrainingEvent(models.Model):
     cohort = models.ForeignKey(TrainingCohort, on_delete=models.PROTECT, related_name='events')
     enrollment = models.ForeignKey(TrainingEnrollment, null=True, blank=True, on_delete=models.PROTECT, related_name='events')
-    actor = models.ForeignKey('accounts.User', on_delete=models.PROTECT)
+    actor = models.ForeignKey('accounts.User', null=True, blank=True, on_delete=models.PROTECT)
     action = models.CharField(max_length=30)
     record = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)

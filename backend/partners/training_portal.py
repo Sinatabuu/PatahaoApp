@@ -51,7 +51,7 @@ def enrollment_data(e):
         'attendance':[{'session_id':a.session_id,'date':a.session.date,'result':a.result} for a in e.attendance.select_related('session').all()],
         'assessments':[{'module':a.module,'label':dict(MODULES)[a.module],'result':a.result} for a in e.assessments.all()],
         'readiness_issues':readiness(e),
-        'history':[{'action':x.action,'actor':x.actor.full_name or x.actor.username,'created_at':x.created_at} for x in e.events.select_related('actor').all()[:50]]}
+        'history':[{'action':x.action,'actor':(x.actor.full_name or x.actor.username) if x.actor else 'Applicant self-booking','created_at':x.created_at} for x in e.events.select_related('actor').all()[:50]]}
 
 
 def audit(cohort, actor, action, enrollment=None, record=None):

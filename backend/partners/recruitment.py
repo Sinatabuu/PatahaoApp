@@ -54,7 +54,7 @@ def cors_response(request, response):
     allowed = getattr(settings, 'PARTNER_APPLICATION_ORIGINS', ('https://patahao.app', 'https://www.patahao.app'))
     if origin in allowed:
         response['Access-Control-Allow-Origin'] = origin
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response['Access-Control-Allow-Headers'] = 'Content-Type'
     response['Cache-Control'] = 'no-store'
     patch_vary_headers(response, ('Origin',))

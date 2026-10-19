@@ -6,7 +6,7 @@ This increment adds office training and supervisor certification to the staff we
 
 1. Deploy the backend commit from main.
 2. In the fresh Railway service terminal at `/app`, run `python manage.py migrate`.
-3. Confirm partners migration `0007_trainingcohort_scheduled_date_trainingcohort_slot_and_more` is applied with `python manage.py showmigrations partners`.
+3. Confirm partners migration `0008_alter_trainingevent_actor` is applied with `python manage.py showmigrations partners`.
 4. Deploy the matching website branch. Do not publish the Training tab before the migration is applied.
 
 No mobile build is required for these staff web changes. Build 26 remains pending the separate activation workflow.
@@ -36,3 +36,13 @@ Validation: 52 Django tests across recruitment, staff screening, reports and tra
 ## Automatic scheduling release
 
 Migration 0007 adds nullable scheduling metadata to existing cohorts and a unique date/slot constraint. Legacy cohorts and their attendance and assessment records remain intact. The new UI opens dates instead of manually named cohorts and removes the reference-copy enrollment form. The legacy API remains for compatibility with already deployed staff pages; its cohort capacity lock remains enforced. Automated scheduling locks candidate cohorts in date/slot order, then the applicant, and records enrollment, appointment and audit events atomically. It never creates dates that staff have not opened.
+
+## Applicant session selection
+
+The public partner form now loads available morning/afternoon classes via `GET /api/partner-applications/sessions/` and submits to `POST /api/partner-applications/reserve/`. The applicant chooses the exact session; this flow never silently moves them to another class. It reserves their place, creates attendance and assessment records and sets the office appointment in one transaction. Staff still review the application; booking never grants partner access. Full or started sessions are excluded from availability and checked again under the shared cohort lock on submission.
+
+The existing application-only endpoint is retained for older clients. Existing applications and enrollment records are unchanged. New public reservations require a session. Repeated identical submissions with the same random submission key return the same reference and booking, including after a class fills or starts. A conflicting retry or full session returns 409. No partial application survives a failed reservation. Booking events have no staff actor and display as Applicant self-booking; migration 0008 makes the audit actor nullable for that purpose.
+
+The web page confirms the PH-APP reference, date, Kenya time and location on screen. SMS and WhatsApp delivery remain separate work. If no sessions are available, submission is disabled and applicants are directed to check again or contact support. Contact details remain in the form after a booking conflict. Only the random submission key is retained in session storage.
+
+Validation for this release: 60 backend tests and four DOM suites, including public availability, reservation capacity, retries, privacy, CORS, audit rollback, full-session recovery and no-session behavior. Capacity tests run locally on SQLite; PostgreSQL concurrency is protected by the shared cohort row lock but has not been load-tested here.
