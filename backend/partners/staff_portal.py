@@ -1,10 +1,12 @@
 from datetime import timedelta
+from hashlib import sha256
+from collections.abc import Mapping
 
 from django.db import transaction
 from django.db.models import Count, Q
 from django.utils.cache import patch_vary_headers
 from rest_framework import serializers
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, APIException
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
@@ -19,8 +21,40 @@ from .recruitment import origin_allowed
 
 
 class PortalLoginThrottle(AnonRateThrottle):
-    rate = '10/hour'
+    # Limit POST volume without counting browser CORS preflight requests.
+    rate = '60/minute'
     scope = 'partner_portal_login'
+
+    def allow_request(self, request, view):
+        return request.method != 'POST' or super().allow_request(request, view)
+
+
+class PortalFailedLoginThrottle(AnonRateThrottle):
+    """Ten failures per account identifier and source in a 15-minute window."""
+    rate = '10/hour'
+    scope = 'partner_portal_failed_login'
+
+    def __init__(self):
+        super().__init__()
+        self.duration = 15 * 60
+
+    def get_cache_key(self, request, view):
+        identifier = str(request.data.get('username', '') if isinstance(request.data, Mapping) else '').strip().casefold()[:255]
+        digest = sha256((self.get_ident(request)+'|'+identifier).encode()).hexdigest()
+        return self.cache_format % {'scope':self.scope, 'ident':digest}
+
+    def allow_request(self, request, view):
+        if request.method != 'POST':
+            return True
+        request.portal_failed_login_throttle = self
+        return super().allow_request(request, view)
+
+    def throttle_success(self):
+        # Passing the check is not a failed login. The view records failures.
+        return True
+
+    def record_failure(self):
+        return super().throttle_success()
 
 
 class TrustedPortalOrigin(BasePermission):
@@ -75,13 +109,18 @@ def staff_identity(user):
 class PortalLoginView(PortalView):
     authentication_classes = []
     permission_classes = [TrustedPortalOrigin, AllowAny]
-    throttle_classes = [PortalLoginThrottle]
+    throttle_classes = [PortalLoginThrottle, PortalFailedLoginThrottle]
 
     def post(self, request):
         serializer = FlexibleTokenObtainPairSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except APIException:
+            request.portal_failed_login_throttle.record_failure()
+            raise
         user = serializer.user
         if not (user.is_staff and user.has_perm('partners.view_partnerapplication')):
+            request.portal_failed_login_throttle.record_failure()
             raise PermissionDenied('Your account does not have access to the staff onboarding portal.')
         access = AccessToken(serializer.validated_data['access'])
         access.set_exp(lifetime=timedelta(minutes=20))

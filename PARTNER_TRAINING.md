@@ -68,3 +68,9 @@ The partner signs out and signs in again in the mobile app to load their current
 The applicant tracking page shows activation without exposing their app username or internal account ID. This increment sends no account messages and does not upload build 26.
 
 Activation validation: all 544 backend tests pass after collecting local static assets. The full regression run uses SQLite and a temporary test-only fast password hasher; production password settings are unchanged. A focused account-to-property-draft test also passes with the normal configured password hasher. All five website DOM suites pass, including activation success, missing account guidance, permission visibility, office confirmations, locked activated records and logout clearing. No PostgreSQL concurrency load test was run; activation uses row locks and one-to-one database constraints to serialize admissions.
+
+## Staff sign-in throttling correction
+
+Browser OPTIONS requests no longer consume login limits. A POST-only volume cap permits 60 requests per minute per source. A separate failed-login limit allows ten failures per normalized account identifier and source in a rolling 15-minute window; successful sign-ins do not consume that failure budget. Throttle keys hash the identifier and source. Blocked POST responses retain CORS headers and Retry-After so the portal can show the readable throttling message instead of failing its preflight. Login connection errors now use sign-in-specific wording rather than the warning about an uncertain applicant save.
+
+Validation: 17 focused staff portal and throttle tests pass, including repeated successful sign-ins, preflight exemption, failed-login blocking, identifier isolation, expiry and POST volume control. No database migration is required.
