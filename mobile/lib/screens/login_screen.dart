@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
+import '../widgets/partner_application_link.dart';
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
 
@@ -274,6 +275,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ],
                         ),
+
+                        const PartnerApplicationLink(),
 
                         const SizedBox(height: 6),
 

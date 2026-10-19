@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
+import '../widgets/partner_application_link.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -344,6 +345,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   ),
                           ),
                         ),
+
+                        const PartnerApplicationLink(),
 
                         const SizedBox(height: 14),
 
