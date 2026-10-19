@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
@@ -23,6 +24,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+
+  Future<void> _openLegalPage(String url) async {
+    try {
+      final opened = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the page.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the page.')),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -58,11 +80,9 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppErrorMessage.forError(error)),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppErrorMessage.forError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -257,6 +277,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
                         const SizedBox(height: 6),
 
+                        const SizedBox(height: 12),
+
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          children: [
+                            TextButton(
+                              onPressed: () => _openLegalPage(
+                                'https://patahao.app/privacy-policy/',
+                              ),
+                              child: const Text('Privacy Policy'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  _openLegalPage('https://patahao.app/terms/'),
+                              child: const Text('Terms of Service'),
+                            ),
+                          ],
+                        ),
                         const Text(
                           'Your account protects your viewing '
                           'reservations and payment receipts.',

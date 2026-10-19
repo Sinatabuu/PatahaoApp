@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
@@ -11,6 +12,27 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
+  Future<void> _openLegalPage(String url) async {
+    try {
+      final opened = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the page.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the page.')),
+        );
+      }
+    }
+  }
+
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   final TextEditingController _fullNameController = TextEditingController();
@@ -73,11 +95,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppErrorMessage.forError(error)),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppErrorMessage.forError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -326,6 +346,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
 
                         const SizedBox(height: 14),
+
+                        const SizedBox(height: 12),
+
+                        const Text(
+                          'Before creating an account, please review our:',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 13, color: Colors.black54),
+                        ),
+
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          children: [
+                            TextButton(
+                              onPressed: () => _openLegalPage(
+                                'https://patahao.app/privacy-policy/',
+                              ),
+                              child: const Text('Privacy Policy'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  _openLegalPage('https://patahao.app/terms/'),
+                              child: const Text('Terms of Service'),
+                            ),
+                          ],
+                        ),
 
                         const Text(
                           'After creating your account, you will sign in '
