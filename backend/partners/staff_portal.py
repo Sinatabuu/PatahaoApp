@@ -171,6 +171,8 @@ class StaffApplicationDetailView(PortalView):
             if application.updated_at != data['expected_updated_at']:
                 return Response({'detail': 'Another staff member updated this application. Reload it before saving.'}, status=409)
             enrollment = getattr(application, 'training_enrollment', None)
+            if enrollment and hasattr(enrollment, 'activation') and data['status'] in ('declined','withdrawn'):
+                raise serializers.ValidationError('This partner is activated. Use partner management for suspension or termination.')
             if enrollment and enrollment.cohort.scheduled_date and data['office_appointment'] != application.office_appointment:
                 raise serializers.ValidationError({'office_appointment':'This appointment belongs to the assigned training class and cannot be changed independently.'})
             old_status = application.status

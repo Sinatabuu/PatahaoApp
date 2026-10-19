@@ -218,6 +218,11 @@ class PropertyViewSet(viewsets.ModelViewSet):
             .order_by("-created_at")
         )
 
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [permissions.IsAdminUser()]
+        return super().get_permissions()
+
     def _is_staff_request(self):
         return (
             self.request.user.is_authenticated
@@ -838,6 +843,8 @@ class PartnerPropertyViewSet(
                 "Your partner profile is currently inactive."
             )
 
+        from governance.services import enforce_partner_operational_access
+        enforce_partner_operational_access(partner, operation="manage_properties")
         return partner
 
     @transaction.atomic
@@ -1339,6 +1346,8 @@ class PropertyPhotoViewSet(viewsets.ModelViewSet):
                 "Partner profile is inactive."
             )
 
+        from governance.services import enforce_partner_operational_access
+        enforce_partner_operational_access(partner, operation="manage_properties")
         return partner
 
     def get_queryset(self):
@@ -1461,6 +1470,8 @@ class PropertyVideoViewSet(viewsets.ModelViewSet):
                 "Partner profile is inactive."
             )
 
+        from governance.services import enforce_partner_operational_access
+        enforce_partner_operational_access(partner, operation="manage_properties")
         return partner
 
     def get_queryset(self):

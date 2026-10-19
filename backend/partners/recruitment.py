@@ -144,4 +144,12 @@ def application_status(request):
             'modules_required': 8,
         }
         payload['message'] = 'Training certification requires attendance, practical assessment and supervisor approval. Account activation and field access are separate steps.'
+        activation = getattr(enrollment, 'activation', None)
+        if activation:
+            payload['status'] = 'Partner activated'
+            payload['message'] = 'Your partner account is activated. Sign out and sign in again in the app using your existing account. Property submissions remain subject to approval.'
+            payload['partner_code'] = activation.partner.partner_code
+            if not activation.partner.is_active or activation.partner.verification_status != 'approved':
+                payload['status'] = 'Partner account under review'
+                payload['message'] = 'Contact our team about your partner account status. Field access is currently unavailable.'
     return cors_response(request, Response(payload))

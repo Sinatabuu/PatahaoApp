@@ -100,3 +100,22 @@ class TrainingEvent(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError('Training history cannot be deleted.')
+
+
+class PartnerActivation(models.Model):
+    enrollment = models.OneToOneField(TrainingEnrollment, on_delete=models.PROTECT, related_name='activation')
+    partner = models.OneToOneField('partners.Partner', on_delete=models.PROTECT, related_name='onboarding_activation')
+    activated_by = models.ForeignKey('accounts.User', on_delete=models.PROTECT, related_name='activated_partners')
+    policy_version = models.CharField(max_length=30, default='partner-nocash-2026-10')
+    activated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        permissions = [('activate_trained_partner', 'Can activate a certified partner')]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError('Partner activation history cannot be edited.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError('Partner activation history cannot be deleted.')

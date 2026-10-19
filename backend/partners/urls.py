@@ -1,5 +1,6 @@
 from django.urls import path
 from .recruitment import apply, application_status
+from .activation_portal import PartnerActivationView
 from .recruitment_booking import available_sessions, reserve_training
 from .training_schedule import TrainingDatesView, ScheduleApplicantView
 from .training_portal import TrainingCohortListView, TrainingCohortDetailView, TrainingEnrollmentDetailView, TrainingDecisionView
@@ -26,6 +27,7 @@ from .views import (
 
 
 urlpatterns = [
+    path("staff/onboarding/training/enrollments/<int:pk>/activation/", PartnerActivationView.as_view(), name="partner-onboarding-activation"),
     path("partner-applications/sessions/", available_sessions, name="partner-training-availability"),
     path("partner-applications/reserve/", reserve_training, name="partner-application-reserve"),
     path("staff/onboarding/training/dates/", TrainingDatesView.as_view(), name="training-dates"),

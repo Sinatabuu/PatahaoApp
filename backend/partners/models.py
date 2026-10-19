@@ -164,3 +164,4 @@ from .training_models import (  # noqa: E402,F401
     TrainingCohort, TrainingSession, TrainingEnrollment,
     TrainingAttendance, TrainingAssessment, TrainingEvent,
 )
+from .training_models import PartnerActivation

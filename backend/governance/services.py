@@ -1466,6 +1466,9 @@ def enforce_partner_operational_access(
             }
         )
 
+    from partners.training_access import enforce_onboarding_certification
+    enforce_onboarding_certification(partner)
+
     restriction_summary = (
         get_partner_restriction_summary(
             partner,

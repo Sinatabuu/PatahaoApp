@@ -46,8 +46,12 @@ def cohort_data(cohort):
     return {'scheduled_date':cohort.scheduled_date, 'slot':cohort.slot, 'time_label':cohort.get_slot_display() if cohort.slot else '', 'id':cohort.pk, 'reference':cohort.reference, 'name':cohort.name, 'location':cohort.location, 'trainer_name':cohort.trainer_name, 'capacity':12, 'enrolled':active.count(), 'certified':active.filter(state='certified').count(), 'sessions':[{'id':s.pk,'date':s.date} for s in cohort.sessions.all()]}
 
 
+def training_state_label(e):
+    return 'Partner activated' if hasattr(e, 'activation') else e.get_state_display()
+
+
 def enrollment_data(e):
-    return {'id':e.pk,'application_reference':e.application.reference,'full_name':e.application.full_name,'cohort_id':e.cohort_id,'state':e.state,'state_label':e.get_state_display(),'identity_checked':e.identity_checked,'agreement_signed':e.agreement_signed,'updated_at':e.updated_at,'certified_at':e.certified_at,'certified_by':(e.certified_by.full_name or e.certified_by.username) if e.certified_by else None,
+    return {'id':e.pk,'application_reference':e.application.reference,'full_name':e.application.full_name,'cohort_id':e.cohort_id,'state':e.state,'state_label':training_state_label(e),'identity_checked':e.identity_checked,'agreement_signed':e.agreement_signed,'updated_at':e.updated_at,'activation':({'partner_code':e.activation.partner.partner_code,'activated_at':e.activation.activated_at} if hasattr(e,'activation') else None),'certified_at':e.certified_at,'certified_by':(e.certified_by.full_name or e.certified_by.username) if e.certified_by else None,
         'attendance':[{'session_id':a.session_id,'date':a.session.date,'result':a.result} for a in e.attendance.select_related('session').all()],
         'assessments':[{'module':a.module,'label':dict(MODULES)[a.module],'result':a.result} for a in e.assessments.all()],
         'readiness_issues':readiness(e),
@@ -76,6 +80,7 @@ class TrainingCohortListView(PortalView):
         page=paginator.paginate_queryset(TrainingCohort.objects.prefetch_related('sessions').all(),request)
         response=paginator.get_paginated_response([cohort_data(c) for c in page])
         response.data['can_manage']=request.user.has_perm('partners.change_partnerapplication')
+        response.data['can_activate']=request.user.has_perm('partners.activate_trained_partner')
         response.data['can_certify']=request.user.has_perm('partners.certify_partner_training')
         return response
 
@@ -98,7 +103,7 @@ class TrainingCohortDetailView(PortalView):
     def get(self,request,pk):
         cohort=get_object_or_404(TrainingCohort,pk=pk)
         data=cohort_data(cohort)
-        data['enrollments']=[{'id':e.pk,'full_name':e.application.full_name,'reference':e.application.reference,'state':e.state,'state_label':e.get_state_display()} for e in cohort.enrollments.select_related('application').all()]
+        data['enrollments']=[{'id':e.pk,'full_name':e.application.full_name,'reference':e.application.reference,'state':e.state,'state_label':training_state_label(e)} for e in cohort.enrollments.select_related('application').all()]
         return Response(data)
 
     def post(self,request,pk):
@@ -178,6 +183,8 @@ class TrainingDecisionView(PortalView):
             if e.updated_at!=values['expected_updated_at']:
                 return Response({'detail':'This training record changed. Reload it before deciding.'},status=409)
             TrainingCohort.objects.select_for_update().get(pk=e.cohort_id)
+            if hasattr(e, 'activation'):
+                raise serializers.ValidationError('This partner is activated. Use partner management for suspension or termination; training cannot be reopened or withdrawn here.')
             old=e.state
             if values['decision']=='certify':
                 if e.state!='enrolled': raise serializers.ValidationError('Only an enrolled trainee can be certified.')

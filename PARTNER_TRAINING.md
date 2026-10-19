@@ -1,15 +1,15 @@
 # Staff partner training
 
-This increment adds office training and supervisor certification to the staff web portal. It does not create user accounts, activate partners or change operational permissions.
+The staff web portal supports office training, supervisor certification and activation of certified applicants into their existing app accounts. Applicants create their own app credentials; staff do not create passwords.
 
 ## Deployment order
 
 1. Deploy the backend commit from main.
 2. In the fresh Railway service terminal at `/app`, run `python manage.py migrate`.
-3. Confirm partners migration `0008_alter_trainingevent_actor` is applied with `python manage.py showmigrations partners`.
+3. Confirm partners migration `0010_partneractivation` is applied with `python manage.py showmigrations partners`.
 4. Deploy the matching website branch. Do not publish the Training tab before the migration is applied.
 
-No mobile build is required for these staff web changes. Build 26 remains pending the separate activation workflow.
+No mobile build is required for these staff web changes. Build 26 remains on hold until the deployed activation flow and mobile partner access are verified.
 
 ## Permissions
 
@@ -52,3 +52,19 @@ Validation for this release: 60 backend tests and four DOM suites, including pub
 The partner page prominently prohibits all cash transactions with customers and property owners, states immediate termination of the partnership for violations, and requires an explicit no-cash acknowledgement. Both application endpoints validate the acknowledgement server-side. New applications record `recruitment-nocash-2026-10` in the existing consent version field. Existing applicants are not retroactively marked as accepting the new notice.
 
 Migration 0009 changes only training cohort locations equal to `nai` (case-insensitive) to `Nairobi`, as requested by the project owner. Existing booking references, training dates, capacity and results remain intact. The next date inherits the corrected location through the existing defaults mechanism. Apply the migration after backend deployment, then publish the matching website.
+
+## Certified partner activation
+
+Migration 0010 adds an immutable activation record linking one training enrollment to one partner profile, with the staff actor, timestamp and confirmed no-cash policy version. Only active staff with `partners.view_partnerapplication` and the separate `partners.activate_trained_partner` permission can prepare or perform activation. Superusers have the permission automatically; other staff need it assigned during account setup.
+
+In Training, open the certified trainee. The activation section finds an existing active, non-staff app account by normalized Kenyan phone number. It blocks missing or ambiguous accounts, admin accounts, accounts already assigned a partner role and all existing partner profiles, including suspended profiles. The applicant must create their own app account using their application phone number before activation. Staff do not create passwords or elevate staff accounts here.
+
+Staff confirm account ownership and the no-cash policy at the office, then select Activate partner. Certification, attendance, eight competent assessments, original-document verification, signed agreement, current application status and the record version are checked again under transaction locks. The existing user becomes a partner; a new approved active Partner profile and public partner code are created. Passwords, verified-contact flags, payments and customer history are preserved. No commission plan or payout is assigned by this action.
+
+Role change, profile creation, activation record and audit event commit together. A retry returns the existing activation and never reactivates a subsequently suspended profile. Activation blocks ordinary training reopening/withdrawal and application closure; use the existing partner disciplinary management flow for suspension or termination.
+
+The partner signs out and signs in again in the mobile app to load their current role. Property posting uses the existing private partner endpoint and creates drafts. It does not publish listings or bypass owner authorization, media checks, mandates or property verification. The public property endpoint now restricts generic create/update/delete actions to staff so an authenticated customer cannot bypass the partner admission path. Private property and media access also enforce central governance restrictions. Newly activated partners require valid onboarding certification through that shared guard; legacy partners are not forced through a retrospective certification process.
+
+The applicant tracking page shows activation without exposing their app username or internal account ID. This increment sends no account messages and does not upload build 26.
+
+Activation validation: all 544 backend tests pass after collecting local static assets. The full regression run uses SQLite and a temporary test-only fast password hasher; production password settings are unchanged. A focused account-to-property-draft test also passes with the normal configured password hasher. All five website DOM suites pass, including activation success, missing account guidance, permission visibility, office confirmations, locked activated records and logout clearing. No PostgreSQL concurrency load test was run; activation uses row locks and one-to-one database constraints to serialize admissions.
