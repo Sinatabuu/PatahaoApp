@@ -38,3 +38,21 @@ class PartnerAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+from .models import PartnerApplication
+
+
+@admin.register(PartnerApplication)
+class PartnerApplicationAdmin(admin.ModelAdmin):
+    list_display = ('reference', 'full_name', 'county', 'operating_area', 'status', 'office_appointment', 'created_at')
+    list_filter = ('status', 'county', 'training_availability', 'partner_type')
+    search_fields = ('reference', 'full_name', 'phone_number', 'email')
+    readonly_fields = ('reference', 'submission_key', 'consent_version', 'created_at', 'updated_at')
+    fieldsets = (
+        ('Application', {'fields': ('reference', 'full_name', 'phone_number', 'email', 'county', 'operating_area', 'partner_type', 'experience', 'training_availability')}),
+        ('Office screening', {'fields': ('status', 'office_appointment'), 'description': 'Verify originals and keep sensitive identity records in the locked physical file identified by this application reference. This screen does not activate partner accounts.'}),
+        ('Submission record', {'fields': ('submission_key', 'consent_version', 'created_at', 'updated_at')}),
+    )
+
+    def has_add_permission(self, request):
+        return False
