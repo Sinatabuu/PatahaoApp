@@ -37,3 +37,27 @@ class PartnerApplication(models.Model):
 
     def __str__(self):
         return f'{self.reference} — {self.full_name}'
+
+
+class PartnerApplicationEvent(models.Model):
+    """Append-only operational history; identity verification stays on paper."""
+    id = models.BigAutoField(primary_key=True)
+    application = models.ForeignKey(PartnerApplication, on_delete=models.PROTECT, related_name='screening_events')
+    actor = models.ForeignKey('accounts.User', on_delete=models.PROTECT, related_name='partner_screening_events')
+    action = models.CharField(max_length=30, choices=[('screening', 'Screening updated'), ('contacted', 'Applicant contacted'), ('follow_up', 'Follow-up required'), ('appointment', 'Office appointment arranged'), ('closed', 'Application closed')])
+    previous_status = models.CharField(max_length=20)
+    new_status = models.CharField(max_length=20)
+    previous_appointment = models.DateTimeField(null=True, blank=True)
+    new_appointment = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-pk']
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError('Screening history cannot be edited.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError('Screening history cannot be deleted.')

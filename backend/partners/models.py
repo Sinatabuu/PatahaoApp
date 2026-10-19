@@ -159,4 +159,4 @@ class Partner(models.Model):
             and self.is_active
         )
 # Recruitment stays separate from operational Partner accounts.
-from .recruitment_models import PartnerApplication  # noqa: E402,F401
+from .recruitment_models import PartnerApplication, PartnerApplicationEvent  # noqa: E402,F401
