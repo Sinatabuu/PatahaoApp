@@ -1,5 +1,6 @@
 from django.urls import path
 from .recruitment import apply, application_status
+from .staff_reports import StaffRecruitmentReportsView, StaffRecruitmentReportExportView
 from .staff_portal import PortalLoginView, PortalMeView, StaffApplicationListView, StaffApplicationDetailView
 
 from .views import (
@@ -22,6 +23,8 @@ from .views import (
 
 
 urlpatterns = [
+    path("staff/onboarding/reports/", StaffRecruitmentReportsView.as_view(), name="staff-onboarding-reports"),
+    path("staff/onboarding/reports/export/", StaffRecruitmentReportExportView.as_view(), name="staff-onboarding-report-export"),
     path("staff/onboarding/login/", PortalLoginView.as_view(), name="staff-onboarding-login"),
     path("staff/onboarding/me/", PortalMeView.as_view(), name="staff-onboarding-me"),
     path("staff/onboarding/applications/", StaffApplicationListView.as_view(), name="staff-onboarding-applications"),
