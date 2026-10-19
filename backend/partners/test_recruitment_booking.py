@@ -21,7 +21,7 @@ class ApplicantTrainingBookingTests(TestCase):
         day=timezone.localdate(timezone=KENYA)+timedelta(days=2)
         self.cohort=TrainingCohort.objects.create(name='Morning',scheduled_date=day,slot='am',trainer_name='Trainer',location='Roysambu office',created_by=trainer)
         TrainingSession.objects.create(cohort=self.cohort,date=day)
-        self.data=dict(submission_key=str(uuid.uuid4()),full_name='Applicant Test',phone_number='0712345678',email='',county='Nairobi',operating_area='Roysambu',partner_type='new',experience='new',consent=True,office_training=True,training_session=self.cohort.pk)
+        self.data=dict(submission_key=str(uuid.uuid4()),full_name='Applicant Test',phone_number='0712345678',email='',county='Nairobi',operating_area='Roysambu',partner_type='new',experience='new',consent=True,office_training=True, no_cash_policy=True,training_session=self.cohort.pk)
 
     def submit(self,**changes):
         return self.client.post(BASE+'reserve/',{**self.data,**changes},format='json',**ORIGIN)
@@ -34,6 +34,7 @@ class ApplicantTrainingBookingTests(TestCase):
         self.assertEqual(application.training_enrollment.assessments.count(),8)
         self.assertEqual(application.training_enrollment.attendance.count(),1)
         self.assertEqual(application.status,'submitted')
+        self.assertEqual(application.consent_version,'recruitment-nocash-2026-10')
         self.assertEqual(application.office_appointment.astimezone(KENYA).hour,9)
         self.assertEqual(response.data['training']['time'],'9 a.m.–noon')
         self.assertEqual(response.data['training']['location'],'Roysambu office')
@@ -86,6 +87,9 @@ class ApplicantTrainingBookingTests(TestCase):
         self.assertEqual(self.client.post(BASE+'reserve/',data,format='json',**ORIGIN).status_code,400)
         self.assertEqual(self.submit(training_session=9999).status_code,409)
         self.assertEqual(self.submit(consent=False).status_code,400)
+        self.assertEqual(self.submit(no_cash_policy=False).status_code,400)
+        missing_policy=dict(self.data);missing_policy.pop('no_cash_policy')
+        self.assertEqual(self.client.post(BASE+'reserve/',missing_policy,format='json',**ORIGIN).status_code,400)
         self.assertFalse(PartnerApplication.objects.exists())
 
     def test_untrusted_origin_preflight_and_no_listing(self):

@@ -46,3 +46,9 @@ The existing application-only endpoint is retained for older clients. Existing a
 The web page confirms the PH-APP reference, date, Kenya time and location on screen. SMS and WhatsApp delivery remain separate work. If no sessions are available, submission is disabled and applicants are directed to check again or contact support. Contact details remain in the form after a booking conflict. Only the random submission key is retained in session storage.
 
 Validation for this release: 60 backend tests and four DOM suites, including public availability, reservation capacity, retries, privacy, CORS, audit rollback, full-session recovery and no-session behavior. Capacity tests run locally on SQLite; PostgreSQL concurrency is protected by the shared cohort row lock but has not been load-tested here.
+
+## No-cash acknowledgement and office correction
+
+The partner page prominently prohibits all cash transactions with customers and property owners, states immediate termination of the partnership for violations, and requires an explicit no-cash acknowledgement. Both application endpoints validate the acknowledgement server-side. New applications record `recruitment-nocash-2026-10` in the existing consent version field. Existing applicants are not retroactively marked as accepting the new notice.
+
+Migration 0009 changes only training cohort locations equal to `nai` (case-insensitive) to `Nairobi`, as requested by the project owner. Existing booking references, training dates, capacity and results remain intact. The next date inherits the corrected location through the existing defaults mechanism. Apply the migration after backend deployment, then publish the matching website.

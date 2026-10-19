@@ -30,12 +30,13 @@ def normalize_phone(value):
 class ApplicationSerializer(serializers.ModelSerializer):
     consent = serializers.BooleanField(write_only=True)
     office_training = serializers.BooleanField(write_only=True)
+    no_cash_policy = serializers.BooleanField(write_only=True)
     website = serializers.CharField(required=False, allow_blank=True, write_only=True)
     phone_number = serializers.CharField(max_length=30)
 
     class Meta:
         model = PartnerApplication
-        fields = ('submission_key', 'full_name', 'phone_number', 'email', 'county', 'operating_area', 'partner_type', 'experience', 'training_availability', 'consent', 'office_training', 'website')
+        fields = ('submission_key', 'full_name', 'phone_number', 'email', 'county', 'operating_area', 'partner_type', 'experience', 'training_availability', 'consent', 'office_training', 'no_cash_policy', 'website')
         extra_kwargs = {'submission_key': {'read_only': False, 'validators': []}}
 
     def validate_phone_number(self, value):
@@ -44,6 +45,9 @@ class ApplicationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if not attrs.pop('consent') or not attrs.pop('office_training'):
             raise serializers.ValidationError('Please accept the recruitment notice and mandatory in-person training.')
+        if not attrs.pop('no_cash_policy'):
+            raise serializers.ValidationError('You must acknowledge the no-cash policy before applying.')
+        attrs['consent_version'] = 'recruitment-nocash-2026-10'
         if attrs.pop('website', ''):
             raise serializers.ValidationError('Unable to accept this application.')
         return attrs

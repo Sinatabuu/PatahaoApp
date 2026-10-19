@@ -10,7 +10,7 @@ class RecruitmentTests(TestCase):
     def setUp(self):
         cache.clear()
         self.client = APIClient()
-        self.data = dict(submission_key=str(uuid.uuid4()), full_name='Test Applicant', phone_number='0712345678', email='', county='Nairobi', operating_area='Roysambu', partner_type='new', experience='new', training_availability='flexible', consent=True, office_training=True)
+        self.data = dict(submission_key=str(uuid.uuid4()), full_name='Test Applicant', phone_number='0712345678', email='', county='Nairobi', operating_area='Roysambu', partner_type='new', experience='new', training_availability='flexible', consent=True, office_training=True, no_cash_policy=True)
 
     def submit(self, data=None, origin='https://patahao.app'):
         return self.client.post('/api/partner-applications/', data or self.data, format='json', HTTP_ORIGIN=origin)
