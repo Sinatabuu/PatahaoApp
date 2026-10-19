@@ -1,5 +1,6 @@
 from django.urls import path
 from .recruitment import apply, application_status
+from .training_portal import TrainingCohortListView, TrainingCohortDetailView, TrainingEnrollmentDetailView, TrainingDecisionView
 from .staff_reports import StaffRecruitmentReportsView, StaffRecruitmentReportExportView
 from .staff_portal import PortalLoginView, PortalMeView, StaffApplicationListView, StaffApplicationDetailView
 
@@ -23,6 +24,10 @@ from .views import (
 
 
 urlpatterns = [
+    path("staff/onboarding/training/cohorts/", TrainingCohortListView.as_view(), name="training-cohort-list"),
+    path("staff/onboarding/training/cohorts/<int:pk>/", TrainingCohortDetailView.as_view(), name="training-cohort-detail"),
+    path("staff/onboarding/training/enrollments/<int:pk>/", TrainingEnrollmentDetailView.as_view(), name="training-enrollment-detail"),
+    path("staff/onboarding/training/enrollments/<int:pk>/decision/", TrainingDecisionView.as_view(), name="training-enrollment-decision"),
     path("staff/onboarding/reports/", StaffRecruitmentReportsView.as_view(), name="staff-onboarding-reports"),
     path("staff/onboarding/reports/export/", StaffRecruitmentReportExportView.as_view(), name="staff-onboarding-report-export"),
     path("staff/onboarding/login/", PortalLoginView.as_view(), name="staff-onboarding-login"),

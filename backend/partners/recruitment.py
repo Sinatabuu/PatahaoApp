@@ -124,4 +124,18 @@ def application_status(request):
     a = PartnerApplication.objects.filter(**serializer.validated_data).first()
     if a is None:
         return cors_response(request, Response({'detail': 'No application matches those details.'}, status=404))
-    return cors_response(request, Response({'reference': a.reference, 'status': a.get_status_display(), 'office_appointment': a.office_appointment, 'message': 'Our team will confirm office arrangements directly. No partner field access is granted by an application.'}))
+    payload = {'reference': a.reference, 'status': a.get_status_display(), 'office_appointment': a.office_appointment, 'message': 'Our team will confirm office arrangements directly. No partner field access is granted by an application.'}
+    enrollment = getattr(a, 'training_enrollment', None)
+    if enrollment:
+        if a.status not in ('declined', 'withdrawn'):
+            payload['status'] = enrollment.get_state_display()
+        payload['training'] = {
+            'cohort': enrollment.cohort.name,
+            'dates': list(enrollment.cohort.sessions.values_list('date', flat=True)),
+            'attendance_completed': enrollment.attendance.filter(result__in=('present', 'makeup')).count(),
+            'sessions_required': enrollment.cohort.sessions.count(),
+            'competent_modules': enrollment.assessments.filter(result='pass').count(),
+            'modules_required': 8,
+        }
+        payload['message'] = 'Training certification requires attendance, practical assessment and supervisor approval. Account activation and field access are separate steps.'
+    return cors_response(request, Response(payload))
