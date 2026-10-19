@@ -82,6 +82,7 @@ class TrainingPortalTests(TestCase):
     def test_incomplete_and_future_training_cannot_be_certified(self):
         e=self.enroll();self.auth(self.supervisor);self.assertEqual(self.decide(e).status_code,400)
         e=self.complete(e)
+        c=TrainingCohort.objects.get(pk=self.cohort)
         first=c.sessions.first();first.date=timezone.localdate()+timedelta(days=20);first.save()
         self.assertEqual(self.decide(e).status_code,400)
 

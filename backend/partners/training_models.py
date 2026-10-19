@@ -18,6 +18,8 @@ def cohort_reference():
 
 
 class TrainingCohort(models.Model):
+    scheduled_date = models.DateField(null=True, blank=True)
+    slot = models.CharField(max_length=2, blank=True, choices=[('am', '9 a.m.–noon'), ('pm', '2–5 p.m.')])
     reference = models.CharField(max_length=30, unique=True, default=cohort_reference, editable=False)
     name = models.CharField(max_length=100)
     location = models.CharField(max_length=150)
@@ -26,6 +28,7 @@ class TrainingCohort(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        constraints = [models.UniqueConstraint(fields=['scheduled_date', 'slot'], name='unique_training_date_slot')]
         ordering = ['-created_at', '-pk']
 
 

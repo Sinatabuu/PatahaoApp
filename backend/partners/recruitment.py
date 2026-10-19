@@ -131,6 +131,8 @@ def application_status(request):
             payload['status'] = enrollment.get_state_display()
         payload['training'] = {
             'cohort': enrollment.cohort.name,
+            'time': enrollment.cohort.get_slot_display() if enrollment.cohort.slot else '',
+            'location': enrollment.cohort.location,
             'dates': list(enrollment.cohort.sessions.values_list('date', flat=True)),
             'attendance_completed': enrollment.attendance.filter(result__in=('present', 'makeup')).count(),
             'sessions_required': enrollment.cohort.sessions.count(),

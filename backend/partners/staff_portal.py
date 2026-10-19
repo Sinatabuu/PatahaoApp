@@ -140,6 +140,8 @@ class ScreeningUpdateSerializer(serializers.Serializer):
 
 def application_detail(application):
     result = StaffApplicationSerializer(application).data
+    enrollment = getattr(application, 'training_enrollment', None)
+    result['training'] = ({'id':enrollment.pk, 'class_name':enrollment.cohort.name, 'location':enrollment.cohort.location, 'state':enrollment.state} if enrollment else None)
     result['history'] = [{
         'action': event.get_action_display(),
         'actor': event.actor.full_name or event.actor.username,
@@ -168,6 +170,9 @@ class StaffApplicationDetailView(PortalView):
             application = get_object_or_404(PartnerApplication.objects.select_for_update(), pk=pk)
             if application.updated_at != data['expected_updated_at']:
                 return Response({'detail': 'Another staff member updated this application. Reload it before saving.'}, status=409)
+            enrollment = getattr(application, 'training_enrollment', None)
+            if enrollment and enrollment.cohort.scheduled_date and data['office_appointment'] != application.office_appointment:
+                raise serializers.ValidationError({'office_appointment':'This appointment belongs to the assigned training class and cannot be changed independently.'})
             old_status = application.status
             old_appointment = application.office_appointment
             application.status = data['status']

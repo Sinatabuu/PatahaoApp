@@ -27,6 +27,11 @@ def readiness(enrollment):
     results = {a.module:a.result for a in enrollment.assessments.all()}
     sessions = list(enrollment.cohort.sessions.all())
     missing = []
+    if enrollment.cohort.scheduled_date and enrollment.cohort.slot:
+        from datetime import datetime, time
+        end = time(12) if enrollment.cohort.slot == 'am' else time(17)
+        if timezone.now() < datetime.combine(enrollment.cohort.scheduled_date, end, tzinfo=ZoneInfo('Africa/Nairobi')):
+            missing.append('The assigned training class must finish before certification.')
     if any(s.date > timezone.localdate(timezone.now(), ZoneInfo('Africa/Nairobi')) for s in sessions): missing.append('All training dates must have taken place before certification.')
     if not enrollment.identity_checked: missing.append('Original identity documents must be checked at the office.')
     if not enrollment.agreement_signed: missing.append('The signed agreement must be confirmed in the physical file.')
@@ -38,7 +43,7 @@ def readiness(enrollment):
 
 def cohort_data(cohort):
     active = cohort.enrollments.exclude(state='withdrawn')
-    return {'id':cohort.pk, 'reference':cohort.reference, 'name':cohort.name, 'location':cohort.location, 'trainer_name':cohort.trainer_name, 'capacity':12, 'enrolled':active.count(), 'certified':active.filter(state='certified').count(), 'sessions':[{'id':s.pk,'date':s.date} for s in cohort.sessions.all()]}
+    return {'scheduled_date':cohort.scheduled_date, 'slot':cohort.slot, 'time_label':cohort.get_slot_display() if cohort.slot else '', 'id':cohort.pk, 'reference':cohort.reference, 'name':cohort.name, 'location':cohort.location, 'trainer_name':cohort.trainer_name, 'capacity':12, 'enrolled':active.count(), 'certified':active.filter(state='certified').count(), 'sessions':[{'id':s.pk,'date':s.date} for s in cohort.sessions.all()]}
 
 
 def enrollment_data(e):
