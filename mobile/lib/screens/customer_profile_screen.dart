@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/partner_application_link.dart';
 import 'package:mobile/foundation/app_error_message.dart';
 import 'package:mobile/screens/customer_completed_transactions_screen.dart';
 
@@ -315,6 +316,8 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   ],
                 ),
                 const SizedBox(height: 22),
+                const PartnerApplicationLink(compact: true),
+                const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(17),
                   decoration: BoxDecoration(

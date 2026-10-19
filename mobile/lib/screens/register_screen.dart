@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/partner_application_link.dart';
 
 import '../foundation/app_error_message.dart';
 import '../services/auth_service.dart';
@@ -324,6 +325,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   ),
                           ),
                         ),
+
+                        const PartnerApplicationLink(),
 
                         const SizedBox(height: 14),
 
