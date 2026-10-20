@@ -1346,7 +1346,7 @@ def mpesa_callback(request):
             )
 
         payment = (
-            Payment.objects.select_for_update()
+            Payment.objects.select_for_update(of=("self",))
             .select_related("viewing")
             .get(pk=attempt.payment_id)
         )

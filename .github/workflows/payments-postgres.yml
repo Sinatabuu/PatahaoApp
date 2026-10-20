@@ -1,0 +1,57 @@
+name: M-Pesa PostgreSQL callbacks
+
+on:
+  push:
+    branches: [main, fix/mpesa-callback-postgres]
+    paths:
+      - 'backend/payments/**'
+      - '.github/workflows/payments-postgres.yml'
+  pull_request:
+    paths:
+      - 'backend/payments/**'
+      - '.github/workflows/payments-postgres.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  callbacks:
+    name: Callback validation on PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: patahao
+          POSTGRES_PASSWORD: ci-only-callback-tests
+          POSTGRES_DB: patahao
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U patahao -d patahao"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PATAHAO_ENVIRONMENT: development
+      DJANGO_DEBUG: "true"
+      DATABASE_URL: postgresql://patahao:ci-only-callback-tests@localhost:5432/patahao
+      PYTHONDONTWRITEBYTECODE: "1"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Require real PostgreSQL
+        run: python manage.py shell -c "from django.db import connection; assert connection.vendor == 'postgresql', connection.vendor"
+      - name: Validate callbacks, duplicate receipts and reconciliation
+        run: python manage.py test payments.test_mpesa_hardening --noinput -v 2
