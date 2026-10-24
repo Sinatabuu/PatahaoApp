@@ -1273,6 +1273,17 @@ class PaymentViewSet(viewsets.ModelViewSet):
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def mpesa_callback(request):
+    from django.utils.crypto import constant_time_compare
+
+    callback_token = getattr(settings, "MPESA_CALLBACK_TOKEN", "")
+    if callback_token and not constant_time_compare(
+        request.query_params.get("token", ""), callback_token
+    ):
+        return Response(
+            {"detail": "Unauthorized callback."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     if not isinstance(request.data, dict):
         return _callback_response(
             accepted=False,

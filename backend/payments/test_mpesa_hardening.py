@@ -164,6 +164,31 @@ class MpesaHardeningTests(APITestCase):
             }
         }
 
+    @override_settings(MPESA_CALLBACK_TOKEN="callback-test-secret")
+    def test_callback_token_rejects_missing_and_wrong_without_mutation(self):
+        for suffix in ("", "?token=wrong"):
+            response = self.client.post(
+                self.callback_url + suffix,
+                self._success_callback(),
+                format="json",
+            )
+            self.assertEqual(response.status_code, 403)
+            self.attempt.refresh_from_db()
+            self.assertIsNone(self.attempt.callback_received_at)
+            self.payment.refresh_from_db()
+            self.assertNotEqual(self.payment.status, Payment.Status.SUCCESSFUL)
+
+    @override_settings(MPESA_CALLBACK_TOKEN="callback-test-secret")
+    def test_matching_callback_token_completes_payment(self):
+        response = self.client.post(
+            self.callback_url + "?token=callback-test-secret",
+            self._success_callback(),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, Payment.Status.SUCCESSFUL)
+
     def test_verified_callback_completes_payment_and_attempt(self):
         response = self.client.post(
             self.callback_url,
