@@ -102,4 +102,4 @@ def reserve_training(request):
               record={'source':'applicant','slot':cohort.slot,'date':cohort.scheduled_date.isoformat()})
     return Response({'reference':application.reference,'status':application.get_status_display(),
                      'training':booking_details(enrollment),
-                     'message':'Your training place is reserved. Screening, assessment and supervisor approval are still required before partner activation.'},status=201)
+                     'message':'Your training place is reserved. Attend your selected session; our team will approve and activate your account when ready.'},status=201)

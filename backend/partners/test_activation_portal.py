@@ -138,3 +138,73 @@ class PartnerActivationTests(TestCase):
         self.assertEqual(response.data['status'],'Partner activated')
         self.assertIn('partner_code',response.data)
         self.assertNotIn('username',response.data);self.assertNotIn('user_id',response.data)
+
+
+class CombinedApprovalTests(TestCase):
+    setUpTestData = classmethod(helpers.TrainingPortalTests.setUpTestData.__func__)
+    auth = PartnerActivationTests.auth
+    enroll = PartnerActivationTests.enroll
+    complete = PartnerActivationTests.complete
+    decide = PartnerActivationTests.decide
+    activate = PartnerActivationTests.activate
+    def setUp(self):
+        PartnerActivationTests.setUp(self)
+        from datetime import timedelta
+        from django.utils import timezone
+        self.enrollment = TrainingEnrollment.objects.get(pk=self.record['id'])
+        self.enrollment.state = 'enrolled'
+        self.enrollment.certified_by = None
+        self.enrollment.certified_at = None
+        self.enrollment.identity_checked = False
+        self.enrollment.agreement_signed = False
+        self.enrollment.save()
+        for offset, session in enumerate(self.enrollment.cohort.sessions.all()):
+            session.date=timezone.localdate()+timedelta(days=20+offset)
+            session.save(update_fields=['date'])
+        self.enrollment.attendance.update(result='pending')
+        self.enrollment.assessments.update(result='pending')
+        self.record['updated_at'] = self.enrollment.updated_at
+
+    def approve(self, **changes):
+        return self.activate(approve_training=True, identity_checked=True,
+                             agreement_signed=True, training_confirmed=True, **changes)
+
+    def test_single_action_certifies_and_activates_without_timing_or_module_gates(self):
+        prepared=self.client.get(self.url,**ORIGIN)
+        self.assertEqual(prepared.data['issues'],[])
+        response=self.approve(); self.assertEqual(response.status_code,201,response.data)
+        self.enrollment.refresh_from_db();self.user.refresh_from_db()
+        self.assertEqual(self.enrollment.state,'certified')
+        self.assertEqual(self.enrollment.certified_by,self.supervisor)
+        self.assertTrue(self.enrollment.identity_checked)
+        self.assertEqual(self.user.role,'partner')
+        self.assertTrue(self.enrollment.assessments.filter(result='pending').exists())
+        self.assertTrue(TrainingEvent.objects.filter(action='Training approved by supervisor').exists())
+        self.assertEqual(self.approve().status_code,200)
+        self.assertEqual(PartnerActivation.objects.count(),1)
+
+    def test_combined_approval_requires_each_confirmation(self):
+        for field in ('identity_checked','agreement_signed','training_confirmed','account_confirmed','no_cash_confirmed'):
+            values=dict(approve_training=True,identity_checked=True,agreement_signed=True,training_confirmed=True)
+            values[field]=False
+            self.assertEqual(self.activate(**values).status_code,400)
+        self.assertFalse(Partner.objects.exists())
+
+    def test_combined_approval_requires_supervisor_permission(self):
+        self.trainer.user_permissions.add(Permission.objects.get(codename='activate_trained_partner',content_type__app_label='partners'))
+        self.auth(self.trainer)
+        self.assertEqual(self.approve().status_code,403)
+        self.assertFalse(Partner.objects.exists())
+
+    def test_invalid_account_rolls_back_certification(self):
+        self.assertEqual(self.approve(user_id=999999).status_code,400)
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.state,'enrolled')
+        self.assertFalse(self.enrollment.identity_checked)
+
+    def test_closed_or_withdrawn_cannot_use_combined_approval(self):
+        self.application.status='declined';self.application.save()
+        self.assertEqual(self.approve().status_code,400)
+        self.assertFalse(Partner.objects.exists())
+
+    # Legacy activation tests are covered in PartnerActivationTests above.

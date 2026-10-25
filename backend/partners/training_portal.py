@@ -23,21 +23,12 @@ def require_supervisor(user):
 
 
 def readiness(enrollment):
-    attendance = {a.session_id:a.result for a in enrollment.attendance.all()}
-    results = {a.module:a.result for a in enrollment.assessments.all()}
-    sessions = list(enrollment.cohort.sessions.all())
+    # Readiness is a supervisor decision; dates and detailed records are advisory.
     missing = []
-    if enrollment.cohort.scheduled_date and enrollment.cohort.slot:
-        from datetime import datetime, time
-        end = time(12) if enrollment.cohort.slot == 'am' else time(17)
-        if timezone.now() < datetime.combine(enrollment.cohort.scheduled_date, end, tzinfo=ZoneInfo('Africa/Nairobi')):
-            missing.append('The assigned training class must finish before certification.')
-    if any(s.date > timezone.localdate(timezone.now(), ZoneInfo('Africa/Nairobi')) for s in sessions): missing.append('All training dates must have taken place before certification.')
     if not enrollment.identity_checked: missing.append('Original identity documents must be checked at the office.')
     if not enrollment.agreement_signed: missing.append('The signed agreement must be confirmed in the physical file.')
-    if not sessions or any(attendance.get(s.pk) not in ('present', 'makeup') for s in sessions): missing.append('Every training session needs attendance or completed make-up training.')
-    if any(results.get(code) != 'pass' for code, _ in MODULES): missing.append('All eight practical modules must be assessed as competent.')
     if enrollment.application.status in ('declined', 'withdrawn'): missing.append('The application is closed.')
+    if enrollment.state == 'withdrawn': missing.append('The training enrollment is withdrawn.')
     return missing
 
 

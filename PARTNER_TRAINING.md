@@ -5,7 +5,7 @@ The staff web portal supports office training, supervisor certification and acti
 ## Deployment order
 
 1. Deploy the backend commit from main.
-2. In the fresh Railway service terminal at `/app`, run `python manage.py migrate`.
+2. For a first installation, apply existing migrations in the fresh Railway terminal with `/app/.venv/bin/python manage.py migrate`. The simplified approval release adds no migration.
 3. Confirm partners migration `0010_partneractivation` is applied with `python manage.py showmigrations partners`.
 4. Deploy the matching website branch. Do not publish the Training tab before the migration is applied.
 
@@ -18,12 +18,12 @@ All portal access requires active staff status and `partners.view_partnerapplica
 ## Office workflow
 
 1. Open Training and choose **Open a training date**. The system creates the 9 a.m.–noon and 2–5 p.m. classes in Kenya time. Set the office location once; the trainer starts with the signed-in staff name. Both settings are reused for later dates and can be changed before opening a date.
-2. Open an applicant in Applications, choose the preferred date and select **Schedule training**. This staff decision sets the application to invited, records the assigned appointment and enrolls the existing PH-APP reference without copying it.
+2. Applicants choose their session during application; the reservation also sets their office appointment. Screening/contact actions are optional. For legacy applicants without a reservation, staff can use **Schedule training** from Applications.
 3. Classes fill chronologically: 12 morning places, then 12 afternoon places, then the next date staff have explicitly opened. A class that has started is skipped. Full classes cannot receive a thirteenth active trainee. If all available dates are full, nothing is changed; staff must open another date. Existing training records are retained and duplicate enrollment is rejected.
 4. At the office, check original identity documents and the signed agreement. Only confirmation flags are stored. Keep identity numbers, scans and detailed verification notes in the secure physical file.
-5. Record each session as present, absent or make-up completed. Assess the eight practical modules as competent or needing further training, then save.
-6. An authorized supervisor certifies only after every training date has occurred in Kenya (scheduled morning/afternoon classes must also have finished), every attendance requirement is complete, both office checks are confirmed and all eight modules are competent.
-7. Certification locks the training record. A supervisor can reopen it for reassessment; reopening resets the module assessments. Withdrawal releases a cohort place. Rejoining a full cohort is rejected.
+5. Optionally record attendance and detailed module assessments. Use **Save progress** to retain partial office checks without granting access.
+6. Confirm identity, the signed agreement, satisfactory training, account ownership and the no-cash policy. Select **Approve and activate partner**. The supervisor decides readiness; class dates, attendance and eight module results do not block approval.
+7. Activated records are protected. For applicants not yet activated, supervisors can withdraw training or reopen legacy certifications. Withdrawal releases a class place. Rejoining a full class is rejected.
 
 The applicant status page displays training progress after reference and phone verification. Saving records does not send SMS or WhatsApp messages. Staff must contact applicants directly until messaging is implemented.
 
@@ -57,9 +57,9 @@ Migration 0009 changes only training cohort locations equal to `nai` (case-insen
 
 Migration 0010 adds an immutable activation record linking one training enrollment to one partner profile, with the staff actor, timestamp and confirmed no-cash policy version. Only active staff with `partners.view_partnerapplication` and the separate `partners.activate_trained_partner` permission can prepare or perform activation. Superusers have the permission automatically; other staff need it assigned during account setup.
 
-In Training, open the certified trainee. The activation section finds an existing active, non-staff app account by normalized Kenyan phone number. It blocks missing or ambiguous accounts, admin accounts, accounts already assigned a partner role and all existing partner profiles, including suspended profiles. The applicant must create their own app account using their application phone number before activation. Staff do not create passwords or elevate staff accounts here.
+In Training, open the trainee. The activation section finds an existing active, non-staff app account by normalized Kenyan phone number. It blocks missing or ambiguous accounts, admin accounts, accounts already assigned a partner role and all existing partner profiles, including suspended profiles. The applicant must create their own app account using their application phone number before activation. Staff do not create passwords or elevate staff accounts here.
 
-Staff confirm account ownership and the no-cash policy at the office, then select Activate partner. Certification, attendance, eight competent assessments, original-document verification, signed agreement, current application status and the record version are checked again under transaction locks. The existing user becomes a partner; a new approved active Partner profile and public partner code are created. Passwords, verified-contact flags, payments and customer history are preserved. No commission plan or payout is assigned by this action.
+Staff confirm identity, the signed agreement, satisfactory training, account ownership and the no-cash policy, then select **Approve and activate partner**. Both certification and activation permissions are required. The action records certification and activation together under transaction locks, with application status, account eligibility and record-version checks. Attendance, module scores and class dates remain advisory. The existing user becomes a partner; a new approved active Partner profile and public partner code are created. Passwords, verified-contact flags, payments and customer history are preserved. No commission plan or payout is assigned by this action.
 
 Role change, profile creation, activation record and audit event commit together. A retry returns the existing activation and never reactivates a subsequently suspended profile. Activation blocks ordinary training reopening/withdrawal and application closure; use the existing partner disciplinary management flow for suspension or termination.
 
@@ -74,3 +74,7 @@ Activation validation: all 544 backend tests pass after collecting local static 
 Browser OPTIONS requests no longer consume login limits. A POST-only volume cap permits 60 requests per minute per source. A separate failed-login limit allows ten failures per normalized account identifier and source in a rolling 15-minute window; successful sign-ins do not consume that failure budget. Throttle keys hash the identifier and source. Blocked POST responses retain CORS headers and Retry-After so the portal can show the readable throttling message instead of failing its preflight. Login connection errors now use sign-in-specific wording rather than the warning about an uncertain applicant save.
 
 Validation: 17 focused staff portal and throttle tests pass, including repeated successful sign-ins, preflight exemption, failed-login blocking, identifier isolation, expiry and POST volume control. No database migration is required.
+
+
+## Simplified supervisor approval
+Staff open dates; applicants reserve a session and use it as their office appointment. Screening actions are optional tracking. On the training record, identity and signed agreement checks, account ownership, no-cash acknowledgement and satisfactory training confirmation are submitted together with **Approve and activate partner**. The same atomic action certifies training and activates the existing matched customer account. Both certification and activation permissions are required. Dates, attendance and eight detailed module assessments are advisory; they do not block supervisor judgment. Save progress remains available. Closed/withdrawn applicants, ambiguous accounts, inactive/privileged accounts and existing partner profiles remain blocked; concurrent edits return 409. Certification and activation audit records roll back together on failure. Existing activated partners are not changed by retries. No migration is required.

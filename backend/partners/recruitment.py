@@ -143,7 +143,7 @@ def application_status(request):
             'competent_modules': enrollment.assessments.filter(result='pass').count(),
             'modules_required': 8,
         }
-        payload['message'] = 'Training certification requires attendance, practical assessment and supervisor approval. Account activation and field access are separate steps.'
+        payload['message'] = 'Your training place is reserved. Attend your selected session; our team will approve and activate your partner account when ready.'
         activation = getattr(enrollment, 'activation', None)
         if activation:
             payload['status'] = 'Partner activated'

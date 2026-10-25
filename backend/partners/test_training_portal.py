@@ -79,12 +79,12 @@ class TrainingPortalTests(TestCase):
         self.assertEqual(User.objects.filter(role='partner').count(),0)
         self.assertTrue(TrainingEvent.objects.filter(action='Training certify').exists())
 
-    def test_incomplete_and_future_training_cannot_be_certified(self):
+    def test_identity_required_but_future_dates_and_assessments_are_advisory(self):
         e=self.enroll();self.auth(self.supervisor);self.assertEqual(self.decide(e).status_code,400)
         e=self.complete(e)
         c=TrainingCohort.objects.get(pk=self.cohort)
         first=c.sessions.first();first.date=timezone.localdate()+timedelta(days=20);first.save()
-        self.assertEqual(self.decide(e).status_code,400)
+        self.assertEqual(self.decide(e).status_code,200)
 
     def test_stale_updates_rejected(self):
         e=self.enroll();self.complete(e)

@@ -94,15 +94,14 @@ class TrainingScheduleTests(TestCase):
         self.assertEqual(self.open_date(self.date-timedelta(days=4),trainer_name='Sammy',location='Office').status_code,400)
         self.assertEqual(self.schedule(self.application).status_code,400)
 
-    def test_started_class_skipped_and_end_time_gates_certification(self):
+    def test_started_class_skipped_but_supervisor_decides_readiness(self):
         self.open_date(trainer_name='Sammy',location='Office')
         now=datetime.combine(self.date,datetime.min.time(),tzinfo=KENYA).replace(hour=10)
         with patch('django.utils.timezone.now',return_value=now):
             r=self.schedule(self.application);self.assertEqual(r.status_code,201,r.data)
             self.assertEqual(r.data['class']['slot'],'pm')
             record=self.complete(r.data['enrollment']);self.auth(self.supervisor)
-            response=self.decide(record);self.assertEqual(response.status_code,400)
-            self.assertIn('must finish',str(response.data))
+            response=self.decide(record);self.assertEqual(response.status_code,200,response.data)
 
     def test_public_status_includes_assigned_time_and_location(self):
         self.open_date(trainer_name='Sammy',location='Office')
