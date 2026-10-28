@@ -1,3 +1,4 @@
+import '../widgets/property_share_button.dart';
 import 'package:flutter/material.dart';
 
 import 'package:mobile/foundation/app_error_message.dart';
@@ -337,6 +338,15 @@ class _SavedPropertyCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (property.status == 'published')
+                  Positioned(
+                    top: 12,
+                    right: 68,
+                    child: CircleAvatar(
+                      backgroundColor: Colors.white,
+                      child: PropertyShareButton(property: property),
+                    ),
+                  ),
                 Positioned(
                   top: 12,
                   right: 12,

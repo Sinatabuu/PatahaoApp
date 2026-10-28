@@ -1,3 +1,4 @@
+import '../widgets/property_share_button.dart';
 import 'package:flutter/material.dart';
 import '../foundation/app_error_message.dart';
 import '../models/property.dart';
@@ -195,6 +196,7 @@ class _PropertyDetailContent extends StatelessWidget {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Property Details'),
+        actions: [PropertyShareButton(property: property)],
         backgroundColor: const Color(0xFF14532D),
         foregroundColor: Colors.white,
       ),
