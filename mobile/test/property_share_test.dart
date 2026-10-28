@@ -72,6 +72,15 @@ void main() {
     expect(find.text('This listing is no longer available to share.'), findsOneWidget);
   });
   testWidgets('native failure offers validated public link for copying', (tester) async {
+    String? copiedText;
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copiedText = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await tester.pumpWidget(host(PropertyShareButton(
       property: listing(), loadProperty: (_) async => listing(),
       presentShare: (_) async => throw PlatformException(code: 'unavailable'),
@@ -79,8 +88,8 @@ void main() {
     await tester.tap(find.byTooltip('Share property')); await tester.pumpAndSettle();
     expect(find.text('Copy link'), findsOneWidget);
     await tester.tap(find.text('Copy link')); await tester.pump();
-    expect((await Clipboard.getData(Clipboard.kTextPlain))!.text, 'https://patahao.app/p/42/');
-  });
+    expect(copiedText, 'https://patahao.app/p/42/');
+  }, timeout: const Timeout(Duration(seconds: 30)));
   testWidgets('failed availability check exposes no link', (tester) async {
     await tester.pumpWidget(host(PropertyShareButton(
       property: listing(), loadProperty: (_) async => throw Exception('network'),
