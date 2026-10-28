@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Mobile</string>
+	<string>Pata Hao</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>mobile</string>
+	<string>Pata Hao</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -24,6 +24,14 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Pata Hao uses the camera when you choose to photograph or record a property for a listing.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pata Hao lets you select property photos and videos from your library to upload to your listings.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pata Hao uses the microphone to include sound when you record a property walkthrough video.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Pata Hao uses your location while you use the app to find nearby properties or set a listing location.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
