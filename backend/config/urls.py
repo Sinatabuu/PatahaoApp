@@ -9,6 +9,7 @@ from accounts.views import (
     PasswordAwareTokenRefreshView,
 )
 from core.health import liveness, readiness
+from properties.public_share import shared_property
 
 
 def home(request):
@@ -30,6 +31,7 @@ def home(request):
 
 urlpatterns = [
     path("", home, name="home"),
+    path("p/<int:pk>/", shared_property, name="shared-property"),
     path("health/live/", liveness, name="health-live"),
     path("health/ready/", readiness, name="health-ready"),
     path("", include("deals.public_urls")),
