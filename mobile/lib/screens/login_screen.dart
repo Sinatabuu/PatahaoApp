@@ -112,13 +112,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const CircleAvatar(
-                          radius: 38,
-                          backgroundColor: Color(0xFFE8F5E9),
-                          child: Icon(
-                            Icons.home_work_outlined,
-                            size: 42,
-                            color: Color(0xFF14532D),
+                        Center(
+                          child: Image.asset(
+                            'assets/images/pata_hao_logo.jpg',
+                            width: 76,
+                            height: 76,
+                            fit: BoxFit.contain,
+                            semanticLabel: 'Pata Hao logo',
                           ),
                         ),
 
