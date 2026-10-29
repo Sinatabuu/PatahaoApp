@@ -399,6 +399,18 @@ class PropertyPhoto(models.Model):
         upload_to="property_photos/",
     )
 
+    thumbnail_image = models.ImageField(
+        upload_to="property_photos/thumbnails/",
+        blank=True,
+        null=True,
+    )
+
+    listing_image = models.ImageField(
+        upload_to="property_photos/listings/",
+        blank=True,
+        null=True,
+    )
+
     caption = models.CharField(
         max_length=255,
         blank=True,

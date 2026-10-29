@@ -459,7 +459,7 @@ class _PropertyListScreenState extends State<PropertyListScreen>
   }
 
   String _mediaUrl(Property property) {
-    final media = property.coverMediaUrl?.trim() ?? '';
+    final media = property.coverMediaUrlForWidth(900)?.trim() ?? '';
 
     if (media.isEmpty) {
       return '';
@@ -1129,7 +1129,7 @@ class _RecentSuccessStrip extends StatelessWidget {
   final List<Property> properties;
 
   String _mediaUrl(Property property) {
-    final media = property.coverMediaUrl?.trim() ?? '';
+    final media = property.coverMediaUrlForWidth(360)?.trim() ?? '';
 
     if (media.isEmpty || media.startsWith('http')) {
       return media;
