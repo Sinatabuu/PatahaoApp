@@ -103,6 +103,7 @@ def staff_identity(user):
     return {
         'name': user.full_name or user.get_full_name() or user.username,
         'can_change': user.has_perm('partners.change_partnerapplication'),
+        'can_view_operations': user.has_perm('core.view_operationsissue'),
     }
 
 

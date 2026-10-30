@@ -23,3 +23,5 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f"{self.action} - {self.entity_type}"
+
+from .operations_models import OperationsIssue, OperationsEvent, OperationsScan  # noqa: E402,F401

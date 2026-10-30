@@ -5,10 +5,12 @@ on:
     branches: [main, fix/mpesa-callback-postgres]
     paths:
       - 'backend/payments/**'
+      - 'backend/core/**'
       - '.github/workflows/payments-postgres.yml'
   pull_request:
     paths:
       - 'backend/payments/**'
+      - 'backend/core/**'
       - '.github/workflows/payments-postgres.yml'
   workflow_dispatch:
 
@@ -54,4 +56,4 @@ jobs:
       - name: Require real PostgreSQL
         run: python manage.py shell -c "from django.db import connection; assert connection.vendor == 'postgresql', connection.vendor"
       - name: Validate callbacks, duplicate receipts and reconciliation
-        run: python manage.py test payments.test_mpesa_hardening --noinput -v 2
+        run: python manage.py test payments.test_mpesa_hardening core.test_operations --noinput -v 2
