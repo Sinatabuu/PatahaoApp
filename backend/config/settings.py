@@ -232,6 +232,8 @@ EMAIL_BACKEND = (
     os.environ.get("DJANGO_EMAIL_BACKEND", "").strip()
     or DEFAULT_EMAIL_BACKEND
 )
+# API credentials are used at send time, not required by collectstatic.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "").strip()
 EMAIL_PORT = env_int("DJANGO_EMAIL_PORT", 587)
 EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_HOST_USER", "").strip()
